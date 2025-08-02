@@ -1,0 +1,11 @@
+cff-version: 0.1.0
+title: tdhook
+type: software
+authors:
+  - name: Yoann Poupart
+repository-code: 'https://github.com/Xmaster6y/tdhook'
+repository-artifact: 'https://github.com/Xmaster6y/tdhook/releases/'
+keywords:
+  - reinforcement learning (RL)
+  - explainable AI (XAI)
+license: MIT

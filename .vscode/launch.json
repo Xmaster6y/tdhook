@@ -1,0 +1,13 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Script: Demo",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "scripts.demo",
+            "console": "integratedTerminal",
+            "justMyCode": false
+        }
+    ]
+}
