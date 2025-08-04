@@ -5,10 +5,10 @@ HookedModule
 from torch.utils.hooks import RemovableHandle
 from tensordict.nn import TensorDictModule
 from tensordict import TensorDict
-from typing import Callable, Any, Literal, Optional, Tuple
+from typing import Callable, Any, Optional, Tuple
 import torch
 
-from tdhook.hooks import register_hook_to_module, CacheProxy, HookFactory, EarlyStoppingException
+from tdhook.hooks import register_hook_to_module, CacheProxy, HookFactory, EarlyStoppingException, HookDirection
 
 
 class HookedModuleRun:
@@ -18,15 +18,19 @@ class HookedModuleRun:
         data: TensorDict,
         cache: Optional[TensorDict] = None,
         run_name: str = "run",
+        run_sep: str = ".",
         run_cache: Optional[TensorDict] = None,
         grad_enabled: bool = False,
+        run_callback: Optional[Callable] = None,
     ):
         self._module = module
         self._data = data
         self._outer_cache = cache
         self._name = run_name
+        self._sep = run_sep
         self._cache = run_cache or TensorDict()
         self._grad_enabled = grad_enabled
+        self._run_callback = run_callback or (lambda module, data: module(data))
 
         if self._outer_cache is None:
             self._save_cache = self._cache
@@ -51,7 +55,7 @@ class HookedModuleRun:
     def __exit__(self, exc_type, exc_value, traceback):
         try:
             with torch.set_grad_enabled(self._grad_enabled):
-                self._module(self._data)
+                self._run_callback(self._module, self._data)
         except EarlyStoppingException:
             pass
         except Exception as e:
@@ -65,38 +69,84 @@ class HookedModuleRun:
         if not self._in_context:
             raise RuntimeError(f"Not in context, method {method} must be called in context or directly on the module")
 
-    def set(self, key: str, value: Any, sep: str = ".", callback: Optional[Callable] = None) -> None:
+    def set(
+        self,
+        key: str,
+        value: Any,
+        *,
+        callback: Optional[Callable] = None,
+        direction: HookDirection = "fwd",
+        prepend: bool = False,
+    ) -> None:
         self._ensure_in_context("set")
-        handle = self._module.set(key, value, sep=sep, callback=callback)
+        handle = self._module.set(key, value, callback=callback, direction=direction, prepend=prepend)
         self._handles.append(handle)
 
-    def get(self, key: str, sep: str = ".", callback: Optional[Callable] = None) -> CacheProxy:
+    def get(
+        self, key: str, *, callback: Optional[Callable] = None, direction: HookDirection = "fwd", prepend: bool = False
+    ) -> CacheProxy:
         self._ensure_in_context("get")
-        handle, proxy = self._module.get(self._cache, key, sep=sep, callback=callback)
+        handle, proxy = self._module.get(self._cache, key, callback=callback, direction=direction, prepend=prepend)
         self._handles.append(handle)
         return proxy
 
-    def save(self, key: str, sep: str = ".", callback: Optional[Callable] = None) -> None:
+    def save(
+        self, key: str, *, callback: Optional[Callable] = None, direction: HookDirection = "fwd", prepend: bool = False
+    ) -> None:
         self._ensure_in_context("save")
-        cache_key = self._name + sep + key
-        handle, proxy = self._module.save(self._save_cache, key, cache_key=cache_key, sep=sep, callback=callback)
+        cache_key = self._name + self._sep + key
+        handle, proxy = self._module.save(
+            self._save_cache, key, cache_key=cache_key, callback=callback, direction=direction, prepend=prepend
+        )
         self._handles.append(handle)
         return proxy
+
+    def set_grad(self, *args, **kwargs):
+        self._ensure_in_context("set_grad")
+        self._grad_enabled = True
+        kwargs["direction"] = "bwd"
+        self.set("grad", *args, **kwargs)
+
+    def get_grad(self, *args, **kwargs):
+        self._ensure_in_context("get_grad")
+        self._grad_enabled = True
+        kwargs["direction"] = "bwd"
+        return self.get("grad", *args, **kwargs)
+
+    def save_grad(self, *args, **kwargs):
+        self._ensure_in_context("save_grad")
+        self._grad_enabled = True
+        kwargs["direction"] = "bwd"
+        return self.save("grad", *args, **kwargs)
+
+    def set_input(self, *args, **kwargs):
+        kwargs["direction"] = "fwd_pre"
+        self.set("input", *args, **kwargs)
+
+    def get_input(self, *args, **kwargs):
+        kwargs["direction"] = "fwd_pre"
+        return self.get("input", *args, **kwargs)
+
+    def save_input(self, *args, **kwargs):
+        kwargs["direction"] = "fwd_pre"
+        return self.save("input", *args, **kwargs)
+
+    def set_grad_input(self, *args, **kwargs):
+        kwargs["direction"] = "bwd_pre"
+        self.set("grad_input", *args, **kwargs)
+
+    def get_grad_input(self, *args, **kwargs):
+        kwargs["direction"] = "bwd"
+        return self.get("grad_input", *args, **kwargs)
+
+    def save_grad_input(self, *args, **kwargs):
+        kwargs["direction"] = "bwd_pre"
+        return self.save("grad_input", *args, **kwargs)
 
     def stop(self, key: str) -> None:
         self._ensure_in_context("stop")
         handle = self._module.stop(key)
         self._handles.append(handle)
-
-    def set_grad(self):
-        self._ensure_in_context("set_grad")
-        self._grad_enabled = True
-        ...
-
-    def get_grad(self):
-        self._ensure_in_context("get_grad")
-        self._grad_enabled = True
-        ...
 
 
 class HookedModule(TensorDictModule):
@@ -136,18 +186,25 @@ class HookedModule(TensorDictModule):
         self,
         key: str,
         hook: Callable,
-        direction: Literal["fwd", "bwd", "fwd_pre", "bwd_pre"],
+        direction: HookDirection,
         prepend: bool = False,
-        with_kwargs: bool = False,
     ):
         submodule = self._resolve_submodule_path(key)
-        return register_hook_to_module(submodule, hook, direction, prepend, with_kwargs)
+        return register_hook_to_module(submodule, hook, direction, prepend)
 
-    def set(self, moduel_key: str, value: Any, sep: str = ".", callback: Optional[Callable] = None) -> RemovableHandle:
+    def set(
+        self,
+        moduel_key: str,
+        value: Any,
+        callback: Optional[Callable] = None,
+        direction: HookDirection = "fwd",
+        prepend: bool = False,
+    ) -> RemovableHandle:
         handle = self.register_submodule_hook(
             key=moduel_key,
-            hook=HookFactory.make_setting_hook(value, callback=callback),
-            direction="fwd",
+            hook=HookFactory.make_setting_hook(value, callback=callback, direction=direction),
+            direction=direction,
+            prepend=prepend,
         )
         return handle
 
@@ -156,34 +213,43 @@ class HookedModule(TensorDictModule):
         cache: TensorDict,
         moduel_key: str,
         cache_key: Optional[str] = None,
-        sep: str = ".",
         callback: Optional[Callable] = None,
+        direction: HookDirection = "fwd",
+        prepend: bool = False,
     ) -> Tuple[RemovableHandle, CacheProxy]:
         cache_key = cache_key or moduel_key
-        proxy = CacheProxy(cache_key, cache, sep=sep)
+        proxy = CacheProxy(cache_key, cache)
         handle = self.register_submodule_hook(
             key=moduel_key,
-            hook=HookFactory.make_caching_hook(cache_key, cache, sep=sep, callback=callback),
-            direction="fwd",
+            hook=HookFactory.make_caching_hook(cache_key, cache, callback=callback, direction=direction),
+            direction=direction,
+            prepend=prepend,
         )
         return handle, proxy
 
-    def save(
-        self,
-        cache: TensorDict,
-        moduel_key: str,
-        cache_key: Optional[str] = None,
-        sep: str = ".",
-        callback: Optional[Callable] = None,
-    ) -> Tuple[RemovableHandle, CacheProxy]:
-        cache_key = cache_key or moduel_key
-        proxy = CacheProxy(cache_key, cache, sep=sep)
-        handle = self.register_submodule_hook(
-            key=moduel_key,
-            hook=HookFactory.make_caching_hook(cache_key, cache, sep=sep, callback=callback),
-            direction="fwd",
-        )
-        return handle, proxy
+    def set_input(self, *args, **kwargs):
+        kwargs["direction"] = "fwd_pre"
+        self.set("input", *args, **kwargs)
+
+    def get_input(self, *args, **kwargs):
+        kwargs["direction"] = "fwd"
+        return self.get("input", *args, **kwargs)
+
+    def set_grad(self, *args, **kwargs):
+        kwargs["direction"] = "bwd"
+        self.set("grad", *args, **kwargs)
+
+    def get_grad(self, *args, **kwargs):
+        kwargs["direction"] = "bwd"
+        return self.get("grad", *args, **kwargs)
+
+    def set_grad_input(self, *args, **kwargs):
+        kwargs["direction"] = "bwd_pre"
+        self.set("grad_input", *args, **kwargs)
+
+    def get_grad_input(self, *args, **kwargs):
+        kwargs["direction"] = "bwd"
+        return self.get("grad_input", *args, **kwargs)
 
     def stop(self, key: str) -> None:
         handle = self.register_submodule_hook(
@@ -192,9 +258,3 @@ class HookedModule(TensorDictModule):
             direction="fwd",
         )
         return handle
-
-    def set_grad(self):
-        pass
-
-    def get_grad(self):
-        pass
