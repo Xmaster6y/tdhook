@@ -15,11 +15,11 @@ from tdhook.module import HookedModule
 class GradientAttribution(BaseContext):
     def __init__(
         self,
-        output_callback: Optional[Callable] = None,
+        init_target: Optional[Callable] = None,
         init_grad: Optional[Callable] = None,
         write_attr_to_input: bool = True,
     ):
-        self._output_callback = output_callback
+        self._init_target = init_target
         self._init_grad = init_grad
         self._write_attr_to_input = write_attr_to_input
 
@@ -55,8 +55,8 @@ class GradientAttribution(BaseContext):
         )
 
         def output_backward_hook(module, args, output):
-            if self._output_callback is not None:
-                target = self._output_callback(output)
+            if self._init_target is not None:
+                target = self._init_target(output)
             else:
                 target = output
             if self._init_grad is not None:
