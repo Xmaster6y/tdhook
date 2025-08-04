@@ -125,6 +125,28 @@ class HookedModule(TensorDictModule):
     ) -> HookedModuleRun:
         return HookedModuleRun(self, data, cache, run_name, run_cache, grad_enabled)
 
+    def _resolve_submodule_path(self, key: str):
+        """
+        Resolve a submodule path that may contain indexing expressions.
+
+        Supports any valid Python attribute access and indexing:
+        - "layers[-1]" -> self.layers[-1]
+        - "layers['attr']" -> self.layers['attr']
+        - "layers.attention" -> self.layers.attention
+        - "layers[1:3]" -> self.layers[1:3]
+        """
+        if key == "":
+            return self
+
+        # Create a safe environment with only the current module
+        safe_dict = {"self": self}
+
+        try:
+            # Evaluate the expression in the safe environment
+            return eval(f"self.{key}", {"__builtins__": {}}, safe_dict)
+        except (AttributeError, IndexError, KeyError, SyntaxError) as e:
+            raise ValueError(f"Invalid submodule path '{key}': {e}")
+
     def register_submodule_hook(
         self,
         key: str,
@@ -133,8 +155,5 @@ class HookedModule(TensorDictModule):
         prepend: bool = False,
         with_kwargs: bool = False,
     ):
-        submodule = self
-        if key != "":
-            for subname in key.split("."):
-                submodule = getattr(submodule, subname)
+        submodule = self._resolve_submodule_path(key)
         return register_hook_to_module(submodule, hook, direction, prepend, with_kwargs)
