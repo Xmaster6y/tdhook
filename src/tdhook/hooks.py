@@ -23,6 +23,15 @@ DIRECTION_TO_PARAMS = {
     "fwd_pre_kwargs": ("module", "args", "kwargs"),
 }
 
+DIRECTION_TO_RETURN = {
+    "fwd": "output",
+    "bwd": "grad_output",
+    "fwd_pre": "args",
+    "bwd_pre": "grad_input",
+    "fwd_kwargs": "output",
+    "fwd_pre_kwargs": "args",
+}
+
 DIRECTION_TO_TYPE = {
     "fwd": "output",
     "bwd": "grad",
