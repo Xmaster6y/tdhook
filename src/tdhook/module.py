@@ -2,9 +2,10 @@
 HookedModule
 """
 
+from torch.utils.hooks import RemovableHandle
 from tensordict.nn import TensorDictModule
 from tensordict import TensorDict
-from typing import Callable, Any, Literal, Optional
+from typing import Callable, Any, Literal, Optional, Tuple
 import torch
 
 from tdhook.hooks import register_hook_to_module, CacheProxy, HookFactory, EarlyStoppingException
@@ -62,56 +63,40 @@ class HookedModuleRun:
 
     def _ensure_in_context(self, method: str):
         if not self._in_context:
-            raise RuntimeError(f"Not in context, method {method} must be called in context")
+            raise RuntimeError(f"Not in context, method {method} must be called in context or directly on the module")
 
     def set(self, key: str, value: Any, sep: str = ".", callback: Optional[Callable] = None) -> None:
         self._ensure_in_context("set")
-        self._module.register_submodule_hook(
-            key=key,
-            hook=HookFactory.make_setting_hook(value, callback=callback),
-            direction="fwd",
-        )
+        handle = self._module.set(key, value, sep=sep, callback=callback)
+        self._handles.append(handle)
 
     def get(self, key: str, sep: str = ".", callback: Optional[Callable] = None) -> CacheProxy:
         self._ensure_in_context("get")
-        proxy = CacheProxy(key, self._cache, sep=sep)
-        self._module.register_submodule_hook(
-            key=key,
-            hook=HookFactory.make_caching_hook(key, self._cache, sep=sep, callback=callback),
-            direction="fwd",
-        )
+        handle, proxy = self._module.get(self._cache, key, sep=sep, callback=callback)
+        self._handles.append(handle)
         return proxy
 
     def save(self, key: str, sep: str = ".", callback: Optional[Callable] = None) -> None:
         self._ensure_in_context("save")
         cache_key = self._name + sep + key
-        proxy = CacheProxy(cache_key, self._save_cache, sep=sep)
-        self._module.register_submodule_hook(
-            key=key,
-            hook=HookFactory.make_caching_hook(cache_key, self._save_cache, sep=sep, callback=callback),
-            direction="fwd",
-        )
+        handle, proxy = self._module.save(self._save_cache, key, cache_key=cache_key, sep=sep, callback=callback)
+        self._handles.append(handle)
         return proxy
 
     def stop(self, key: str) -> None:
         self._ensure_in_context("stop")
-        self._module.register_submodule_hook(
-            key=key,
-            hook=HookFactory.make_stopping_hook(key),
-            direction="fwd",
-        )
+        handle = self._module.stop(key)
+        self._handles.append(handle)
 
     def set_grad(self):
         self._ensure_in_context("set_grad")
         self._grad_enabled = True
+        ...
 
     def get_grad(self):
         self._ensure_in_context("get_grad")
-        return self._grad_enabled
-
-    def set_grad_enabled(self, grad_enabled: bool):
-        self._ensure_in_context("set_grad_enabled")
-        self._grad_enabled = grad_enabled
+        self._grad_enabled = True
+        ...
 
 
 class HookedModule(TensorDictModule):
@@ -157,3 +142,59 @@ class HookedModule(TensorDictModule):
     ):
         submodule = self._resolve_submodule_path(key)
         return register_hook_to_module(submodule, hook, direction, prepend, with_kwargs)
+
+    def set(self, moduel_key: str, value: Any, sep: str = ".", callback: Optional[Callable] = None) -> RemovableHandle:
+        handle = self.register_submodule_hook(
+            key=moduel_key,
+            hook=HookFactory.make_setting_hook(value, callback=callback),
+            direction="fwd",
+        )
+        return handle
+
+    def get(
+        self,
+        cache: TensorDict,
+        moduel_key: str,
+        cache_key: Optional[str] = None,
+        sep: str = ".",
+        callback: Optional[Callable] = None,
+    ) -> Tuple[RemovableHandle, CacheProxy]:
+        cache_key = cache_key or moduel_key
+        proxy = CacheProxy(cache_key, cache, sep=sep)
+        handle = self.register_submodule_hook(
+            key=moduel_key,
+            hook=HookFactory.make_caching_hook(cache_key, cache, sep=sep, callback=callback),
+            direction="fwd",
+        )
+        return handle, proxy
+
+    def save(
+        self,
+        cache: TensorDict,
+        moduel_key: str,
+        cache_key: Optional[str] = None,
+        sep: str = ".",
+        callback: Optional[Callable] = None,
+    ) -> Tuple[RemovableHandle, CacheProxy]:
+        cache_key = cache_key or moduel_key
+        proxy = CacheProxy(cache_key, cache, sep=sep)
+        handle = self.register_submodule_hook(
+            key=moduel_key,
+            hook=HookFactory.make_caching_hook(cache_key, cache, sep=sep, callback=callback),
+            direction="fwd",
+        )
+        return handle, proxy
+
+    def stop(self, key: str) -> None:
+        handle = self.register_submodule_hook(
+            key=key,
+            hook=HookFactory.make_stopping_hook(key),
+            direction="fwd",
+        )
+        return handle
+
+    def set_grad(self):
+        pass
+
+    def get_grad(self):
+        pass
