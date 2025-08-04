@@ -129,19 +129,43 @@ class EarlyStoppingException(Exception):
 
 class HookFactory:
     @staticmethod
+    def _check_callback_signature(callback: Callable, expected_param_names: set[str]):
+        """Check callback signature matches expected parameter names."""
+        if callback is None:
+            return
+        sig = inspect.signature(callback)
+        param_names = set(sig.parameters.keys())
+
+        has_positional_only = any(param.kind == inspect.Parameter.POSITIONAL_ONLY for param in sig.parameters.values())
+        if has_positional_only:
+            raise ValueError("Callback cannot have positional-only parameters since we only pass named arguments")
+
+        has_kwargs = any(param.kind == inspect.Parameter.VAR_KEYWORD for param in sig.parameters.values())
+        if has_kwargs:
+            return
+
+        missing_params = expected_param_names - param_names
+        if missing_params:
+            raise ValueError(f"Callback missing required parameters: {missing_params}")
+
+    @staticmethod
     def make_caching_hook(
         key: str, cache: TensorDict, sep: str = ".", callback: Optional[Callable] = None
     ) -> Callable:
+        HookFactory._check_callback_signature(callback, {"output", "module", "args"})
+
         def hook(module, args, output):
             nonlocal key, cache, sep, callback
             if callback is not None:
-                output = callback(output, module=module, args=args)
+                output = callback(output=output, module=module, args=args)
             cache[key] = output
 
         return hook
 
     @staticmethod
     def make_setting_hook(value: Any, callback: Optional[Callable] = None) -> Callable:
+        HookFactory._check_callback_signature(callback, {"value", "module", "args", "output"})
+
         def hook(module, args, output):
             nonlocal value, callback
             if isinstance(value, CacheProxy):
