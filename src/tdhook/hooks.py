@@ -64,7 +64,7 @@ def register_hook_to_module(
 
 
 class MultiHookHandle:
-    def __init__(self, handles: Optional[List[RemovableHandle]] = None):
+    def __init__(self, handles: Optional[List[RemovableHandle | "MultiHookHandle"]] = None):
         self._handles = handles or []
 
     def remove(self):
