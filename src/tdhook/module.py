@@ -8,7 +8,14 @@ from tensordict import TensorDict
 from typing import Callable, Any, Optional, Tuple
 import torch
 
-from tdhook.hooks import register_hook_to_module, CacheProxy, HookFactory, EarlyStoppingException, HookDirection
+from tdhook.hooks import (
+    register_hook_to_module,
+    CacheProxy,
+    HookFactory,
+    EarlyStoppingException,
+    HookDirection,
+    DIRECTION_TO_TYPE,
+)
 
 
 class HookedModuleRun:
@@ -83,19 +90,33 @@ class HookedModuleRun:
         self._handles.append(handle)
 
     def get(
-        self, key: str, *, callback: Optional[Callable] = None, direction: HookDirection = "fwd", prepend: bool = False
+        self,
+        key: str,
+        *,
+        cache_key: Optional[str] = None,
+        callback: Optional[Callable] = None,
+        direction: HookDirection = "fwd",
+        prepend: bool = False,
     ) -> CacheProxy:
         self._ensure_in_context("get")
-        handle, proxy = self._module.get(self._cache, key, callback=callback, direction=direction, prepend=prepend)
+        handle, proxy = self._module.get(
+            self._cache, key, cache_key, callback=callback, direction=direction, prepend=prepend
+        )
         self._handles.append(handle)
         return proxy
 
     def save(
-        self, key: str, *, callback: Optional[Callable] = None, direction: HookDirection = "fwd", prepend: bool = False
+        self,
+        key: str,
+        *,
+        cache_key: Optional[str] = None,
+        callback: Optional[Callable] = None,
+        direction: HookDirection = "fwd",
+        prepend: bool = False,
     ) -> None:
         self._ensure_in_context("save")
-        cache_key = self._name + self._sep + key
-        handle, proxy = self._module.save(
+        cache_key = cache_key or f"{self._name + self._sep + key}_{DIRECTION_TO_TYPE[direction]}"
+        handle, proxy = self._module.get(
             self._save_cache, key, cache_key=cache_key, callback=callback, direction=direction, prepend=prepend
         )
         self._handles.append(handle)
@@ -217,7 +238,7 @@ class HookedModule(TensorDictModule):
         direction: HookDirection = "fwd",
         prepend: bool = False,
     ) -> Tuple[RemovableHandle, CacheProxy]:
-        cache_key = cache_key or moduel_key
+        cache_key = cache_key or f"{moduel_key}_{DIRECTION_TO_TYPE[direction]}"
         proxy = CacheProxy(cache_key, cache)
         handle = self.register_submodule_hook(
             key=moduel_key,

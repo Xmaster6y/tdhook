@@ -23,6 +23,15 @@ DIRECTION_TO_PARAMS = {
     "fwd_pre_kwargs": ("module", "args", "kwargs"),
 }
 
+DIRECTION_TO_TYPE = {
+    "fwd": "output",
+    "bwd": "grad",
+    "fwd_pre": "input",
+    "bwd_pre": "grad_input",
+    "fwd_kwargs": "output",
+    "fwd_pre_kwargs": "input",
+}
+
 
 def _check_hook_signature(hook: Callable, direction: HookDirection):
     """Check the signature of the hook."""
@@ -94,15 +103,16 @@ class MultiHookManager:
     def register_hook(
         self,
         module: nn.Module,
-        hook: Callable,
-        direction: HookDirection,
+        hook_factory: Callable[[str], Callable],
+        *,
+        direction: HookDirection = "fwd",
         prepend: bool = False,
     ):
         """Register the hook to the module."""
         handles = []
         for name, module in module.named_modules():
             if self._reg_exp.match(name):
-                handles.append(register_hook_to_module(module, hook, direction, prepend))
+                handles.append(register_hook_to_module(module, hook_factory(name), direction, prepend))
         return MultiHookHandle(handles)
 
 
@@ -150,7 +160,7 @@ class HookFactory:
 
     @staticmethod
     def make_caching_hook(
-        key: str, cache: TensorDict, callback: Optional[Callable] = None, direction: HookDirection = "fwd"
+        key: str, cache: TensorDict, *, callback: Optional[Callable] = None, direction: HookDirection = "fwd"
     ) -> Callable:
         """
         Make a caching hook.
@@ -175,7 +185,7 @@ class HookFactory:
 
     @staticmethod
     def make_setting_hook(
-        value: Any, callback: Optional[Callable] = None, direction: HookDirection = "fwd"
+        value: Any, *, callback: Optional[Callable] = None, direction: HookDirection = "fwd"
     ) -> Callable:
         """
         Make a setting hook.
