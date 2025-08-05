@@ -4,32 +4,17 @@ Script to measure bundle sizes for different packages and plot results.
 Run with:
 
 ```
-uv run --group scripts -m scripts.bench.bundle.py
+uv run --group scripts -m scripts.bench.plot_bundle
 ```
 
 """
 
-import subprocess
 import re
 import matplotlib.pyplot as plt
 from pathlib import Path
 from loguru import logger
 
-
-def run_command(command, cwd=None):
-    """Run a shell command and return the output."""
-    try:
-        result = subprocess.run(
-            command, shell=True, capture_output=True, text=True, cwd=f"./scripts/bundle-test/{cwd or ''}"
-        )
-        if result.returncode != 0:
-            logger.error(f"Command failed: {command}")
-            logger.error(f"Error: {result.stderr}")
-            return None
-        return result.stdout.strip()
-    except Exception as e:
-        logger.error(f"Exception running command '{command}': {e}")
-        return None
+from .utils import run_command
 
 
 def parse_du_output(output):
@@ -53,7 +38,7 @@ def parse_du_output(output):
 
 def measure_bundle_size():
     """Measure the current bundle size."""
-    output = run_command("du -sh", cwd=".venv")
+    output = run_command("du -sh", cwd="./scripts/bundle-test/.venv")
     return parse_du_output(output)
 
 
@@ -66,7 +51,7 @@ def install_package(package):
         install_cmd = "uv pip install ../.. -p .venv/bin/python"
     else:
         install_cmd = f"uv pip install {package} -p .venv/bin/python"
-    result = run_command(install_cmd)
+    result = run_command(install_cmd, cwd="./scripts/bundle-test")
     if result is None:
         logger.error(f"Failed to install {package}")
         return None
@@ -81,7 +66,7 @@ def install_package(package):
 def reset_environment():
     """Reset the environment to clean state."""
     logger.info("Resetting environment...")
-    result = run_command("uv sync")
+    result = run_command("uv sync", cwd="./scripts/bundle-test")
     if result is None:
         logger.error("Failed to reset environment")
         return False
