@@ -3,7 +3,7 @@ MultiHook
 """
 
 import weakref
-from typing import Callable, Any, Optional, List, Literal
+from typing import Callable, Any, Optional, List, Literal, Union
 import inspect
 
 from tensordict import TensorDict
@@ -47,8 +47,16 @@ def _check_hook_signature(hook: Callable, direction: HookDirection):
     if direction not in DIRECTION_TO_PARAMS:
         raise ValueError(f"Invalid direction: {direction}")
 
-    param_len = len(inspect.signature(hook).parameters)
+    sig = inspect.signature(hook)
+    param_len = len(sig.parameters)
     expected_params = DIRECTION_TO_PARAMS[direction]
+
+    has_varargs = any(param.kind == inspect.Parameter.VAR_POSITIONAL for param in sig.parameters.values())
+
+    if has_varargs:
+        if param_len > len(expected_params) + 1:
+            raise ValueError(f"Hook ({direction}) must have at most {len(expected_params) + 1} positional parameters")
+        return
 
     if param_len != len(expected_params):
         raise ValueError(f"Hook ({direction}) must have the signature {expected_params}")
@@ -73,7 +81,7 @@ def register_hook_to_module(
 
 
 class MultiHookHandle:
-    def __init__(self, handles: Optional[List[RemovableHandle | "MultiHookHandle"]] = None):
+    def __init__(self, handles: Optional[List[Union[RemovableHandle, "MultiHookHandle"]]] = None):
         self._handles = handles or []
 
     def remove(self):
@@ -211,7 +219,7 @@ class HookFactory:
             if isinstance(value, CacheProxy):
                 value = value.resolve()
             if callback is not None:
-                value = callback(**dict(zip(params, args)))
+                value = callback(**dict(zip(params, args)), value=value)
             return value
 
         return hook
