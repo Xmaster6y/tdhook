@@ -2,6 +2,7 @@
 Utils for benchmarking.
 """
 
+import re
 import numpy as np
 import torch
 import subprocess
@@ -15,7 +16,6 @@ def run_command(command, cwd=None, return_stderr=False):
         result = subprocess.run(
             command,
             shell=True,
-            executable="/bin/zsh",
             capture_output=True,
             text=True,
             cwd=cwd,
@@ -23,6 +23,8 @@ def run_command(command, cwd=None, return_stderr=False):
         if result.returncode != 0:
             logger.error(f"Command failed: {command}")
             logger.error(f"Error: {result.stderr}")
+            if return_stderr:
+                return None, None
             return None
         if return_stderr:
             return result.stdout.strip(), result.stderr.strip()
@@ -35,7 +37,7 @@ def run_command(command, cwd=None, return_stderr=False):
 
 
 def set_seed(seed: int):
-    """Set random seed for reproducibility."""
+    """Set random seed to check accuracy."""
     torch.manual_seed(seed)
     np.random.seed(seed)
 
@@ -49,29 +51,40 @@ def assert_accuracy(outs1, outs2):
 class Measurer:
     """Memory measurement class that tracks maximum memory usage during execution."""
 
-    def __init__(self, time_fmt: str = "%*E/%P/%M"):
+    def __init__(self, time_fmt: str = "%E/%P/%M"):
         self.time_fmt = time_fmt
 
-    def _parse_time_output(self, time_output: str) -> Dict[str, Any]:
+    def _parse_time_output(self, cuda_log: str, time_output: str) -> Dict[str, Any]:
         """Parse time output."""
+        gpu_memory_match = re.search(r"Max GPU memory: (\d+\.\d+) KB", cuda_log)
+        if gpu_memory_match:
+            max_gpu_memory = float(gpu_memory_match.group(1))
+        else:
+            max_gpu_memory = 0.0
+
         time_output = time_output.split("/")
         return {
-            "wall_time": float(time_output[0]),
+            "wall_time": float(time_output[0].replace("0:", "")),
             "cpu_percent": float(time_output[1].replace("%", "")),
-            "max_memory_used_kb": float(time_output[2]),
+            "max_ram_used_kb": float(time_output[2]),
+            "max_gpu_memory_kb": max_gpu_memory,
         }
 
     def measure_script(self, script_name: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         params = " ".join([f"--{k}={v}" for k, v in parameters.items()])
-        command = f"export TIMEFMT='{self.time_fmt}' && time uv run --group scripts {script_name} {params}"
+        command = f"time -f '{self.time_fmt}' .venv/bin/python {script_name} {params}"
 
         _, spawn_stderr = run_command(f"{command} --no-run", return_stderr=True)
-        spawn_stats = self._parse_time_output(spawn_stderr.split("\n")[-1])
+        spawn_stats = self._parse_time_output(*spawn_stderr.split("\n")[-2:])
 
-        _, run_stderr = run_command(f"{command} --run", return_stderr=True)
-        run_stats = self._parse_time_output(run_stderr.split("\n")[-1])
+        _, run_cpu_stderr = run_command(f"{command} --run --no-cuda", return_stderr=True)
+        run_cpu_stats = self._parse_time_output(*run_cpu_stderr.split("\n")[-2:])
+
+        _, run_gpu_stderr = run_command(f"{command} --run --cuda", return_stderr=True)
+        run_gpu_stats = self._parse_time_output(*run_gpu_stderr.split("\n")[-2:])
 
         return {
             "spawn": spawn_stats,
-            "run": run_stats,
+            "run_cpu": run_cpu_stats,
+            "run_gpu": run_gpu_stats,
         }

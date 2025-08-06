@@ -10,6 +10,9 @@ from loguru import logger
 from nnsight import NNsight
 
 
+cuda_available = torch.cuda.is_available()
+
+
 class MLP(nn.Module):
     def __init__(self, height: int = 10, width: int = 10):
         super().__init__()
@@ -26,10 +29,11 @@ def prepare(
     height: int,
     width: int,
     batch_size: int,
+    use_cuda: bool,
 ) -> NNsight:
     """Prepare the model and input data."""
-    model = MLP(height=height, width=width)
-    input_data = torch.randn(batch_size, width)
+    model = MLP(height=height, width=width).to("cuda" if use_cuda else "cpu")
+    input_data = torch.randn(batch_size, width).to("cuda" if use_cuda else "cpu")
     return model, input_data
 
 
@@ -67,28 +71,33 @@ def main():
     parser.add_argument("--batch_size", type=int, default=10)
     parser.add_argument("--variation", type=int, default=10)
     parser.add_argument("--run", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--cuda", action=argparse.BooleanOptionalAction, default=True)
 
     args = parser.parse_args()
 
-    # Set random seed
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
 
-    # Prepare model and input
-    model, input_data = prepare(args.height, args.width, args.batch_size)
-    nnsight_model = spawn(model)
-
+    if cuda_available:
+        torch.cuda.empty_cache()
+        torch.cuda.reset_peak_memory_stats()
+    use_cuda = cuda_available and args.cuda
     logger.info("Running MLP intervention task with NNsight:")
+    logger.info(f"  Spawn max GPU memory: {torch.cuda.max_memory_allocated() / 1024:.0f} KB")
     logger.info(f"  Seed: {args.seed}")
     logger.info(f"  Width: {args.width}")
     logger.info(f"  Height: {args.height}")
     logger.info(f"  Batch size: {args.batch_size}")
     logger.info(f"  Variation: {args.variation}")
+    logger.info(f"  Use CUDA: {use_cuda}")
 
-    # Run the benchmark
+    model, input_data = prepare(args.height, args.width, args.batch_size, use_cuda)
+    nnsight_model = spawn(model)
+
     if args.run:
         try:
             result = run(nnsight_model, input_data, args.variation)
+            logger.info(f"  Max GPU memory: {torch.cuda.max_memory_allocated() / 1024:.2f} KB")
             return result
         except Exception as e:
             logger.error(f"Error: {e}")

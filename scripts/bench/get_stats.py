@@ -22,14 +22,14 @@ TASKS = {
     "mlp_intervene": ["nnsight", "tdhook"],
 }
 PARAMETERS = {
-    "width": [2, 10],  # [2, 10, 50, 100, 500], # [10, 100, 1000, 10_000, 100_000],
-    "height": [2, 10],
-    "batch_size": [2, 10],
+    "width": [100, 1000, 5_000, 10_000],
+    "height": [5, 10, 20, 50],
+    "batch_size": [100, 1000, 10_000, 100_000],
 }
 DEFAULT_PARAMETERS = {
-    "width": 10,
+    "width": 1000,
     "height": 10,
-    "batch_size": 10,
+    "batch_size": 1000,
 }
 
 

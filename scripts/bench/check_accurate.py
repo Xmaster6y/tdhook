@@ -16,7 +16,7 @@ from .utils import assert_accuracy
 # Fixed seeds for reproducibility
 SEEDS = [42, 123, 456]
 TASKS = {
-    "mlp_intervene": ["nnsight", "tdhook"],
+    "mlp_intervene": ["tdhook", "nnsight"],
 }
 
 
