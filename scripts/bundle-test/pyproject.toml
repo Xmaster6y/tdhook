@@ -7,3 +7,17 @@ requires-python = ">=3.11"
 dependencies = [
     "torch>=2.7.1",
 ]
+
+[dependency-groups]
+captum = [
+    "captum>=0.8.0",
+]
+nnsight = [
+    "nnsight>=0.4.11",
+]
+transformer-lens = [
+    "transformer-lens>=2.16.1",
+]
+zennit = [
+    "zennit>=0.5.1",
+]

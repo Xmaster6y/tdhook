@@ -50,7 +50,7 @@ def install_package(package):
     if package == "tdhook":
         install_cmd = "uv pip install ../.. -p .venv/bin/python"
     else:
-        install_cmd = f"uv pip install {package} -p .venv/bin/python"
+        install_cmd = f"uv sync --group {package} --locked -p .venv/bin/python"
     result = run_command(install_cmd, cwd="./scripts/bundle-test")
     if result is None:
         logger.error(f"Failed to install {package}")
