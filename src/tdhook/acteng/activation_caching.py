@@ -40,7 +40,7 @@ class ActivationCaching(BaseContext):
     def _hook_module(self, module: nn.Module) -> Generator[None, None, None]:
         def hook_factory(name: str, direction: HookDirection) -> Callable:
             nonlocal self
-            return HookFactory.make_caching_hook(name, self._cache, direction=direction, callback=self._callback)
+            return HookFactory.make_caching_hook(name, self.cache, direction=direction, callback=self._callback)
 
         handles = []
         for direction in self._directions:

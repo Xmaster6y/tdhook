@@ -8,11 +8,11 @@ from contextlib import contextmanager
 from torch import nn
 from tensordict import TensorDict
 
-from tdhook.contexts import BaseContext
+from tdhook.contexts import HookingContextFactory
 from tdhook.hooks import MultiHookManager, HookFactory, HookDirection, MultiHookHandle, DIRECTION_TO_RETURN
 
 
-class ProbingContext(BaseContext):
+class LinearProbing(HookingContextFactory):
     def __init__(
         self,
         key_pattern: str,

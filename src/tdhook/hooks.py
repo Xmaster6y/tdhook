@@ -193,7 +193,7 @@ class HookFactory:
         def hook(*args):
             nonlocal key, cache, callback
             if callback is not None:
-                value = callback(**dict(zip(params, args)))
+                value = callback(**dict(zip(params, args)), key=key)
             else:
                 value = args[value_index]
             cache[key] = value
