@@ -60,26 +60,28 @@ class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
             attrs = self._grad_attr(args, output)
             return attrs
 
-        if self._multiply_by_inputs:
-            handles.append(
-                module.register_submodule_hook(
-                    "module",
-                    output_backward_hook,
-                    direction="fwd",
-                )
+        handles.append(
+            module.register_submodule_hook(
+                "module",
+                output_backward_hook,
+                direction="fwd",
             )
+        )
+
+        if self._multiply_by_inputs:
 
             def output_multiply_hook(module, args, output):
                 self._multiply_by_inputs_(output, module.in_keys)
                 return output
 
-        handles.append(
-            module.register_submodule_hook(
-                "",
-                output_multiply_hook,
-                direction="fwd",
+            handles.append(
+                module.register_submodule_hook(
+                    "",
+                    output_multiply_hook,
+                    direction="fwd",
+                )
             )
-        )
+
         return MultiHookHandle(handles)
 
     @abstractmethod
