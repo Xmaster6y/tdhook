@@ -2,8 +2,6 @@
 Attribution
 """
 
-from .input_times_gradient import InputTimesGradient
+from .gradient_attribution import GradientAttribution, GradientAttributionWithBaseline, IntegratedGradients, Saliency
 
-__all__ = [
-    "InputTimesGradient",
-]
+__all__ = ["GradientAttribution", "GradientAttributionWithBaseline", "IntegratedGradients", "Saliency"]

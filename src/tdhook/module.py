@@ -5,8 +5,11 @@ HookedModule
 from torch.utils.hooks import RemovableHandle
 from tensordict.nn import TensorDictModule
 from tensordict import TensorDict
-from typing import Callable, Any, Optional, Tuple
+from typing import Callable, Any, Optional, Tuple, TYPE_CHECKING
 import torch
+import warnings
+import torch.nn as nn
+from contextlib import contextmanager
 
 from tdhook.hooks import (
     register_hook_to_module,
@@ -16,6 +19,9 @@ from tdhook.hooks import (
     HookDirection,
     DIRECTION_TO_TYPE,
 )
+
+if TYPE_CHECKING:
+    from tdhook.contexts import HookingContext
 
 
 class HookedModuleRun:
@@ -171,6 +177,10 @@ class HookedModuleRun:
 
 
 class HookedModule(TensorDictModule):
+    def __init__(self, *args, hooking_context: Optional["HookingContext"] = None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._hooking_context = hooking_context
+
     def run(
         self,
         data: TensorDict,
@@ -211,6 +221,8 @@ class HookedModule(TensorDictModule):
         prepend: bool = False,
     ):
         submodule = self._resolve_submodule_path(key)
+        if isinstance(submodule, nn.ModuleList):
+            warnings.warn(f"You are hooking a ModuleList ({key}), which will never be executed.")
         return register_hook_to_module(submodule, hook, direction, prepend)
 
     def set(
@@ -279,3 +291,22 @@ class HookedModule(TensorDictModule):
             direction="fwd",
         )
         return handle
+
+    def forward(self, *args, **kwargs):
+        if self._hooking_context is not None and not self._hooking_context._in_context:
+            raise RuntimeError("Contextual HookedModule must be called in context")
+        return super().forward(*args, **kwargs)
+
+    @contextmanager
+    def disable_context_hooks(self):
+        if self._hooking_context is None:
+            raise RuntimeError("No hooking context provided to this module")
+        with self._hooking_context.disable_hooks():
+            yield
+
+    @contextmanager
+    def disable_context(self):
+        if self._hooking_context is None:
+            raise RuntimeError("No hooking context provided to this module")
+        with self._hooking_context.disable() as raw_module:
+            yield raw_module

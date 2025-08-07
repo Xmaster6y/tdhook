@@ -4,6 +4,7 @@ MLP intervention task - Standalone script.
 
 import torch
 import torch.nn as nn
+from typing import Tuple
 import argparse
 import numpy as np
 from loguru import logger
@@ -30,18 +31,11 @@ def prepare(
     width: int,
     batch_size: int,
     use_cuda: bool,
-) -> NNsight:
+) -> Tuple[NNsight, torch.Tensor]:
     """Prepare the model and input data."""
     model = MLP(height=height, width=width).to("cuda" if use_cuda else "cpu")
     input_data = torch.randn(batch_size, width).to("cuda" if use_cuda else "cpu")
-    return model, input_data
-
-
-def spawn(
-    model: MLP,
-) -> NNsight:
-    """Spawn the model."""
-    return NNsight(model)
+    return NNsight(model), input_data
 
 
 def run(
@@ -92,11 +86,10 @@ def main():
     logger.info(f"  Use CUDA: {use_cuda}")
 
     model, input_data = prepare(args.height, args.width, args.batch_size, use_cuda)
-    nnsight_model = spawn(model)
 
     if args.run:
         try:
-            result = run(nnsight_model, input_data, args.variation)
+            result = run(model, input_data, args.variation)
             logger.info(f"  Max GPU memory: {torch.cuda.max_memory_allocated() / 1024:.2f} KB")
             return result
         except Exception as e:

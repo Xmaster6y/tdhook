@@ -51,6 +51,9 @@ scripts = [
     "matplotlib>=3.8.0",
     "numpy>=1.24.0",
     "pyside6>=6.9.1",
+    "transformer-lens>=2.15.4",
+    "zennit>=0.5.1",
+    "captum>=0.8.0",
 ]
 notebooks = [
     "ipykernel>=6.29.5",

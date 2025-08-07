@@ -7,6 +7,7 @@ from loguru import logger
 import torch
 import torch.nn as nn
 import numpy as np
+from typing import Tuple
 
 cuda_available = torch.cuda.is_available()
 
@@ -26,7 +27,7 @@ class MLP(nn.Module):
 def prepare(
     batch_size: int,
     use_cuda: bool,
-) -> nn.Module:
+) -> Tuple[nn.Module, torch.Tensor]:
     """Prepare the model and input data."""
     model = MLP().to("cuda" if use_cuda else "cpu")
     input_data = torch.randn(batch_size, 10).to("cuda" if use_cuda else "cpu")

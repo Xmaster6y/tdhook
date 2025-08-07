@@ -3,8 +3,6 @@ Utils for benchmarking.
 """
 
 import re
-import numpy as np
-import torch
 import subprocess
 from typing import Dict, Any
 from loguru import logger
@@ -34,18 +32,6 @@ def run_command(command, cwd=None, return_stderr=False):
         if return_stderr:
             return None, None
         return None
-
-
-def set_seed(seed: int):
-    """Set random seed to check accuracy."""
-    torch.manual_seed(seed)
-    np.random.seed(seed)
-
-
-def assert_accuracy(outs1, outs2):
-    """Assert accuracy of two outputs."""
-    for out1, out2 in zip(outs1, outs2):
-        assert torch.allclose(out1, out2, atol=1e-6)
 
 
 class Measurer:

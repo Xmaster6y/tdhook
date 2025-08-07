@@ -19,26 +19,16 @@ from .utils import Measurer
 # Fixed seeds for reproducibility
 SEEDS = [42, 123, 456]
 TASKS = {
+    "gpt2_cache": ["tdhook", "nnsight", "transformer_lens"],
     "mlp_intervene": ["nnsight", "tdhook"],
-}
-PARAMETERS = {
-    "width": [100, 1000, 5_000, 10_000],
-    "height": [5, 10, 20, 50],
-    "batch_size": [100, 1000, 10_000, 100_000],
-}
-DEFAULT_PARAMETERS = {
-    "width": 1000,
-    "height": 10,
-    "batch_size": 1000,
 }
 
 
 def run_task(task, script_name: str, measurer: Measurer):
     """Run a task."""
-    all_parameters = {**PARAMETERS, "variation": task.variations}
-    default_parameters = {**DEFAULT_PARAMETERS, "variation": task.default_variation}
+    default_parameters = task.default_parameters
     results = {}
-    for parameter, values in all_parameters.items():
+    for parameter, values in task.impact_parameters.items():
         results[parameter] = {}
         logger.info(f"Running parameter: {parameter}")
         for value in values:
