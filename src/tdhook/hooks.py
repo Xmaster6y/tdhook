@@ -3,7 +3,7 @@ MultiHook
 """
 
 import weakref
-from typing import Callable, Any, Optional, List, Literal, Union
+from typing import Callable, Any, Optional, List, Literal, Protocol
 import inspect
 
 from tensordict import TensorDict
@@ -80,8 +80,12 @@ def register_hook_to_module(
         return module.register_full_backward_pre_hook(hook, prepend=prepend)
 
 
+class RemovableHandleProtocol(Protocol):
+    def remove(self): ...
+
+
 class MultiHookHandle:
-    def __init__(self, handles: Optional[List[Union[RemovableHandle, "MultiHookHandle"]]] = None):
+    def __init__(self, handles: Optional[List[RemovableHandleProtocol]] = None):
         self._handles = handles or []
 
     def remove(self):
