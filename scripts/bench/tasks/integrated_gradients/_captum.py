@@ -92,5 +92,6 @@ def main():
     else:
         logger.info(f"  Max GPU memory: {torch.cuda.max_memory_allocated() / 1024:.2f} KB")
 
+
 if __name__ == "__main__":
     main()
