@@ -6,8 +6,6 @@ import torch
 
 from .helpers import approximation_parameters
 
-from tdhook.hooks import MultiHookHandle
-from tdhook.module import HookedModule
 from tdhook.attribution.gradient_attribution import GradientAttributionWithBaseline
 
 
@@ -18,26 +16,31 @@ class IntegratedGradients(GradientAttributionWithBaseline):
         self._n_steps = n_steps
         self._step_sizes = None
 
-    def _hook_module(self, module: HookedModule) -> MultiHookHandle:
-        handles = []
+    def _output_backward_hook(self, module, args, output):
+        if isinstance(output, tuple):
+            full_bs, *rest = output[0].shape
+            new_shape = (full_bs // self._n_steps, self._n_steps, *rest)
+            perm = (0,) + tuple(range(2, len(new_shape))) + (1,)
+            output = tuple(out.reshape(new_shape).permute(perm) for out in output)
+        else:
+            full_bs, *rest = output.shape
+            new_shape = (full_bs // self._n_steps, self._n_steps, *rest)
+            perm = (0,) + tuple(range(2, len(new_shape))) + (1,)
+            output = output.reshape(new_shape).permute(perm)
 
-        def reshape_hook(module, args, output):
-            if isinstance(output, tuple):
-                full_bs, *rest = output[0].shape
-                return tuple(out.reshape(full_bs // self._n_steps, self._n_steps, *rest) for out in output)
-            else:
-                full_bs, *rest = output.shape
-                return output.reshape(full_bs // self._n_steps, self._n_steps, *rest)
-
-        handles.append(
-            module.register_submodule_hook(
-                "module",
-                reshape_hook,
-                direction="fwd",
-            )
-        )
-        handles.append(super()._hook_module(module))
-        return MultiHookHandle(handles)
+        if self._init_target is not None:
+            target = self._init_target(output)
+        else:
+            target = output
+        if self._init_grad is not None:
+            init_grad = self._init_grad(output)
+        else:
+            init_grad = torch.ones_like(target)
+        attrs = self._grad_attr(target, args, init_grad)
+        if isinstance(output, tuple):
+            return *output, *attrs
+        else:
+            return output, *attrs
 
     def _reduce_baselines(self, inputs, baselines):
         step_sizes_func, alphas_func = approximation_parameters(self._method)
@@ -55,10 +58,12 @@ class IntegratedGradients(GradientAttributionWithBaseline):
 
     def _grad_attr(self, target, args, init_grad):
         grads = torch.autograd.grad(target, args, init_grad)
-        in_dims = args[0].ndim - 1
+        full_bs, *rest = grads[0].shape
+        new_shape = (full_bs // self._n_steps, self._n_steps, *rest)
+        perm = (0,) + tuple(range(2, len(new_shape))) + (1,)
         scaled_grads = tuple(
-            grad * torch.tensor(self._step_sizes).float().view(1, self._n_steps, *(1,) * in_dims).to(grad.device)
+            grad.reshape(new_shape).permute(perm) * torch.tensor(self._step_sizes).float().to(grad.device)
             for grad in grads
         )
-        total_grads = tuple(torch.sum(scaled_grad, dim=1) for scaled_grad in scaled_grads)
+        total_grads = tuple(torch.sum(scaled_grad, dim=-1) for scaled_grad in scaled_grads)
         return total_grads

@@ -35,56 +35,55 @@ class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
     def _hook_module(self, module: HookedModule) -> MultiHookHandle:
         handles = []
 
-        def input_grad_hook(module, args):
-            for arg in args:
-                arg.requires_grad = True
-
         handles.append(
             module.register_submodule_hook(
                 "module",
-                input_grad_hook,
+                self._input_grad_hook,
                 direction="fwd_pre",
             )
         )
 
-        def output_backward_hook(module, args, output):
-            if self._init_target is not None:
-                target = self._init_target(output)
-            else:
-                target = output
-            if self._init_grad is not None:
-                init_grad = self._init_grad(output)
-            else:
-                init_grad = torch.ones_like(target)
-            attrs = self._grad_attr(target, args, init_grad)
-            if isinstance(output, tuple):
-                return *output, *attrs
-            else:
-                return output, *attrs
-
         handles.append(
             module.register_submodule_hook(
                 "module",
-                output_backward_hook,
+                self._output_backward_hook,
                 direction="fwd",
             )
         )
 
         if self._multiply_by_inputs:
-
-            def output_multiply_hook(module, args, output):
-                self._multiply_by_inputs_(output, module.in_keys)
-                return output
-
             handles.append(
                 module.register_submodule_hook(
                     "",
-                    output_multiply_hook,
+                    self._attr_multiply_hook,
                     direction="fwd",
                 )
             )
 
         return MultiHookHandle(handles)
+
+    def _input_grad_hook(self, module, args):
+        for arg in args:
+            arg.requires_grad = True
+
+    def _output_backward_hook(self, module, args, output):
+        if self._init_target is not None:
+            target = self._init_target(output)
+        else:
+            target = output
+        if self._init_grad is not None:
+            init_grad = self._init_grad(output)
+        else:
+            init_grad = torch.ones_like(target)
+        attrs = self._grad_attr(target, args, init_grad)
+        if isinstance(output, tuple):
+            return *output, *attrs
+        else:
+            return output, *attrs
+
+    def _attr_multiply_hook(self, module, args, output):
+        self._multiply_by_inputs_(output, module.in_keys)
+        return output
 
     @abstractmethod
     def _grad_attr(self, target, args, init_grad):
@@ -113,27 +112,18 @@ class GradientAttributionWithBaseline(GradientAttribution):
     def _hook_module(self, module: HookedModule) -> MultiHookHandle:
         handles = []
 
-        def requires_batched_hook(module, args):
-            if args[0].ndim == 0:
-                raise NotImplementedError("This attribution method requires batched inputs")
-
         handles.append(
             module.register_submodule_hook(
                 "",
-                requires_batched_hook,
+                self._assert_batched_hook,
                 direction="fwd_pre",
             )
         )
 
-        def baseline_hook(module, args):
-            inputs = args[: len(args) // 2]
-            baselines = args[len(args) // 2 :]
-            return self._reduce_baselines(inputs, baselines)
-
         handles.append(
             module.register_submodule_hook(
                 "module",
-                baseline_hook,
+                self._reduce_baselines_hook,
                 direction="fwd_pre",
             )
         )
@@ -141,33 +131,41 @@ class GradientAttributionWithBaseline(GradientAttribution):
         handles.append(super()._hook_module(module))
 
         if self._compute_convergence_delta:
-
-            def placeholder_hook(module, args, output):
-                if isinstance(output, tuple):
-                    return *output, torch.empty(output[0].shape[0], 1)
-                else:
-                    return output, torch.empty(output.shape[0], 1)
-
             handles.append(
                 module.register_submodule_hook(
                     "module",
-                    placeholder_hook,
+                    self._convergence_delta_placeholder_hook,
                     direction="fwd",
                 )
             )
 
-            def convergence_delta_hook(module, args, output):
-                return self._compute_convergence_delta_(module, output)
-
             handles.append(
                 module.register_submodule_hook(
                     "",
-                    convergence_delta_hook,
+                    self._compute_convergence_delta_hook,
                     direction="fwd",
                 )
             )
 
         return MultiHookHandle(handles)
+
+    def _assert_batched_hook(self, module, args):
+        if args[0].ndim == 0:
+            raise NotImplementedError("This attribution method requires batched inputs")
+
+    def _reduce_baselines_hook(self, module, args):
+        inputs = args[: len(args) // 2]
+        baselines = args[len(args) // 2 :]
+        return self._reduce_baselines(inputs, baselines)
+
+    def _convergence_delta_placeholder_hook(self, module, args, output):
+        if isinstance(output, tuple):
+            return *output, torch.empty(output[0].shape[0], 1)
+        else:
+            return output, torch.empty(output.shape[0], 1)
+
+    def _compute_convergence_delta_hook(self, module, args, output):
+        return self._compute_convergence_delta_(module, output)
 
     def _multiply_by_inputs_(self, output, in_keys):
         for key in in_keys:
