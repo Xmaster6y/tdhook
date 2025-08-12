@@ -56,8 +56,7 @@ class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
                 init_grad = self._init_grad(output)
             else:
                 init_grad = torch.ones_like(target)
-            target.backward(init_grad)
-            attrs = self._grad_attr(args, output)
+            attrs = self._grad_attr(target, args, init_grad)
             if isinstance(output, tuple):
                 return *output, *attrs
             else:
@@ -84,14 +83,14 @@ class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
                     direction="fwd",
                 )
             )
-            # TODO: compare with captum "input_x_gradient"
 
         return MultiHookHandle(handles)
 
     @abstractmethod
-    def _grad_attr(self, args, output):
+    def _grad_attr(self, target, args, init_grad):
         pass
 
+    @torch.no_grad()
     def _multiply_by_inputs_(self, output, in_keys):
         for key in in_keys:
             output[f"{key}_attr"] *= output[key]
@@ -113,6 +112,18 @@ class GradientAttributionWithBaseline(GradientAttribution):
 
     def _hook_module(self, module: HookedModule) -> MultiHookHandle:
         handles = []
+
+        def requires_batched_hook(module, args):
+            if args[0].ndim == 0:
+                raise NotImplementedError("This attribution method requires batched inputs")
+
+        handles.append(
+            module.register_submodule_hook(
+                "",
+                requires_batched_hook,
+                direction="fwd_pre",
+            )
+        )
 
         def baseline_hook(module, args):
             inputs = args[: len(args) // 2]
@@ -155,7 +166,6 @@ class GradientAttributionWithBaseline(GradientAttribution):
                     direction="fwd",
                 )
             )
-            # TODO: compare with captum delta
 
         return MultiHookHandle(handles)
 

@@ -12,7 +12,6 @@ from typing import Callable, cast, List, Tuple
 import torch
 
 
-# TODO: compare with captum implementation (trivial)
 class Riemann(Enum):
     left = 1
     right = 2

@@ -9,6 +9,7 @@ from typing import List
 from tdhook.module import HookedModule
 
 
+# TODO: test against captum
 class InfidelityMetric:
     def __init__(self, n_perturb_samples: int = 10):
         self.n_perturb_samples = n_perturb_samples

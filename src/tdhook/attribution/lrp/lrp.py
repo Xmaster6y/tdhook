@@ -5,6 +5,7 @@ LRP
 from typing import Callable, Optional
 
 from torch import nn
+import torch
 from warnings import warn
 
 from tdhook.attribution.gradient_attribution import GradientAttribution
@@ -51,8 +52,8 @@ class LRP(GradientAttribution):
         del module._rule_map
         return module
 
-    def _grad_attr(self, args, output):
-        return (arg.grad for arg in args)
+    def _grad_attr(self, target, args, init_grad):
+        return torch.autograd.grad(target, args, init_grad)
 
     @staticmethod
     def skip_root_and_modulelist(name: str, module: nn.Module) -> bool:

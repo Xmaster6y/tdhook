@@ -215,8 +215,6 @@ class TestRules:
             zennit_in_relevance = zennit_input.grad
 
         torch.testing.assert_close(original_output, tdhook_output.get("output"))
-
-        # TODO: reduce tolerances
         torch.testing.assert_close(tdhook_in_relevance, zennit_in_relevance)
 
     def test_skip_modules_no_warning(self):
