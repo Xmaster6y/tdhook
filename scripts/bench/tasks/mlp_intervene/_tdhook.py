@@ -98,7 +98,8 @@ def main():
         except Exception as e:
             logger.error(f"Error: {e}")
             raise
-
+    else:
+        logger.info(f"  Max GPU memory: {torch.cuda.max_memory_allocated() / 1024:.2f} KB")
 
 if __name__ == "__main__":
     main()
