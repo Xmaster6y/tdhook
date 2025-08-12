@@ -12,7 +12,6 @@ from loguru import logger
 from importlib import import_module
 
 
-# Fixed seeds for reproducibility
 SEEDS = [42, 123, 456]
 TASKS = {
     "lrp": ["tdhook", "zennit"],

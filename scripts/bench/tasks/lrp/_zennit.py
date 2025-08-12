@@ -59,7 +59,7 @@ def main():
     parser.add_argument("--width", type=int, default=10)
     parser.add_argument("--height", type=int, default=10)
     parser.add_argument("--batch_size", type=int, default=10)
-    parser.add_argument("--variation", type=int, default=10)
+    parser.add_argument("--variation", type=str, default="epsilon-plus")
     parser.add_argument("--run", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--cuda", action=argparse.BooleanOptionalAction, default=True)
 

@@ -16,7 +16,6 @@ from importlib import import_module
 
 from .utils import Measurer
 
-# Fixed seeds for reproducibility
 SEEDS = [42, 123, 456]
 TASKS = {
     "lrp": ["tdhook", "zennit"],
