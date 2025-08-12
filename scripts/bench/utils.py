@@ -60,17 +60,18 @@ class Measurer:
         params = " ".join([f"--{k}={v}" for k, v in parameters.items()])
         command = f"time -f '{self.time_fmt}' .venv/bin/python {script_name} {params}"
 
-        _, spawn_stderr = run_command(f"{command} --no-run", return_stderr=True)
-        spawn_stats = self._parse_time_output(*spawn_stderr.split("\n")[-2:])
-
-        _, run_cpu_stderr = run_command(f"{command} --run --no-cuda", return_stderr=True)
-        run_cpu_stats = self._parse_time_output(*run_cpu_stderr.split("\n")[-2:])
-
-        _, run_gpu_stderr = run_command(f"{command} --run --cuda", return_stderr=True)
-        run_gpu_stats = self._parse_time_output(*run_gpu_stderr.split("\n")[-2:])
-
-        return {
-            "spawn": spawn_stats,
-            "run_cpu": run_cpu_stats,
-            "run_gpu": run_gpu_stats,
+        args = {
+            "spawn": "--no-run",
+            "run_cpu": "--run --no-cuda",
+            "run_gpu": "--run --cuda",
         }
+        results = {}
+        for key, value in args.items():
+            _, stderr = run_command(f"{command} {value}", return_stderr=True)
+            time_output = stderr.split("\n")[-2:]
+            if not time_output[0].startswith("0:"):
+                logger.error(stderr)
+                raise ValueError(f"Time output: {time_output}")
+            results[key] = self._parse_time_output(*time_output)
+
+        return results
