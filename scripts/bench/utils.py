@@ -68,10 +68,10 @@ class Measurer:
         results = {}
         for key, value in args.items():
             _, stderr = run_command(f"{command} {value}", return_stderr=True)
-            time_output = stderr.split("\n")[-2:]
-            if not time_output[0].startswith("0:"):
-                logger.error(stderr)
+            cuda_log, time_output = stderr.split("\n")[-2:]
+            if not time_output.startswith("0:"):
+                logger.error(f"Script stderr: \n\n{stderr}")
                 raise ValueError(f"Time output: {time_output}")
-            results[key] = self._parse_time_output(*time_output)
+            results[key] = self._parse_time_output(cuda_log, time_output)
 
         return results
