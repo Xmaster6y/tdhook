@@ -2,8 +2,7 @@
 Linear probing
 """
 
-from typing import Callable, Optional, Generator, List
-from contextlib import contextmanager
+from typing import Callable, Optional, List
 
 from torch import nn
 from tensordict import TensorDict
@@ -38,8 +37,7 @@ class LinearProbing(HookingContextFactory):
         self._key_pattern = key_pattern
         self._hook_manager.pattern = key_pattern
 
-    @contextmanager
-    def _hook_module(self, module: nn.Module) -> Generator[None, None, None]:
+    def _hook_module(self, module: nn.Module) -> MultiHookHandle:
         def hook_factory(name: str, direction: HookDirection) -> Callable:
             nonlocal self
             probe = self._probe_factory(name, direction)
@@ -48,13 +46,13 @@ class LinearProbing(HookingContextFactory):
                 def callback(**kwargs):
                     data = self._preprocess(**kwargs, name=name, direction=direction)
                     return probe(data[DIRECTION_TO_RETURN[direction]])
+
             else:
 
                 def callback(**kwargs):
-                    data = self._preprocess(**kwargs, name=name, direction=direction)
-                    return probe(data[DIRECTION_TO_RETURN[direction]])
+                    return probe(kwargs[DIRECTION_TO_RETURN[direction]])
 
-            return HookFactory.make_caching_hook(name, self._cache, direction=direction, callback=callback)
+            return HookFactory.make_caching_hook(name, self.cache, direction=direction, callback=callback)
 
         handles = []
         for direction in self._directions:
@@ -64,5 +62,4 @@ class LinearProbing(HookingContextFactory):
                 )
             )
 
-        with MultiHookHandle(handles):
-            yield
+        return MultiHookHandle(handles)

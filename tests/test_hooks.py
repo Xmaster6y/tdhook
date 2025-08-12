@@ -28,8 +28,8 @@ class TestHookRegistration:
         original_output = default_test_model(input)
         handle = register_hook_to_module(default_test_model.linear1, forward_hook, direction="fwd")
         assert handle is not None
-        output = default_test_model(input)
-        assert not torch.allclose(output, original_output)
+        model_output = default_test_model(input)
+        assert not torch.allclose(model_output, original_output)
         handle.remove()
         output = default_test_model(input)
         assert torch.allclose(output, original_output)
@@ -37,13 +37,23 @@ class TestHookRegistration:
     def test_multi_hook_manager(self, default_test_model):
         """Test MultiHookManager."""
 
-        def hook(module, args, output):
-            return output
+        def hook_factory(name: str):
+            def hook(module, args, output):
+                return output + 1
+
+            return hook
+
+        input = torch.randn(2, 10)
+        original_output = default_test_model(input)
 
         manager = MultiHookManager(pattern=r"linear\d+")
-        handle = manager.register_hook(default_test_model, hook, "fwd")
+        handle = manager.register_hook(default_test_model, hook_factory, direction="fwd")
         assert isinstance(handle, MultiHookHandle)
+        mod_output = default_test_model(input)
+        assert not torch.allclose(mod_output, original_output)
         handle.remove()
+        output = default_test_model(input)
+        assert torch.allclose(output, original_output)
 
 
 class TestHookFactory:
@@ -63,7 +73,7 @@ class TestHookFactory:
         def callback(value, module, args, output):
             return value + 1
 
-        hook = HookFactory.make_setting_hook(1, callback)
+        hook = HookFactory.make_setting_hook(1, callback=callback)
         assert hook is not None
         output = hook(default_test_model, None, 1)
         assert output == 2

@@ -4,39 +4,30 @@ Tests for the contexts functionality.
 
 import torch
 from tensordict import TensorDict
-from contextlib import contextmanager
-from typing import Generator
 
-from tdhook.contexts import BaseContext, CompositeContext
+from tdhook.contexts import HookingContextFactory, CompositeHookingContextFactory
 from tdhook.module import HookedModule
+from tdhook.hooks import MultiHookHandle
 
 
-class Context1(BaseContext):
-    @contextmanager
-    def _hook_module(self, module: HookedModule) -> Generator[None, None, None]:
+class Context1(HookingContextFactory):
+    def _hook_module(self, module: HookedModule) -> MultiHookHandle:
         handle = module.register_submodule_hook(
             key="module",
             hook=lambda module, args, output: output + 1,
             direction="fwd",
         )
-        try:
-            yield
-        finally:
-            handle.remove()
+        return handle
 
 
-class Context2(BaseContext):
-    @contextmanager
-    def _hook_module(self, module: HookedModule) -> Generator[None, None, None]:
+class Context2(HookingContextFactory):
+    def _hook_module(self, module: HookedModule) -> MultiHookHandle:
         handle = module.register_submodule_hook(
             key="module",
             hook=lambda module, args, output: output * 2,
             direction="fwd",
         )
-        try:
-            yield
-        finally:
-            handle.remove()
+        return handle
 
 
 class TestBaseContext:
@@ -70,7 +61,7 @@ class TestCompositeContext:
         """Test preparing a regular module with CompositeContext."""
         input = torch.randn(2, 3, 10)
         original_output = default_test_model(input)
-        context = CompositeContext(Context1(), Context2())
+        context = CompositeHookingContextFactory(Context1(), Context2())
         with context.prepare(default_test_model) as hooked_module:
             data = TensorDict({"input": input}, batch_size=[2, 3])
             hooked_module(data)

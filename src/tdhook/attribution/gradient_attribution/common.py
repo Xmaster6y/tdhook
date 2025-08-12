@@ -28,7 +28,7 @@ class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
     def _spawn_hooked_module(
         self, prep_module: nn.Module, in_keys: List[str], out_keys: List[str], hooking_context: HookingContext
     ):
-        out_keys = [f"{in_key}_attr" for in_key in in_keys]
+        out_keys = out_keys + [f"{in_key}_attr" for in_key in in_keys]
 
         return super()._spawn_hooked_module(prep_module, in_keys, out_keys, hooking_context)
 
@@ -58,7 +58,10 @@ class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
                 init_grad = torch.ones_like(target)
             target.backward(init_grad)
             attrs = self._grad_attr(args, output)
-            return attrs
+            if isinstance(output, tuple):
+                return *output, *attrs
+            else:
+                return output, *attrs
 
         handles.append(
             module.register_submodule_hook(

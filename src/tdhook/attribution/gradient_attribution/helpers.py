@@ -1,7 +1,9 @@
 """
-Helpers for integrated gradients
+Helpers for gradient attribution.
 
-Taken from https://github.com/pytorch/captum/blob/master/captum/attr/_utils/approximation_methods.py
+
+This code is adapted from the Captum library (BSD 3-Clause)
+Original source: https://github.com/pytorch/captum/blob/master/captum/attr/_utils/approximation_methods.py
 """
 
 from enum import Enum

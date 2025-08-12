@@ -3,31 +3,24 @@ Tests for the latents functionality.
 """
 
 import torch.nn as nn
+import torch
 
-from tdhook.acteng.linear_probing import ProbingContext
+from tdhook.acteng.linear_probing import LinearProbing
 
 
-class TestProbingContext:
-    """Test the ProbingContext class."""
+class TestLinearProbing:
+    """Test the LinearProbing class."""
 
-    def test_probing_context_creation(self):
-        """Test creating a ProbingContext."""
+    def test_probing_context_creation(self, default_test_model):
+        """Test creating a LinearProbing."""
 
-        def get_probe(key):
+        def probe_factory(key, direction):
             return nn.Linear(20, 1)
 
-        context = ProbingContext("linear\\d+", get_probe)
-        assert isinstance(context, ProbingContext)
-        assert context._get_probe == get_probe
+        context = LinearProbing("module\.linear2", probe_factory)
+        assert isinstance(context, LinearProbing)
 
-    def test_probing_context_get_probe(self):
-        """Test the get_probe function."""
-
-        def get_probe(key):
-            return nn.Linear(20, 1)
-
-        context = ProbingContext("linear\\d+", get_probe)
-        probe = context._get_probe("linear1")
-        assert isinstance(probe, nn.Linear)
-        assert probe.in_features == 20
-        assert probe.out_features == 1
+        inputs = torch.randn(2, 10)
+        with context.prepare(default_test_model) as hooked_module:
+            hooked_module(inputs)
+        assert "module.linear2" in context.cache

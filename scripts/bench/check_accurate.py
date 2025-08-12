@@ -15,10 +15,10 @@ from importlib import import_module
 # Fixed seeds for reproducibility
 SEEDS = [42, 123, 456]
 TASKS = {
-    # "lrp": ["tdhook", "zennit"],
+    "lrp": ["tdhook", "zennit"],
     "integrated_gradients": ["tdhook", "captum_add", "captum"],
-    # "gpt2_cache": ["tdhook", "nnsight", "transformer_lens"],
-    # "mlp_intervene": ["tdhook", "nnsight"],
+    "gpt2_cache": ["tdhook", "nnsight", "transformer_lens"],
+    "mlp_intervene": ["tdhook", "nnsight"],
 }
 
 
