@@ -176,6 +176,9 @@ class HookedModuleRun:
         self._handles.append(handle)
 
 
+# TODO: test API against nnsight
+
+
 class HookedModule(TensorDictModule):
     def __init__(self, *args, hooking_context: Optional["HookingContext"] = None, **kwargs):
         super().__init__(*args, **kwargs)

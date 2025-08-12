@@ -84,6 +84,7 @@ class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
                     direction="fwd",
                 )
             )
+            # TODO: compare with captum "input_x_gradient"
 
         return MultiHookHandle(handles)
 
@@ -154,6 +155,7 @@ class GradientAttributionWithBaseline(GradientAttribution):
                     direction="fwd",
                 )
             )
+            # TODO: compare with captum delta
 
         return MultiHookHandle(handles)
 

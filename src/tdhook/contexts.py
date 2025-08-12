@@ -106,6 +106,7 @@ class CompositeHookingContextFactory(HookingContextFactory):
         return MultiHookHandle(handles)
 
 
+# TODO: Test against out of context usage
 class HookingContext:
     def __init__(
         self,
