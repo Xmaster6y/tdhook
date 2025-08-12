@@ -49,8 +49,9 @@ class Measurer:
             max_gpu_memory = 0.0
 
         time_output = time_output.split("/")
+        mins, secs = time_output[0].split(":")
         return {
-            "wall_time": float(time_output[0].replace("0:", "")),
+            "wall_time": float(mins) * 60 + float(secs),
             "cpu_percent": float(time_output[1].replace("%", "")),
             "max_ram_used_kb": float(time_output[2]),
             "max_gpu_memory_kb": max_gpu_memory,
@@ -68,10 +69,6 @@ class Measurer:
         results = {}
         for key, value in args.items():
             _, stderr = run_command(f"{command} {value}", return_stderr=True)
-            cuda_log, time_output = stderr.split("\n")[-2:]
-            if not time_output.startswith("0:"):
-                logger.error(f"Script stderr: \n\n{stderr}")
-                raise ValueError(f"Time output: {time_output}")
-            results[key] = self._parse_time_output(cuda_log, time_output)
+            results[key] = self._parse_time_output(*stderr.split("\n")[-2:])
 
         return results
