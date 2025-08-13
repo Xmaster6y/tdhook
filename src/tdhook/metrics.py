@@ -10,6 +10,7 @@ from tdhook.module import HookedModule
 
 
 # TODO: test against captum
+# TODO: fix this
 class InfidelityMetric:
     def __init__(self, n_perturb_samples: int = 10):
         self.n_perturb_samples = n_perturb_samples

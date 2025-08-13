@@ -53,12 +53,20 @@ def _check_hook_signature(hook: Callable, direction: HookDirection):
 
     has_varargs = any(param.kind == inspect.Parameter.VAR_POSITIONAL for param in sig.parameters.values())
 
+    num_optional_params = sum(
+        1
+        for param in sig.parameters.values()
+        if param.default is not inspect.Parameter.empty or param.kind == inspect.Parameter.VAR_KEYWORD
+    )
+
     if has_varargs:
-        if param_len > len(expected_params) + 1:
-            raise ValueError(f"Hook ({direction}) must have at most {len(expected_params) + 1} positional parameters")
+        if param_len > len(expected_params) + 1 + num_optional_params:
+            raise ValueError(
+                f"Hook ({direction}) must have at most {len(expected_params) + 1 + num_optional_params} positional parameters"
+            )
         return
 
-    if param_len != len(expected_params):
+    if param_len != len(expected_params) + num_optional_params:
         raise ValueError(f"Hook ({direction}) must have the signature {expected_params}")
 
 

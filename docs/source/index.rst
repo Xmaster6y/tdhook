@@ -33,9 +33,9 @@
 
         .. div:: sd-fs-4 sd-font-weight-bold sd-my-0 sub-bot image-container
 
-            Explainable RL for TorchRL
+            Interpreting ``torch`` Deep Neural Networks
 
-        **tdhook** is a package for explaining the decisions of RL agents.
+        **tdhook** is a package for explaining ``torch`` deep neural networks based on ``tensordict`` and ``torch`` hooks.
 
         .. div:: button-group
 
@@ -74,9 +74,9 @@
 
         .. div::
 
-          **Adaptability**
+          **Efficiency**
 
-          Directly load networks from TorchRL or ``torch``.
+          Memory and time efficient, no large bundle, only what you need.
 
     .. grid-item::
 
@@ -89,4 +89,4 @@
 
           **Interpretability**
 
-          Easily compute saliency maps or aggregated statistics using the pre-built Interpretability methods.
+          Wide range of interpretability methods ready to be plugged in, with a general API to have full control over the interpretability process.

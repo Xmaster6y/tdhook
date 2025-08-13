@@ -229,14 +229,14 @@ class HookedModule(TensorDictModule):
 
     def set(
         self,
-        moduel_key: str,
+        module_key: str,
         value: Any,
         callback: Optional[Callable] = None,
         direction: HookDirection = "fwd",
         prepend: bool = False,
     ) -> RemovableHandle:
         handle = self.register_submodule_hook(
-            key=moduel_key,
+            key=module_key,
             hook=HookFactory.make_setting_hook(value, callback=callback, direction=direction),
             direction=direction,
             prepend=prepend,
@@ -246,16 +246,16 @@ class HookedModule(TensorDictModule):
     def get(
         self,
         cache: TensorDict,
-        moduel_key: str,
+        module_key: str,
         cache_key: Optional[str] = None,
         callback: Optional[Callable] = None,
         direction: HookDirection = "fwd",
         prepend: bool = False,
     ) -> Tuple[RemovableHandle, CacheProxy]:
-        cache_key = cache_key or f"{moduel_key}_{DIRECTION_TO_TYPE[direction]}"
+        cache_key = cache_key or f"{module_key}_{DIRECTION_TO_TYPE[direction]}"
         proxy = CacheProxy(cache_key, cache)
         handle = self.register_submodule_hook(
-            key=moduel_key,
+            key=module_key,
             hook=HookFactory.make_caching_hook(cache_key, cache, callback=callback, direction=direction),
             direction=direction,
             prepend=prepend,

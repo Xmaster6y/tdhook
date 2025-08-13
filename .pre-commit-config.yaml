@@ -4,7 +4,7 @@ repos:
     hooks:
     -   id: check-added-large-files
         args: ['--maxkb=1024']
-        exclude: ^docs/source/_static/images/xdrl-logo\.png$
+        exclude: ^docs/source/_static/images/tdhook-logo\.png$
     -   id: check-yaml
     -   id: check-json
     -   id: check-toml

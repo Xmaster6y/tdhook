@@ -64,7 +64,7 @@ class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
 
     def _input_grad_hook(self, module, args):
         for arg in args:
-            arg.requires_grad = True
+            arg.requires_grad_(True)
 
     def _output_backward_hook(self, module, args, output):
         if self._init_target is not None:

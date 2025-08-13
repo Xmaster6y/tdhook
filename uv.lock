@@ -3138,9 +3138,13 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "captum" },
+    { name = "nnsight" },
     { name = "pre-commit" },
     { name = "pytest" },
     { name = "pytest-cov" },
+    { name = "zennit", version = "0.5.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11.11'" },
+    { name = "zennit", version = "1.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11.11'" },
 ]
 docs = [
     { name = "nbsphinx" },
@@ -3176,9 +3180,12 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "captum", specifier = ">=0.8.0" },
+    { name = "nnsight", specifier = ">=0.4.11" },
     { name = "pre-commit", specifier = ">=4.0.1" },
     { name = "pytest", specifier = ">=8.3.5" },
     { name = "pytest-cov", specifier = ">=6.1.1" },
+    { name = "zennit", specifier = ">=0.5.1" },
 ]
 docs = [
     { name = "nbsphinx", specifier = ">=0.9.6" },
