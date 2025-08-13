@@ -38,4 +38,4 @@ class Circuit(TensorDict, metaclass=CircuitMeta):
     @staticmethod
     def disjoint(circuits: Iterator["Circuit"]) -> bool:
         """Disjoint predicate"""
-        return Circuit.stack(circuits).all(dim=0).any()
+        return not Circuit.stack(circuits).all(dim=0).any()

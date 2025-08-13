@@ -2,11 +2,14 @@
 Latents
 """
 
-from . import linear_probing
-
-from .linear_probing import ProbingContext
+from .linear_probing import LinearProbing
+from .activation_caching import ActivationCaching
 
 __all__ = [
-    "linear_probing",
-    "ProbingContext",
+    "ActivationCaching",
+    "LinearProbing",
 ]
+
+# TODO: Implement Activation Patching
+# TODO: Implement Steering Vectors
+# TODO: Implement ATP*

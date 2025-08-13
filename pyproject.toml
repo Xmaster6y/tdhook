@@ -1,6 +1,6 @@
 [project]
 name = "tdhook"
-version = "0.1.0"
+version = "0.1.1"
 description = "Interpretability with tensordict and torch hooks."
 readme = "README.md"
 license = {file = "LICENSE"}
@@ -16,7 +16,6 @@ classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Science/Research",
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
 ]
@@ -30,9 +29,12 @@ releasenotes = "https://github.com/Xmaster6y/tdhook/releases"
 
 [dependency-groups]
 dev = [
+    "captum>=0.8.0",
     "pre-commit>=4.0.1",
     "pytest>=8.3.5",
     "pytest-cov>=6.1.1",
+    "nnsight>=0.4.11",
+    "zennit>=0.5.1",
 ]
 docs = [
     "nbsphinx>=0.9.6",
@@ -47,6 +49,13 @@ docs = [
 ]
 scripts = [
     "loguru>=0.7.3",
+    "nnsight>=0.4.11",
+    "matplotlib>=3.8.0",
+    "numpy>=1.24.0",
+    "pyside6>=6.9.1",
+    "transformer-lens>=2.15.4",
+    "zennit>=0.5.1",
+    "captum>=0.8.0",
 ]
 notebooks = [
     "ipykernel>=6.29.5",

@@ -1,7 +1,0 @@
-{
-    "editor.wordWrap": "on",
-    "python.testing.pytestEnabled": true,
-    "python.testing.pytestArgs": [
-        "tests"
-    ]
-}

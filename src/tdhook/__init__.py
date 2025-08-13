@@ -2,26 +2,18 @@
 tdhook
 """
 
-__version__ = "0.1.0"
-
-from . import acteng
-from . import artifacts
-from . import attribution
-from . import contexts
-from . import hooks
-from . import metrics
-from . import module
-from . import others
-from . import weights
+__version__ = "0.1.1"
 
 __all__ = [
-    "acteng",
+    # Core
     "artifacts",
-    "attribution",
     "contexts",
     "hooks",
     "metrics",
     "module",
+    # Methods
+    "acteng",
+    "attribution",
+    "auto",
     "weights",
-    "others",
 ]

@@ -137,6 +137,7 @@ lc0
 wandb
 **/.DS_Store
 outputs
+.vscode
 .cursor
 
 *secret*

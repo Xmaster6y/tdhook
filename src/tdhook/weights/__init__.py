@@ -5,10 +5,13 @@ Weight analysis and adapters for RL interpretability:
 - Task vectors
 """
 
-from .task_vectors import TaskVectors, TaskVectorsConfig, ComputeAlphaConfig
+from .task_vectors import TaskVectors
 
 __all__ = [
     "TaskVectors",
-    "TaskVectorsConfig",
-    "ComputeAlphaConfig",
 ]
+
+# TODO: Implment SAE
+# TODO: Implment crosscoders
+# TODO: Implement Clement's model diffing
+# TODO: Implement circuits tracer from Anthropic

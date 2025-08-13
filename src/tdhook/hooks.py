@@ -3,7 +3,7 @@ MultiHook
 """
 
 import weakref
-from typing import Callable, Any, Optional, List, Literal
+from typing import Callable, Any, Optional, List, Literal, Protocol
 import inspect
 
 from tensordict import TensorDict
@@ -12,48 +12,88 @@ from torch.utils.hooks import RemovableHandle
 from torch import nn
 
 
-def _check_hook_signature(hook: Callable, direction: Literal["fwd", "bwd", "fwd_pre", "bwd_pre"], with_kwargs: bool):
+HookDirection = Literal["fwd", "bwd", "fwd_pre", "bwd_pre", "fwd_kwargs", "fwd_pre_kwargs"]
+
+DIRECTION_TO_PARAMS = {
+    "fwd": ("module", "args", "output"),
+    "bwd": ("module", "grad_input", "grad_output"),
+    "fwd_pre": ("module", "args"),
+    "bwd_pre": ("module", "grad_output"),
+    "fwd_kwargs": ("module", "args", "kwargs", "output"),
+    "fwd_pre_kwargs": ("module", "args", "kwargs"),
+}
+
+DIRECTION_TO_RETURN = {
+    "fwd": "output",
+    "bwd": "grad_input",
+    "fwd_pre": "args",
+    "bwd_pre": "grad_output",
+    "fwd_kwargs": "output",
+    "fwd_pre_kwargs": "args",
+}
+
+DIRECTION_TO_TYPE = {
+    "fwd": "output",
+    "bwd": "grad_input",
+    "fwd_pre": "input",
+    "bwd_pre": "grad_output",
+    "fwd_kwargs": "output",
+    "fwd_pre_kwargs": "input",
+}
+
+
+def _check_hook_signature(hook: Callable, direction: HookDirection):
     """Check the signature of the hook."""
-    param_len = len(inspect.signature(hook).parameters)
-    if with_kwargs:
-        fwd_offset = 1
-        signature = ", kwargs"
-    else:
-        fwd_offset = 0
-        signature = ""
-    if direction == "fwd" and param_len != 3 + fwd_offset:
-        raise ValueError(f"Forward hooks must have the signature (module, args{signature}, output)")
-    elif direction == "bwd" and param_len != 3:
-        raise ValueError("Backward hooks must have the signature (module, grad_input, grad_output)")
-    elif direction == "fwd_pre" and param_len != 2 + fwd_offset:
-        raise ValueError(f"Forward pre-hooks must have the signature (module, args{signature})")
-    elif direction == "bwd_pre" and param_len != 2:
-        raise ValueError("Backward pre-hooks must have the signature (module, grad_input)")
+    if direction not in DIRECTION_TO_PARAMS:
+        raise ValueError(f"Invalid direction: {direction}")
+
+    sig = inspect.signature(hook)
+    param_len = len(sig.parameters)
+    expected_params = DIRECTION_TO_PARAMS[direction]
+
+    has_varargs = any(param.kind == inspect.Parameter.VAR_POSITIONAL for param in sig.parameters.values())
+
+    num_optional_params = sum(
+        1
+        for param in sig.parameters.values()
+        if param.default is not inspect.Parameter.empty or param.kind == inspect.Parameter.VAR_KEYWORD
+    )
+
+    if has_varargs:
+        if param_len > len(expected_params) + 1 + num_optional_params:
+            raise ValueError(
+                f"Hook ({direction}) must have at most {len(expected_params) + 1 + num_optional_params} positional parameters"
+            )
+        return
+
+    if param_len != len(expected_params) + num_optional_params:
+        raise ValueError(f"Hook ({direction}) must have the signature {expected_params}")
 
 
 def register_hook_to_module(
     module: nn.Module,
     hook: Callable,
-    direction: Literal["fwd", "bwd", "fwd_pre", "bwd_pre"],
+    direction: HookDirection,
     prepend: bool = False,
-    with_kwargs: bool = False,
 ) -> RemovableHandle:
     """Register the hook to the module."""
-    _check_hook_signature(hook, direction, with_kwargs)
-    if direction == "fwd":
-        return module.register_forward_hook(hook, prepend=prepend, with_kwargs=with_kwargs)
+    _check_hook_signature(hook, direction)
+    if direction in ["fwd", "fwd_kwargs"]:
+        return module.register_forward_hook(hook, prepend=prepend, with_kwargs=direction == "fwd_kwargs")
     elif direction == "bwd":
         return module.register_full_backward_hook(hook, prepend=prepend)
-    elif direction == "fwd_pre":
-        return module.register_forward_pre_hook(hook, prepend=prepend, with_kwargs=with_kwargs)
-    elif direction == "bwd_pre":
-        return module.register_full_backward_pre_hook(hook, prepend=prepend)
+    elif direction in ["fwd_pre", "fwd_pre_kwargs"]:
+        return module.register_forward_pre_hook(hook, prepend=prepend, with_kwargs=direction == "fwd_pre_kwargs")
     else:
-        raise ValueError(f"Invalid direction: {direction}")
+        return module.register_full_backward_pre_hook(hook, prepend=prepend)
+
+
+class RemovableHandleProtocol(Protocol):
+    def remove(self): ...
 
 
 class MultiHookHandle:
-    def __init__(self, handles: Optional[List[RemovableHandle]] = None):
+    def __init__(self, handles: Optional[List[RemovableHandleProtocol]] = None):
         self._handles = handles or []
 
     def remove(self):
@@ -92,24 +132,23 @@ class MultiHookManager:
     def register_hook(
         self,
         module: nn.Module,
-        hook: Callable,
-        direction: Literal["fwd", "bwd", "fwd_pre", "bwd_pre"],
+        hook_factory: Callable[[str], Callable],
+        *,
+        direction: HookDirection = "fwd",
         prepend: bool = False,
-        with_kwargs: bool = False,
     ):
         """Register the hook to the module."""
         handles = []
         for name, module in module.named_modules():
             if self._reg_exp.match(name):
-                handles.append(register_hook_to_module(module, hook, direction, prepend, with_kwargs))
+                handles.append(register_hook_to_module(module, hook_factory(name), direction, prepend))
         return MultiHookHandle(handles)
 
 
 class CacheProxy:
-    def __init__(self, key: str, cache: TensorDict, sep: str = "."):
+    def __init__(self, key: str, cache: TensorDict):
         self._key = key
         self._cache = weakref.ref(cache)
-        self._sep = sep
 
     def resolve(self) -> Any:
         cache = self._cache()
@@ -129,25 +168,77 @@ class EarlyStoppingException(Exception):
 
 class HookFactory:
     @staticmethod
+    def _check_callback_signature(callback: Callable, expected_param_names: set[str]):
+        """Check callback signature matches expected parameter names."""
+        if callback is None:
+            return
+        sig = inspect.signature(callback)
+        param_names = set(sig.parameters.keys())
+
+        has_positional_only = any(param.kind == inspect.Parameter.POSITIONAL_ONLY for param in sig.parameters.values())
+        if has_positional_only:
+            raise ValueError("Callback cannot have positional-only parameters since we only pass named arguments")
+
+        has_kwargs = any(param.kind == inspect.Parameter.VAR_KEYWORD for param in sig.parameters.values())
+        if has_kwargs:
+            return
+
+        missing_params = expected_param_names - param_names
+        if missing_params:
+            raise ValueError(f"Callback missing required parameters: {missing_params}")
+
+    @staticmethod
     def make_caching_hook(
-        key: str, cache: TensorDict, sep: str = ".", callback: Optional[Callable] = None
+        key: str, cache: TensorDict, *, callback: Optional[Callable] = None, direction: HookDirection = "fwd"
     ) -> Callable:
-        def hook(module, args, output):
-            nonlocal key, cache, sep, callback
+        """
+        Make a caching hook.
+        """
+
+        if direction not in DIRECTION_TO_PARAMS:
+            raise ValueError(f"Invalid direction: {direction}")
+
+        params = DIRECTION_TO_PARAMS[direction]
+        value_index = -2 if direction == "fwd_pre_kwargs" else -1
+        HookFactory._check_callback_signature(callback, set(params))
+
+        def hook(*args):
+            nonlocal key, cache, callback
             if callback is not None:
-                output = callback(output, module=module, args=args)
-            cache[key] = output
+                value = callback(**dict(zip(params, args)), key=key)
+            else:
+                value = args[value_index]
+            if isinstance(value, tuple):
+                raise RuntimeError("Tuple values are not supported for caching, use a `callback` to return a tensor")
+            cache[key] = value
 
         return hook
 
     @staticmethod
-    def make_setting_hook(value: Any, callback: Optional[Callable] = None) -> Callable:
-        def hook(module, args, output):
+    def make_setting_hook(
+        value: Any, *, callback: Optional[Callable] = None, direction: HookDirection = "fwd"
+    ) -> Callable:
+        """
+        Make a setting hook.
+        """
+
+        if direction not in DIRECTION_TO_PARAMS:
+            raise ValueError(f"Invalid direction: {direction}")
+
+        params = DIRECTION_TO_PARAMS[direction]
+        HookFactory._check_callback_signature(callback, set(params))
+
+        def hook(*args):
             nonlocal value, callback
+            original_type = type(value)
             if isinstance(value, CacheProxy):
                 value = value.resolve()
             if callback is not None:
-                value = callback(value=value, module=module, args=args, output=output)
+                value = callback(**dict(zip(params, args)), value=value)
+            if type(value) is not original_type:
+                raise RuntimeError(
+                    f"Callback returned a value of type {type(value)} but the original value was of type {original_type}"
+                )
             return value
 
         return hook

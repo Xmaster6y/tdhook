@@ -3,6 +3,7 @@ Global fixtures for the tests.
 """
 
 import pytest
+import torch
 import torch.nn as nn
 
 
@@ -33,7 +34,8 @@ def default_test_model():
 def get_model():
     """Fixture providing a function to create models with custom parameters."""
 
-    def _get_model(*, input_size=10, hidden_size=20, output_size=5):
+    def _get_model(*, seed=42, input_size=10, hidden_size=20, output_size=5):
+        torch.manual_seed(seed)
         return TestModel(input_size, hidden_size, output_size)
 
     return _get_model

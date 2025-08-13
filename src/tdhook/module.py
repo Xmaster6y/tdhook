@@ -2,12 +2,26 @@
 HookedModule
 """
 
+from torch.utils.hooks import RemovableHandle
 from tensordict.nn import TensorDictModule
 from tensordict import TensorDict
-from typing import Callable, Any, Literal, Optional
+from typing import Callable, Any, Optional, Tuple, TYPE_CHECKING
 import torch
+import warnings
+import torch.nn as nn
+from contextlib import contextmanager
 
-from tdhook.hooks import register_hook_to_module, CacheProxy, HookFactory, EarlyStoppingException
+from tdhook.hooks import (
+    register_hook_to_module,
+    CacheProxy,
+    HookFactory,
+    EarlyStoppingException,
+    HookDirection,
+    DIRECTION_TO_TYPE,
+)
+
+if TYPE_CHECKING:
+    from tdhook.contexts import HookingContext
 
 
 class HookedModuleRun:
@@ -16,16 +30,20 @@ class HookedModuleRun:
         module: "HookedModule",
         data: TensorDict,
         cache: Optional[TensorDict] = None,
-        run_name: str = "run",
+        run_name: Optional[str] = None,
+        run_sep: Optional[str] = None,
         run_cache: Optional[TensorDict] = None,
         grad_enabled: bool = False,
+        run_callback: Optional[Callable] = None,
     ):
         self._module = module
         self._data = data
         self._outer_cache = cache
-        self._name = run_name
+        self._name = run_name or "run"
+        self._sep = run_sep or "."
         self._cache = run_cache or TensorDict()
         self._grad_enabled = grad_enabled
+        self._run_callback = run_callback or (lambda module, data: module(data))
 
         if self._outer_cache is None:
             self._save_cache = self._cache
@@ -50,7 +68,7 @@ class HookedModuleRun:
     def __exit__(self, exc_type, exc_value, traceback):
         try:
             with torch.set_grad_enabled(self._grad_enabled):
-                self._module(self._data)
+                self._run_callback(self._module, self._data)
         except EarlyStoppingException:
             pass
         except Exception as e:
@@ -62,79 +80,235 @@ class HookedModuleRun:
 
     def _ensure_in_context(self, method: str):
         if not self._in_context:
-            raise RuntimeError(f"Not in context, method {method} must be called in context")
+            raise RuntimeError(f"Not in context, method {method} must be called in context or directly on the module")
 
-    def set(self, key: str, value: Any, sep: str = ".", callback: Optional[Callable] = None) -> None:
+    def set(
+        self,
+        key: str,
+        value: Any,
+        *,
+        callback: Optional[Callable] = None,
+        direction: HookDirection = "fwd",
+        prepend: bool = False,
+    ) -> None:
         self._ensure_in_context("set")
-        self._module.register_submodule_hook(
-            key=key,
-            hook=HookFactory.make_setting_hook(value, callback=callback),
-            direction="fwd",
-        )
+        handle = self._module.set(key, value, callback=callback, direction=direction, prepend=prepend)
+        self._handles.append(handle)
 
-    def get(self, key: str, sep: str = ".", callback: Optional[Callable] = None) -> CacheProxy:
+    def get(
+        self,
+        key: str,
+        *,
+        cache_key: Optional[str] = None,
+        callback: Optional[Callable] = None,
+        direction: HookDirection = "fwd",
+        prepend: bool = False,
+    ) -> CacheProxy:
         self._ensure_in_context("get")
-        proxy = CacheProxy(key, self._cache, sep=sep)
-        self._module.register_submodule_hook(
-            key=key,
-            hook=HookFactory.make_caching_hook(key, self._cache, sep=sep, callback=callback),
-            direction="fwd",
+        handle, proxy = self._module.get(
+            self._cache, key, cache_key, callback=callback, direction=direction, prepend=prepend
         )
+        self._handles.append(handle)
         return proxy
 
-    def save(self, key: str, sep: str = ".", callback: Optional[Callable] = None) -> None:
+    def save(
+        self,
+        key: str,
+        *,
+        cache_key: Optional[str] = None,
+        callback: Optional[Callable] = None,
+        direction: HookDirection = "fwd",
+        prepend: bool = False,
+    ) -> CacheProxy:
         self._ensure_in_context("save")
-        cache_key = self._name + sep + key
-        proxy = CacheProxy(cache_key, self._save_cache, sep=sep)
-        self._module.register_submodule_hook(
-            key=key,
-            hook=HookFactory.make_caching_hook(cache_key, self._save_cache, sep=sep, callback=callback),
-            direction="fwd",
+        cache_key = cache_key or f"{self._name + self._sep + key}_{DIRECTION_TO_TYPE[direction]}"
+        handle, proxy = self._module.get(
+            self._save_cache, key, cache_key=cache_key, callback=callback, direction=direction, prepend=prepend
         )
+        self._handles.append(handle)
         return proxy
+
+    def set_grad(self, *args, **kwargs):
+        self._ensure_in_context("set_grad")
+        self._grad_enabled = True
+        kwargs["direction"] = "bwd"
+        self.set(*args, **kwargs)
+
+    def get_grad(self, *args, **kwargs):
+        self._ensure_in_context("get_grad")
+        self._grad_enabled = True
+        kwargs["direction"] = "bwd"
+        return self.get(*args, **kwargs)
+
+    def save_grad(self, *args, **kwargs):
+        self._ensure_in_context("save_grad")
+        self._grad_enabled = True
+        kwargs["direction"] = "bwd"
+        return self.save(*args, **kwargs)
+
+    def set_input(self, *args, **kwargs):
+        kwargs["direction"] = "fwd_pre"
+        self.set(*args, **kwargs)
+
+    def get_input(self, *args, **kwargs):
+        kwargs["direction"] = "fwd_pre"
+        return self.get(*args, **kwargs)
+
+    def save_input(self, *args, **kwargs):
+        kwargs["direction"] = "fwd_pre"
+        return self.save(*args, **kwargs)
+
+    def set_grad_output(self, *args, **kwargs):
+        kwargs["direction"] = "bwd_pre"
+        self.set(*args, **kwargs)
+
+    def get_grad_output(self, *args, **kwargs):
+        kwargs["direction"] = "bwd_pre"
+        return self.get(*args, **kwargs)
+
+    def save_grad_output(self, *args, **kwargs):
+        kwargs["direction"] = "bwd_pre"
+        return self.save(*args, **kwargs)
 
     def stop(self, key: str) -> None:
         self._ensure_in_context("stop")
-        self._module.register_submodule_hook(
-            key=key,
-            hook=HookFactory.make_stopping_hook(key),
-            direction="fwd",
-        )
-
-    def set_grad(self):
-        self._ensure_in_context("set_grad")
-        self._grad_enabled = True
-
-    def get_grad(self):
-        self._ensure_in_context("get_grad")
-        return self._grad_enabled
-
-    def set_grad_enabled(self, grad_enabled: bool):
-        self._ensure_in_context("set_grad_enabled")
-        self._grad_enabled = grad_enabled
+        handle = self._module.stop(key)
+        self._handles.append(handle)
 
 
 class HookedModule(TensorDictModule):
+    def __init__(self, *args, hooking_context: Optional["HookingContext"] = None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._hooking_context = hooking_context
+
     def run(
         self,
         data: TensorDict,
         cache: Optional[TensorDict] = None,
         run_name: Optional[str] = None,
+        run_sep: Optional[str] = None,
         run_cache: Optional[TensorDict] = None,
         grad_enabled: bool = False,
+        run_callback: Optional[Callable] = None,
     ) -> HookedModuleRun:
-        return HookedModuleRun(self, data, cache, run_name, run_cache, grad_enabled)
+        return HookedModuleRun(self, data, cache, run_name, run_sep, run_cache, grad_enabled, run_callback)
+
+    def _resolve_submodule_path(self, key: str):
+        """
+        Resolve a submodule path that may contain indexing expressions.
+
+        Supports any valid Python attribute access and indexing:
+        - "layers[-1]" -> self.layers[-1]
+        - "layers['attr']" -> self.layers['attr']
+        - "layers.attention" -> self.layers.attention
+        - "layers[1:3]" -> self.layers[1:3]
+        """
+        if key == "":
+            return self
+
+        # Create a safe environment with only the current module
+        safe_dict = {"self": self}
+
+        try:
+            # Evaluate the expression in the safe environment
+            return eval(f"self.{key}", {"__builtins__": {}}, safe_dict)
+        except (AttributeError, IndexError, KeyError, SyntaxError) as e:
+            raise ValueError(f"Invalid submodule path '{key}': {e}")
 
     def register_submodule_hook(
         self,
         key: str,
         hook: Callable,
-        direction: Literal["fwd", "bwd", "fwd_pre", "bwd_pre"],
+        direction: HookDirection,
         prepend: bool = False,
-        with_kwargs: bool = False,
     ):
-        submodule = self
-        if key != "":
-            for subname in key.split("."):
-                submodule = getattr(submodule, subname)
-        return register_hook_to_module(submodule, hook, direction, prepend, with_kwargs)
+        submodule = self._resolve_submodule_path(key)
+        if isinstance(submodule, nn.ModuleList):
+            warnings.warn(f"You are hooking a ModuleList ({key}), which will never be executed.")
+        return register_hook_to_module(submodule, hook, direction, prepend)
+
+    def set(
+        self,
+        module_key: str,
+        value: Any,
+        callback: Optional[Callable] = None,
+        direction: HookDirection = "fwd",
+        prepend: bool = False,
+    ) -> RemovableHandle:
+        handle = self.register_submodule_hook(
+            key=module_key,
+            hook=HookFactory.make_setting_hook(value, callback=callback, direction=direction),
+            direction=direction,
+            prepend=prepend,
+        )
+        return handle
+
+    def get(
+        self,
+        cache: TensorDict,
+        module_key: str,
+        cache_key: Optional[str] = None,
+        callback: Optional[Callable] = None,
+        direction: HookDirection = "fwd",
+        prepend: bool = False,
+    ) -> Tuple[RemovableHandle, CacheProxy]:
+        cache_key = cache_key or f"{module_key}_{DIRECTION_TO_TYPE[direction]}"
+        proxy = CacheProxy(cache_key, cache)
+        handle = self.register_submodule_hook(
+            key=module_key,
+            hook=HookFactory.make_caching_hook(cache_key, cache, callback=callback, direction=direction),
+            direction=direction,
+            prepend=prepend,
+        )
+        return handle, proxy
+
+    def set_input(self, *args, **kwargs):
+        kwargs["direction"] = "fwd_pre"
+        return self.set(*args, **kwargs)
+
+    def get_input(self, *args, **kwargs):
+        kwargs["direction"] = "fwd_pre"
+        return self.get(*args, **kwargs)
+
+    def set_grad(self, *args, **kwargs):
+        kwargs["direction"] = "bwd"
+        return self.set(*args, **kwargs)
+
+    def get_grad(self, *args, **kwargs):
+        kwargs["direction"] = "bwd"
+        return self.get(*args, **kwargs)
+
+    def set_grad_output(self, *args, **kwargs):
+        kwargs["direction"] = "bwd_pre"
+        return self.set(*args, **kwargs)
+
+    def get_grad_output(self, *args, **kwargs):
+        kwargs["direction"] = "bwd_pre"
+        return self.get(*args, **kwargs)
+
+    def stop(self, key: str) -> None:
+        handle = self.register_submodule_hook(
+            key=key,
+            hook=HookFactory.make_stopping_hook(key),
+            direction="fwd",
+        )
+        return handle
+
+    def forward(self, *args, **kwargs):
+        if self._hooking_context is not None and not self._hooking_context._in_context:
+            raise RuntimeError("Contextual HookedModule must be called in context")
+        return super().forward(*args, **kwargs)
+
+    @contextmanager
+    def disable_context_hooks(self):
+        if self._hooking_context is None:
+            raise RuntimeError("No hooking context provided to this module")
+        with self._hooking_context.disable_hooks():
+            yield
+
+    @contextmanager
+    def disable_context(self):
+        if self._hooking_context is None:
+            raise RuntimeError("No hooking context provided to this module")
+        with self._hooking_context.disable() as raw_module:
+            yield raw_module
