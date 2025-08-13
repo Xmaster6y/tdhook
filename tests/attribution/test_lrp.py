@@ -204,7 +204,9 @@ class TestRules:
 
         original_output = tdhook_module(tdhook_input)
 
-        lrp = LRP(rule_mapper=tdhook_mapper, init_grad=lambda _: out_relevance)
+        lrp = LRP(
+            rule_mapper=tdhook_mapper, init_grad=lambda _: out_relevance, skip_modules=LRP.skip_root_and_modulelist
+        )
         with lrp.prepare(tdhook_module) as hooked_module:
             tdhook_output = hooked_module(TensorDict({"input": tdhook_input}))
             tdhook_in_relevance = tdhook_output.get("input_attr")

@@ -18,25 +18,25 @@ DIRECTION_TO_PARAMS = {
     "fwd": ("module", "args", "output"),
     "bwd": ("module", "grad_input", "grad_output"),
     "fwd_pre": ("module", "args"),
-    "bwd_pre": ("module", "grad_input"),
+    "bwd_pre": ("module", "grad_output"),
     "fwd_kwargs": ("module", "args", "kwargs", "output"),
     "fwd_pre_kwargs": ("module", "args", "kwargs"),
 }
 
 DIRECTION_TO_RETURN = {
     "fwd": "output",
-    "bwd": "grad_output",
+    "bwd": "grad_input",
     "fwd_pre": "args",
-    "bwd_pre": "grad_input",
+    "bwd_pre": "grad_output",
     "fwd_kwargs": "output",
     "fwd_pre_kwargs": "args",
 }
 
 DIRECTION_TO_TYPE = {
     "fwd": "output",
-    "bwd": "grad",
+    "bwd": "grad_input",
     "fwd_pre": "input",
-    "bwd_pre": "grad_input",
+    "bwd_pre": "grad_output",
     "fwd_kwargs": "output",
     "fwd_pre_kwargs": "input",
 }
@@ -200,6 +200,8 @@ class HookFactory:
                 value = callback(**dict(zip(params, args)), key=key)
             else:
                 value = args[value_index]
+            if isinstance(value, tuple):
+                raise RuntimeError("Tuple values are not supported for caching, use a `callback` to return a tensor")
             cache[key] = value
 
         return hook
@@ -220,10 +222,15 @@ class HookFactory:
 
         def hook(*args):
             nonlocal value, callback
+            original_type = type(value)
             if isinstance(value, CacheProxy):
                 value = value.resolve()
             if callback is not None:
                 value = callback(**dict(zip(params, args)), value=value)
+            if type(value) is not original_type:
+                raise RuntimeError(
+                    f"Callback returned a value of type {type(value)} but the original value was of type {original_type}"
+                )
             return value
 
         return hook

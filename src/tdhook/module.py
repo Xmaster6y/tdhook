@@ -30,8 +30,8 @@ class HookedModuleRun:
         module: "HookedModule",
         data: TensorDict,
         cache: Optional[TensorDict] = None,
-        run_name: str = "run",
-        run_sep: str = ".",
+        run_name: Optional[str] = None,
+        run_sep: Optional[str] = None,
         run_cache: Optional[TensorDict] = None,
         grad_enabled: bool = False,
         run_callback: Optional[Callable] = None,
@@ -39,8 +39,8 @@ class HookedModuleRun:
         self._module = module
         self._data = data
         self._outer_cache = cache
-        self._name = run_name
-        self._sep = run_sep
+        self._name = run_name or "run"
+        self._sep = run_sep or "."
         self._cache = run_cache or TensorDict()
         self._grad_enabled = grad_enabled
         self._run_callback = run_callback or (lambda module, data: module(data))
@@ -119,7 +119,7 @@ class HookedModuleRun:
         callback: Optional[Callable] = None,
         direction: HookDirection = "fwd",
         prepend: bool = False,
-    ) -> None:
+    ) -> CacheProxy:
         self._ensure_in_context("save")
         cache_key = cache_key or f"{self._name + self._sep + key}_{DIRECTION_TO_TYPE[direction]}"
         handle, proxy = self._module.get(
@@ -132,51 +132,48 @@ class HookedModuleRun:
         self._ensure_in_context("set_grad")
         self._grad_enabled = True
         kwargs["direction"] = "bwd"
-        self.set("grad", *args, **kwargs)
+        self.set(*args, **kwargs)
 
     def get_grad(self, *args, **kwargs):
         self._ensure_in_context("get_grad")
         self._grad_enabled = True
         kwargs["direction"] = "bwd"
-        return self.get("grad", *args, **kwargs)
+        return self.get(*args, **kwargs)
 
     def save_grad(self, *args, **kwargs):
         self._ensure_in_context("save_grad")
         self._grad_enabled = True
         kwargs["direction"] = "bwd"
-        return self.save("grad", *args, **kwargs)
+        return self.save(*args, **kwargs)
 
     def set_input(self, *args, **kwargs):
         kwargs["direction"] = "fwd_pre"
-        self.set("input", *args, **kwargs)
+        self.set(*args, **kwargs)
 
     def get_input(self, *args, **kwargs):
         kwargs["direction"] = "fwd_pre"
-        return self.get("input", *args, **kwargs)
+        return self.get(*args, **kwargs)
 
     def save_input(self, *args, **kwargs):
         kwargs["direction"] = "fwd_pre"
-        return self.save("input", *args, **kwargs)
+        return self.save(*args, **kwargs)
 
-    def set_grad_input(self, *args, **kwargs):
+    def set_grad_output(self, *args, **kwargs):
         kwargs["direction"] = "bwd_pre"
-        self.set("grad_input", *args, **kwargs)
+        self.set(*args, **kwargs)
 
-    def get_grad_input(self, *args, **kwargs):
-        kwargs["direction"] = "bwd"
-        return self.get("grad_input", *args, **kwargs)
-
-    def save_grad_input(self, *args, **kwargs):
+    def get_grad_output(self, *args, **kwargs):
         kwargs["direction"] = "bwd_pre"
-        return self.save("grad_input", *args, **kwargs)
+        return self.get(*args, **kwargs)
+
+    def save_grad_output(self, *args, **kwargs):
+        kwargs["direction"] = "bwd_pre"
+        return self.save(*args, **kwargs)
 
     def stop(self, key: str) -> None:
         self._ensure_in_context("stop")
         handle = self._module.stop(key)
         self._handles.append(handle)
-
-
-# TODO: test API against nnsight
 
 
 class HookedModule(TensorDictModule):
@@ -189,10 +186,12 @@ class HookedModule(TensorDictModule):
         data: TensorDict,
         cache: Optional[TensorDict] = None,
         run_name: Optional[str] = None,
+        run_sep: Optional[str] = None,
         run_cache: Optional[TensorDict] = None,
         grad_enabled: bool = False,
+        run_callback: Optional[Callable] = None,
     ) -> HookedModuleRun:
-        return HookedModuleRun(self, data, cache, run_name, run_cache, grad_enabled)
+        return HookedModuleRun(self, data, cache, run_name, run_sep, run_cache, grad_enabled, run_callback)
 
     def _resolve_submodule_path(self, key: str):
         """
@@ -265,27 +264,27 @@ class HookedModule(TensorDictModule):
 
     def set_input(self, *args, **kwargs):
         kwargs["direction"] = "fwd_pre"
-        self.set("input", *args, **kwargs)
+        return self.set(*args, **kwargs)
 
     def get_input(self, *args, **kwargs):
-        kwargs["direction"] = "fwd"
-        return self.get("input", *args, **kwargs)
+        kwargs["direction"] = "fwd_pre"
+        return self.get(*args, **kwargs)
 
     def set_grad(self, *args, **kwargs):
         kwargs["direction"] = "bwd"
-        self.set("grad", *args, **kwargs)
+        return self.set(*args, **kwargs)
 
     def get_grad(self, *args, **kwargs):
         kwargs["direction"] = "bwd"
-        return self.get("grad", *args, **kwargs)
+        return self.get(*args, **kwargs)
 
-    def set_grad_input(self, *args, **kwargs):
+    def set_grad_output(self, *args, **kwargs):
         kwargs["direction"] = "bwd_pre"
-        self.set("grad_input", *args, **kwargs)
+        return self.set(*args, **kwargs)
 
-    def get_grad_input(self, *args, **kwargs):
-        kwargs["direction"] = "bwd"
-        return self.get("grad_input", *args, **kwargs)
+    def get_grad_output(self, *args, **kwargs):
+        kwargs["direction"] = "bwd_pre"
+        return self.get(*args, **kwargs)
 
     def stop(self, key: str) -> None:
         handle = self.register_submodule_hook(

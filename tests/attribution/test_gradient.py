@@ -56,7 +56,7 @@ class TestGradientAttribution:
     def test_saliency(self, factory, absolute):
         get_module, input_shape = factory
         module = get_module(seed=0)
-        input_data = torch.randn(input_shape)
+        input_data = torch.randn(input_shape, requires_grad=True)
 
         captum_attributor = CaptumSaliency(module)
         attributions = captum_attributor.attribute(input_data, abs=absolute)
@@ -77,7 +77,7 @@ class TestGradientAttribution:
     def test_input_x_gradient(self, factory):
         get_module, input_shape = factory
         module = get_module(seed=0)
-        input_data = torch.randn(input_shape)
+        input_data = torch.randn(input_shape, requires_grad=True)
 
         captum_attributor = CaptumInputXGradient(module)
         attributions = captum_attributor.attribute(input_data)
