@@ -5,14 +5,14 @@ GPT2 cache task.
 import torch
 
 impact_parameters = {
-    "model_size": ["gpt2", "gpt2-medium", "gpt2-large", "gpt2-xl"],
-    "batch_size": [100, 1000, 10_000, 100_000],
-    "variations": ["all", "specific"],
+    "model_size": ["gpt2", "gpt2-medium", "gpt2-large"],
+    "batch_size": [10, 50, 100, 500],
+    "variation": ["all"],
 }
 default_parameters = {
     "model_size": "gpt2",
-    "batch_size": 1000,
-    "variations": "all",
+    "batch_size": 50,
+    "variation": "all",
 }
 
 

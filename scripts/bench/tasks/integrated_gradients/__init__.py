@@ -8,7 +8,7 @@ import torch
 impact_parameters = {
     "width": [100, 1000, 5_000, 10_000],
     "height": [5, 10, 20, 50],
-    "batch_size": [100, 1000, 10_000, 100_000],
+    "batch_size": [10, 100, 10_00, 50_00],
     "variation": ["multiply", "no-multiply"],
 }
 default_parameters = {
