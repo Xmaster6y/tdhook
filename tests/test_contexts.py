@@ -4,14 +4,13 @@ Tests for the contexts functionality.
 
 import torch
 from tensordict import TensorDict
+from tensordict.nn import TensorDictModule
+
+import pytest
 
 from tdhook.contexts import HookingContextFactory, CompositeHookingContextFactory
 from tdhook.module import HookedModule
 from tdhook.hooks import MultiHookHandle
-
-import pytest
-
-from tensordict.nn import TensorDictModule
 
 
 class Context1(HookingContextFactory):

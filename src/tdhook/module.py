@@ -3,9 +3,9 @@ HookedModule
 """
 
 from torch.utils.hooks import RemovableHandle
-from tensordict.nn import TensorDictModule
+from tensordict.nn import TensorDictModule, TensorDictModuleWrapper
 from tensordict import TensorDict
-from typing import Callable, Any, Optional, Tuple, TYPE_CHECKING
+from typing import Callable, Any, Optional, Tuple, TYPE_CHECKING, List
 import torch
 import warnings
 import torch.nn as nn
@@ -176,10 +176,23 @@ class HookedModuleRun:
         self._handles.append(handle)
 
 
-class HookedModule(TensorDictModule):
-    def __init__(self, *args, hooking_context: Optional["HookingContext"] = None, **kwargs):
-        super().__init__(*args, **kwargs)
+class HookedModule(TensorDictModuleWrapper):
+    def __init__(self, td_module: TensorDictModule, hooking_context: Optional["HookingContext"] = None):
+        super().__init__(td_module)
         self._hooking_context = hooking_context
+
+    @classmethod
+    def from_module(
+        cls,
+        module: Callable,
+        in_keys: List[str],
+        out_keys: List[str],
+        *,
+        hooking_context: Optional["HookingContext"] = None,
+        **kwargs,
+    ) -> "HookedModule":
+        td_module = TensorDictModule(module, in_keys, out_keys, **kwargs)
+        return cls(td_module, hooking_context=hooking_context)
 
     def run(
         self,

@@ -10,6 +10,7 @@ from tensordict import TensorDict
 import re
 from torch.utils.hooks import RemovableHandle
 from torch import nn
+import torch
 
 
 HookDirection = Literal["fwd", "bwd", "fwd_pre", "bwd_pre", "fwd_kwargs", "fwd_pre_kwargs"]
@@ -31,6 +32,8 @@ DIRECTION_TO_RETURN = {
     "fwd_kwargs": "output",
     "fwd_pre_kwargs": "args",
 }
+
+DIRECTION_TO_RETURN_INDEX = {k: v.index(DIRECTION_TO_RETURN[k]) for k, v in DIRECTION_TO_PARAMS.items()}
 
 DIRECTION_TO_TYPE = {
     "fwd": "output",
@@ -113,11 +116,12 @@ class MultiHookHandle:
 
 
 class MultiHookManager:
-    def __init__(self, pattern: Optional[str] = None):
+    def __init__(self, pattern: Optional[str] = None, relative: bool = False):
         if pattern is None:
             pattern = r"a^"  # match nothing by default
         self._pattern = pattern
         self._reg_exp = re.compile(pattern)
+        self._relative = relative
 
     @property
     def pattern(self) -> str:
@@ -140,6 +144,13 @@ class MultiHookManager:
         """Register the hook to the module."""
         handles = []
         for name, module in module.named_modules():
+            if self._relative:
+                if name.startswith("td_module"):
+                    name = name[len("td_module") :].lstrip(".")
+                if name.startswith("module"):
+                    name = name[len("module") :].lstrip(".")
+                if name == "":
+                    continue
             if self._reg_exp.match(name):
                 handles.append(register_hook_to_module(module, hook_factory(name), direction, prepend))
         return MultiHookHandle(handles)
@@ -208,8 +219,10 @@ class HookFactory:
                 value = callback(**dict(zip(params, args)), key=key)
             else:
                 value = args[value_index]
-            if isinstance(value, tuple):
-                raise RuntimeError("Tuple values are not supported for caching, use a `callback` to return a tensor")
+            if not isinstance(value, torch.Tensor):
+                raise RuntimeError(
+                    f"{type(value)} values are not supported for caching, use a `callback` to return a tensor"
+                )
             cache[key] = value
 
         return hook
@@ -226,11 +239,12 @@ class HookFactory:
             raise ValueError(f"Invalid direction: {direction}")
 
         params = DIRECTION_TO_PARAMS[direction]
+        return_index = DIRECTION_TO_RETURN_INDEX[direction]
         HookFactory._check_callback_signature(callback, set(params))
 
         def hook(*args):
-            nonlocal value, callback
-            original_type = type(value)
+            nonlocal value, callback, params, return_index
+            original_type = type(args[return_index])
             if isinstance(value, CacheProxy):
                 value = value.resolve()
             if callback is not None:

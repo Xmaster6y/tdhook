@@ -16,14 +16,14 @@ class TestHookedModule:
 
     def test_hooked_module_creation(self, default_test_model):
         """Test creating a HookedModule from a regular model."""
-        hooked_module = HookedModule(default_test_model, in_keys=["input"], out_keys=["output"])
+        hooked_module = HookedModule.from_module(default_test_model, in_keys=["input"], out_keys=["output"])
         td_output = hooked_module(TensorDict({"input": torch.randn(2, 3, 10)}, batch_size=[2, 3]))
         assert td_output["output"].shape == (2, 3, 5)
         assert torch.allclose(td_output["output"], default_test_model(td_output["input"]))
 
     def test_hooked_module_run(self, default_test_model):
         """Test creating a HookedModuleRun."""
-        hooked_module = HookedModule(default_test_model, in_keys=["input"], out_keys=["output"])
+        hooked_module = HookedModule.from_module(default_test_model, in_keys=["input"], out_keys=["output"])
         data = TensorDict({"input": torch.randn(2, 10)}, batch_size=[2])
 
         with hooked_module.run(data):
@@ -33,7 +33,7 @@ class TestHookedModule:
 
     def test_cache_proxy(self, default_test_model):
         """Test the CacheProxy class."""
-        hooked_module = HookedModule(default_test_model, in_keys=["input"], out_keys=["output"])
+        hooked_module = HookedModule.from_module(default_test_model, in_keys=["input"], out_keys=["output"])
         data = TensorDict({"input": torch.randn(2, 10)}, batch_size=[2])
 
         with hooked_module.run(data) as run:
@@ -50,7 +50,7 @@ class TestHookedModuleGetSet:
     def test_get(self, get_model):
         """Test getting a value."""
         nnsight_model = NNsight(get_model())
-        hooked_module = HookedModule(get_model(), in_keys=["input"], out_keys=["output"])
+        hooked_module = HookedModule.from_module(get_model(), in_keys=["input"], out_keys=["output"])
         input_data = torch.randn(2, 10)
 
         with nnsight_model.trace(input_data):
@@ -78,7 +78,7 @@ class TestHookedModuleGetSet:
         """Test setting a value."""
 
         nnsight_model = NNsight(get_model())
-        hooked_module = HookedModule(get_model(), in_keys=["input"], out_keys=["output"])
+        hooked_module = HookedModule.from_module(get_model(), in_keys=["input"], out_keys=["output"])
         input_data = torch.randn(2, 10)
         intervention_data = torch.randn(2, 20)
 
@@ -106,7 +106,7 @@ class TestHookedModuleGetSet:
     def test_get_input(self, get_model):
         """Test getting and saving input (pre-forward) values."""
         nnsight_model = NNsight(get_model())
-        hooked_module = HookedModule(get_model(), in_keys=["input"], out_keys=["output"])
+        hooked_module = HookedModule.from_module(get_model(), in_keys=["input"], out_keys=["output"])
         input_data = torch.randn(2, 10)
 
         with nnsight_model.trace(input_data):
@@ -132,7 +132,7 @@ class TestHookedModuleGetSet:
     def test_set_input(self, get_model):
         """Test setting input via pre-forward hook."""
         nnsight_model = NNsight(get_model())
-        hooked_module = HookedModule(get_model(), in_keys=["input"], out_keys=["output"])
+        hooked_module = HookedModule.from_module(get_model(), in_keys=["input"], out_keys=["output"])
         input_data = torch.randn(2, 10)
         intervention_input = torch.randn(2, 20)
 
@@ -161,7 +161,7 @@ class TestHookedModuleGetSet:
     def test_get_grad(self, get_model):
         """Test getting and saving grad (backward) values."""
         nnsight_model = NNsight(get_model())
-        hooked_module = HookedModule(get_model(), in_keys=["input"], out_keys=["output"])
+        hooked_module = HookedModule.from_module(get_model(), in_keys=["input"], out_keys=["output"])
         input_data = torch.randn(2, 10, requires_grad=True)
 
         with nnsight_model.trace(input_data):
@@ -204,7 +204,7 @@ class TestHookedModuleGetSet:
     def test_set_grad(self, get_model):
         """Test setting backward gradients to zero stops upstream grads."""
         model = get_model()
-        hooked_module = HookedModule(model, in_keys=["input"], out_keys=["output"])
+        hooked_module = HookedModule.from_module(model, in_keys=["input"], out_keys=["output"])
         input_data = torch.randn(2, 10, requires_grad=True)
 
         td = TensorDict({"input": input_data.clone().detach().requires_grad_(True)})
@@ -237,7 +237,7 @@ class TestHookedModuleGetSet:
     def test_get_grad_output(self, get_model):
         """Test getting and saving grad_input (backward pre-hook) values."""
         nnsight_model = NNsight(get_model())
-        hooked_module = HookedModule(get_model(), in_keys=["input"], out_keys=["output"])
+        hooked_module = HookedModule.from_module(get_model(), in_keys=["input"], out_keys=["output"])
         input_data = torch.randn(2, 10, requires_grad=True)
 
         with nnsight_model.trace(input_data):
@@ -278,7 +278,7 @@ class TestHookedModuleGetSet:
 
     def test_set_grad_output(self, get_model):
         model = get_model()
-        hooked_module = HookedModule(model, in_keys=["input"], out_keys=["output"])
+        hooked_module = HookedModule.from_module(model, in_keys=["input"], out_keys=["output"])
         input_data = torch.randn(2, 10, requires_grad=True)
 
         # Baseline: compute grad for linear1.weight
@@ -317,7 +317,7 @@ class TestHookedModuleGetSet:
 
 class TestStopAndErrors:
     def test_stop_prevents_later_layers(self, get_model):
-        hooked_module = HookedModule(get_model(), in_keys=["input"], out_keys=["output"])
+        hooked_module = HookedModule.from_module(get_model(), in_keys=["input"], out_keys=["output"])
         input_data = torch.randn(2, 10)
 
         called = False
@@ -335,7 +335,7 @@ class TestStopAndErrors:
         assert not called
 
     def test_run_methods_outside_context_raise(self, get_model):
-        hooked_module = HookedModule(get_model(), in_keys=["input"], out_keys=["output"])
+        hooked_module = HookedModule.from_module(get_model(), in_keys=["input"], out_keys=["output"])
         td = TensorDict({"input": torch.randn(2, 10)})
         run = hooked_module.run(td)
 
@@ -347,7 +347,7 @@ class TestStopAndErrors:
             run.set("module.linear2", torch.randn(2, 20))
 
     def test_invalid_submodule_path_raises(self, get_model):
-        hooked_module = HookedModule(get_model(), in_keys=["input"], out_keys=["output"])
+        hooked_module = HookedModule.from_module(get_model(), in_keys=["input"], out_keys=["output"])
         cache = TensorDict()
         with pytest.raises(ValueError):
             hooked_module.get(cache, "module.missing")
@@ -355,7 +355,7 @@ class TestStopAndErrors:
             hooked_module.set("module.missing", torch.randn(2, 20))
 
     def test_invalid_direction_raises(self, get_model):
-        hooked_module = HookedModule(get_model(), in_keys=["input"], out_keys=["output"])
+        hooked_module = HookedModule.from_module(get_model(), in_keys=["input"], out_keys=["output"])
         cache = TensorDict()
         with pytest.raises((KeyError, ValueError)):
             hooked_module.get(cache, "module.linear2", direction="invalid")
@@ -363,7 +363,7 @@ class TestStopAndErrors:
             hooked_module.set("module.linear2", torch.randn(2, 20), direction="invalid")
 
     def test_callback_signature_mismatch_raises(self, get_model):
-        hooked_module = HookedModule(get_model(), in_keys=["input"], out_keys=["output"])
+        hooked_module = HookedModule.from_module(get_model(), in_keys=["input"], out_keys=["output"])
         cache = TensorDict()
         # fwd_pre expects (module, args); missing 'args' -> error
         with pytest.raises(ValueError):
@@ -373,7 +373,7 @@ class TestStopAndErrors:
             hooked_module.get(cache, "module.linear2", direction="bwd", callback=lambda module: None)
 
     def test_tuple_caching_without_callback_raises(self, get_model):
-        hooked_module = HookedModule(get_model(), in_keys=["input"], out_keys=["output"])
+        hooked_module = HookedModule.from_module(get_model(), in_keys=["input"], out_keys=["output"])
         td = TensorDict({"input": torch.randn(2, 10)})
         cache = TensorDict()
         handle, _ = hooked_module.get(cache, "module.linear2", direction="fwd_pre")
@@ -384,7 +384,7 @@ class TestStopAndErrors:
 
 class TestAdditionalCoverage:
     def test_run_cache_setter_and_exception_path(self, get_model):
-        hooked_module = HookedModule(get_model(), in_keys=["input"], out_keys=["output"])
+        hooked_module = HookedModule.from_module(get_model(), in_keys=["input"], out_keys=["output"])
         td = TensorDict({"input": torch.randn(2, 10)})
         outer_cache = TensorDict()
         # exercise cache setter (line 62)
@@ -408,13 +408,13 @@ class TestAdditionalCoverage:
                 return self.linear_out(x)
 
         m = WithList()
-        hm = HookedModule(m, in_keys=["input"], out_keys=["output"])
+        hm = HookedModule.from_module(m, in_keys=["input"], out_keys=["output"])
         with pytest.warns(UserWarning):
             handle = hm.register_submodule_hook("module.layers", lambda module, args, output: output, direction="fwd")
             handle.remove()
 
     def test_module_wrappers_shortcuts(self, get_model):
-        hooked_module = HookedModule(get_model(), in_keys=["input"], out_keys=["output"])
+        hooked_module = HookedModule.from_module(get_model(), in_keys=["input"], out_keys=["output"])
         x = torch.randn(2, 10, requires_grad=True)
         cache = TensorDict()
         h_in, _ = hooked_module.get_input(cache, "module.linear2", callback=lambda **kw: kw["args"][0])
@@ -426,7 +426,7 @@ class TestAdditionalCoverage:
 
     def test_set_get_grad_output_wrappers(self, get_model):
         model = get_model()
-        hooked_module = HookedModule(model, in_keys=["input"], out_keys=["output"])
+        hooked_module = HookedModule.from_module(model, in_keys=["input"], out_keys=["output"])
         x = torch.randn(2, 10, requires_grad=True)
         h_set = hooked_module.set_grad_output("module.linear2", (torch.zeros(2, 20),))
         cache = TensorDict()
@@ -439,12 +439,14 @@ class TestAdditionalCoverage:
     def test_forward_guard_and_context_managers(self, get_model):
         # forward() guard (line 302)
         dummy_ctx = type("C", (), {"_in_context": False})()
-        hm_guard = HookedModule(get_model(), in_keys=["input"], out_keys=["output"], hooking_context=dummy_ctx)
+        hm_guard = HookedModule.from_module(
+            get_model(), in_keys=["input"], out_keys=["output"], hooking_context=dummy_ctx
+        )
         with pytest.raises(RuntimeError):
             hm_guard(TensorDict({"input": torch.randn(1, 10)}))
 
         # disable_context_hooks without context (307-310) and disable_context without context (315)
-        hm = HookedModule(get_model(), in_keys=["input"], out_keys=["output"])
+        hm = HookedModule.from_module(get_model(), in_keys=["input"], out_keys=["output"])
         with pytest.raises(RuntimeError):
             with hm.disable_context_hooks():
                 pass

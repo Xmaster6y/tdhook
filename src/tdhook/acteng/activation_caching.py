@@ -2,12 +2,11 @@
 Activation caching
 """
 
-from typing import Callable, Optional, Generator, List
-from contextlib import contextmanager
+from typing import Callable, Optional, List
 
-from torch import nn
 from tensordict import TensorDict
 
+from tdhook.module import HookedModule
 from tdhook.contexts import HookingContextFactory
 from tdhook.hooks import MultiHookManager, HookFactory, HookDirection, MultiHookHandle
 
@@ -16,6 +15,7 @@ class ActivationCaching(HookingContextFactory):
     def __init__(
         self,
         key_pattern: str,
+        relative: bool = False,
         cache: Optional[TensorDict] = None,
         callback: Optional[Callable] = None,
         directions: Optional[List[HookDirection]] = None,
@@ -23,7 +23,7 @@ class ActivationCaching(HookingContextFactory):
         self.cache = cache or TensorDict()
 
         self._key_pattern = key_pattern
-        self._hook_manager = MultiHookManager(key_pattern)
+        self._hook_manager = MultiHookManager(key_pattern, relative=relative)
         self._callback = callback
         self._directions = directions or ["fwd"]
 
@@ -36,8 +36,7 @@ class ActivationCaching(HookingContextFactory):
         self._key_pattern = key_pattern
         self._hook_manager.pattern = key_pattern
 
-    @contextmanager
-    def _hook_module(self, module: nn.Module) -> Generator[None, None, None]:
+    def _hook_module(self, module: HookedModule) -> MultiHookHandle:
         def hook_factory(name: str, direction: HookDirection) -> Callable:
             nonlocal self
             return HookFactory.make_caching_hook(name, self.cache, direction=direction, callback=self._callback)
@@ -50,5 +49,4 @@ class ActivationCaching(HookingContextFactory):
                 )
             )
 
-        with MultiHookHandle(handles):
-            yield
+        return MultiHookHandle(handles)

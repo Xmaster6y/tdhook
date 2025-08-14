@@ -104,9 +104,9 @@ class GradientAttributionWithBaseline(GradientAttribution):
         self, prep_module: nn.Module, in_keys: List[str], out_keys: List[str], hooking_context: HookingContext
     ):
         hooked_module = super()._spawn_hooked_module(prep_module, in_keys, out_keys, hooking_context)
-        hooked_module.in_keys = in_keys + [f"{in_key}_baseline" for in_key in in_keys]
+        hooked_module.td_module.in_keys = in_keys + [f"{in_key}_baseline" for in_key in in_keys]
         if self._compute_convergence_delta:
-            hooked_module._out_keys = hooked_module._out_keys + ["convergence_delta"]
+            hooked_module.td_module._out_keys = hooked_module.td_module._out_keys + ["convergence_delta"]
         return hooked_module
 
     def _hook_module(self, module: HookedModule) -> MultiHookHandle:

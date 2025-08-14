@@ -37,7 +37,7 @@ def prepare(
     """Prepare the model and input data."""
     model = MLP(height=height, width=width).to("cuda" if use_cuda else "cpu")
     input_data = torch.randn(batch_size, width).to("cuda" if use_cuda else "cpu")
-    return HookedModule(model, in_keys=["input"], out_keys=["output"]), input_data
+    return HookedModule.from_module(model, in_keys=["input"], out_keys=["output"]), input_data
 
 
 def run(

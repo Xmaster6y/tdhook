@@ -28,7 +28,7 @@ def prepare(
     sentences = ["Hello, world!"] * batch_size
     input_data = tokenizer(sentences, return_tensors="pt")
     input_data = {k: v.to("cuda" if use_cuda else "cpu") for k, v in input_data.items()}
-    return HookedModule(model, in_keys={k: k for k in input_data.keys()}, out_keys=["output"]), input_data
+    return HookedModule.from_module(model, in_keys={k: k for k in input_data.keys()}, out_keys=["output"]), input_data
 
 
 def run(
@@ -43,7 +43,7 @@ def run(
             return kwargs["output"][0]
         return kwargs["output"]
 
-    context = ActivationCaching(key_pattern="^(?!(module)?(\\.transformer)?$).*", callback=callback)
+    context = ActivationCaching(key_pattern="^(?!transformer$).*", callback=callback, relative=True)
     with context._hook_module(model):
         shuttle = TensorDict(input_data)
         model(shuttle)

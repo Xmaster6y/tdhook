@@ -16,6 +16,7 @@ class LinearProbing(HookingContextFactory):
         self,
         key_pattern: str,
         probe_factory: Callable[[str, str], Callable],
+        relative: bool = False,
         cache: Optional[TensorDict] = None,
         preprocess: Optional[Callable] = None,
         directions: Optional[List[HookDirection]] = None,
@@ -23,7 +24,7 @@ class LinearProbing(HookingContextFactory):
         self.cache = cache or TensorDict()
 
         self._key_pattern = key_pattern
-        self._hook_manager = MultiHookManager(key_pattern)
+        self._hook_manager = MultiHookManager(key_pattern, relative=relative)
         self._probe_factory = probe_factory
         self._preprocess = preprocess
         self._directions = directions or ["fwd"]
