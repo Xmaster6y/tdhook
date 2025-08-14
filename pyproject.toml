@@ -7,7 +7,7 @@ license = {file = "LICENSE"}
 authors = [
     {name = "Yoann Poupart", email = "yoann.poupart@ens-lyon.org"},
 ]
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 dependencies = [
     "tensordict>=0.9.1",
     "torch>=2.7.1",
@@ -16,6 +16,7 @@ classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Science/Research",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
 ]

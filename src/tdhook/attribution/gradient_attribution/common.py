@@ -68,7 +68,7 @@ class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
 
     def _output_backward_hook(self, module, args, output):
         if self._init_target is not None:
-            target = self._init_target(output)
+            target = self._init_target(output)  # TODO: pass kwargs to init_target (e.g. labels)
         else:
             target = output
         if self._init_grad is not None:

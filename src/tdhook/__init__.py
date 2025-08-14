@@ -2,7 +2,7 @@
 tdhook
 """
 
-__version__ = "0.1.1"
+__version__ = "0.1.1"  # TODO: use metadata instead
 
 __all__ = [
     # Core
