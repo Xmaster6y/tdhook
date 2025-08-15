@@ -20,7 +20,7 @@ class ActivationCaching(HookingContextFactory):
         callback: Optional[Callable] = None,
         directions: Optional[List[HookDirection]] = None,
     ):
-        self.cache = cache or TensorDict()
+        self._cache = TensorDict() if cache is None else cache
 
         self._key_pattern = key_pattern
         self._hook_manager = MultiHookManager(key_pattern, relative=relative)
@@ -39,7 +39,7 @@ class ActivationCaching(HookingContextFactory):
     def _hook_module(self, module: HookedModule) -> MultiHookHandle:
         def hook_factory(name: str, direction: HookDirection) -> Callable:
             nonlocal self
-            return HookFactory.make_caching_hook(name, self.cache, direction=direction, callback=self._callback)
+            return HookFactory.make_caching_hook(name, self._cache, direction=direction, callback=self._callback)
 
         handles = []
         for direction in self._directions:

@@ -12,6 +12,7 @@ from tdhook.hooks import MultiHookManager, HookFactory, HookDirection, MultiHook
 
 
 class LinearProbing(HookingContextFactory):
+    # TODO: refactor to use ActivationCaching and focus on minibatch training
     def __init__(
         self,
         key_pattern: str,
@@ -21,7 +22,7 @@ class LinearProbing(HookingContextFactory):
         preprocess: Optional[Callable] = None,
         directions: Optional[List[HookDirection]] = None,
     ):
-        self.cache = cache or TensorDict()
+        self._cache = TensorDict() if cache is None else cache
 
         self._key_pattern = key_pattern
         self._hook_manager = MultiHookManager(key_pattern, relative=relative)
@@ -53,7 +54,7 @@ class LinearProbing(HookingContextFactory):
                 def callback(**kwargs):
                     return probe(kwargs[DIRECTION_TO_RETURN[direction]])
 
-            return HookFactory.make_caching_hook(name, self.cache, direction=direction, callback=callback)
+            return HookFactory.make_caching_hook(name, self._cache, direction=direction, callback=callback)
 
         handles = []
         for direction in self._directions:

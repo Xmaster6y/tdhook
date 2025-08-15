@@ -41,7 +41,7 @@ class HookedModuleRun:
         self._outer_cache = cache
         self._name = run_name or "run"
         self._sep = run_sep or "."
-        self._cache = run_cache or TensorDict()
+        self._cache = TensorDict() if run_cache is None else run_cache
         self._grad_enabled = grad_enabled
         self._run_callback = run_callback or (lambda module, data: module(data))
 

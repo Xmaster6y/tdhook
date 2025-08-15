@@ -53,6 +53,7 @@ class HookingContext:
         self._handle.remove()
         self._restore(self._module)
         self._in_context = False
+        del self._hooked_module  # TODO: check impact of this
         self._hooked_module = None
         self._handle = None
 
