@@ -19,6 +19,7 @@ class Context1(HookingContextFactory):
             key="module",
             hook=lambda module, args, output: output + 1,
             direction="fwd",
+            relative=False,
         )
         return handle
 
@@ -29,6 +30,7 @@ class Context2(HookingContextFactory):
             key="module",
             hook=lambda module, args, output: output * 2,
             direction="fwd",
+            relative=False,
         )
         return handle
 

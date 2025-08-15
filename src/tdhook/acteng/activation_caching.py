@@ -15,7 +15,7 @@ class ActivationCaching(HookingContextFactory):
     def __init__(
         self,
         key_pattern: str,
-        relative: bool = False,
+        relative: bool = True,
         cache: Optional[TensorDict] = None,
         callback: Optional[Callable] = None,
         directions: Optional[List[HookDirection]] = None,

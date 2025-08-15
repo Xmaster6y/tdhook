@@ -16,7 +16,7 @@ class LinearProbing(HookingContextFactory):
         self,
         key_pattern: str,
         probe_factory: Callable[[str, str], Callable],
-        relative: bool = False,
+        relative: bool = True,
         cache: Optional[TensorDict] = None,
         preprocess: Optional[Callable] = None,
         directions: Optional[List[HookDirection]] = None,

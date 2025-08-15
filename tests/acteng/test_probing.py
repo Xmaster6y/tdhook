@@ -17,7 +17,7 @@ class TestLinearProbing:
         def probe_factory(key, direction):
             return nn.Linear(20, 1)
 
-        context = LinearProbing("td_module\.module\.linear2", probe_factory)
+        context = LinearProbing("td_module\.module\.linear2", probe_factory, relative=False)
         assert isinstance(context, LinearProbing)
 
         inputs = torch.randn(2, 10)

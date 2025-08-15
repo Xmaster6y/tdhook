@@ -40,6 +40,7 @@ class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
                 "module",
                 self._input_grad_hook,
                 direction="fwd_pre",
+                relative=False,
             )
         )
 
@@ -48,6 +49,7 @@ class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
                 "module",
                 self._output_backward_hook,
                 direction="fwd",
+                relative=False,
             )
         )
 
@@ -57,6 +59,7 @@ class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
                     "",
                     self._attr_multiply_hook,
                     direction="fwd",
+                    relative=False,
                 )
             )
 
@@ -117,6 +120,7 @@ class GradientAttributionWithBaseline(GradientAttribution):
                 "",
                 self._assert_batched_hook,
                 direction="fwd_pre",
+                relative=False,
             )
         )
 
@@ -125,6 +129,7 @@ class GradientAttributionWithBaseline(GradientAttribution):
                 "module",
                 self._reduce_baselines_hook,
                 direction="fwd_pre",
+                relative=False,
             )
         )
 
@@ -136,6 +141,7 @@ class GradientAttributionWithBaseline(GradientAttribution):
                     "module",
                     self._convergence_delta_placeholder_hook,
                     direction="fwd",
+                    relative=False,
                 )
             )
 
@@ -144,6 +150,7 @@ class GradientAttributionWithBaseline(GradientAttribution):
                     "",
                     self._compute_convergence_delta_hook,
                     direction="fwd",
+                    relative=False,
                 )
             )
 

@@ -13,7 +13,7 @@ class TestActivationCaching:
     def test_activation_caching_context_creation(self, default_test_model):
         """Test creating a ActivationCaching."""
 
-        context = ActivationCaching("td_module\.module\.linear2")
+        context = ActivationCaching("td_module\.module\.linear2", relative=False)
         assert isinstance(context, ActivationCaching)
 
         inputs = torch.randn(2, 10)

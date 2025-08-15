@@ -206,7 +206,7 @@ class HookedModule(TensorDictModuleWrapper):
     ) -> HookedModuleRun:
         return HookedModuleRun(self, data, cache, run_name, run_sep, run_cache, grad_enabled, run_callback)
 
-    def _resolve_submodule_path(self, key: str):
+    def _resolve_submodule_path(self, key: str, relative: bool = True):
         """
         Resolve a submodule path that may contain indexing expressions.
 
@@ -216,15 +216,20 @@ class HookedModule(TensorDictModuleWrapper):
         - "layers.attention" -> self.layers.attention
         - "layers[1:3]" -> self.layers[1:3]
         """
+        if relative:
+            root = self.td_module.module
+        else:
+            root = self
+
         if key == "":
-            return self
+            return root
 
         # Create a safe environment with only the current module
-        safe_dict = {"self": self}
+        safe_dict = {"root": root}
 
         try:
             # Evaluate the expression in the safe environment
-            return eval(f"self.{key}", {"__builtins__": {}}, safe_dict)
+            return eval(f"root.{key}", {"__builtins__": {}}, safe_dict)
         except (AttributeError, IndexError, KeyError, SyntaxError) as e:
             raise ValueError(f"Invalid submodule path '{key}': {e}")
 
@@ -234,8 +239,9 @@ class HookedModule(TensorDictModuleWrapper):
         hook: Callable,
         direction: HookDirection,
         prepend: bool = False,
+        relative: bool = True,
     ):
-        submodule = self._resolve_submodule_path(key)
+        submodule = self._resolve_submodule_path(key, relative)
         if isinstance(submodule, nn.ModuleList):
             warnings.warn(f"You are hooking a ModuleList ({key}), which will never be executed.")
         return register_hook_to_module(submodule, hook, direction, prepend)
@@ -247,12 +253,14 @@ class HookedModule(TensorDictModuleWrapper):
         callback: Optional[Callable] = None,
         direction: HookDirection = "fwd",
         prepend: bool = False,
+        relative: bool = True,
     ) -> RemovableHandle:
         handle = self.register_submodule_hook(
             key=module_key,
             hook=HookFactory.make_setting_hook(value, callback=callback, direction=direction),
             direction=direction,
             prepend=prepend,
+            relative=relative,
         )
         return handle
 
@@ -264,6 +272,7 @@ class HookedModule(TensorDictModuleWrapper):
         callback: Optional[Callable] = None,
         direction: HookDirection = "fwd",
         prepend: bool = False,
+        relative: bool = True,
     ) -> Tuple[RemovableHandle, CacheProxy]:
         cache_key = cache_key or f"{module_key}_{DIRECTION_TO_TYPE[direction]}"
         proxy = CacheProxy(cache_key, cache)
@@ -272,6 +281,7 @@ class HookedModule(TensorDictModuleWrapper):
             hook=HookFactory.make_caching_hook(cache_key, cache, callback=callback, direction=direction),
             direction=direction,
             prepend=prepend,
+            relative=relative,
         )
         return handle, proxy
 
