@@ -376,12 +376,12 @@ def print_summary(results: Dict, task: str = "mlp_intervene"):
                             )
 
 
-def main():
+def main(args):
     """Load results and create plots."""
     logger.info("Loading benchmark results...")
 
     # Load results
-    results_path = Path("./results/bench/results.json")
+    results_path = Path(args.input_file)
     if not results_path.exists():
         logger.error(f"Results file not found: {results_path}")
         return
@@ -398,11 +398,25 @@ def main():
     plot_run_memory_group(results)
 
     # Print summary
-    print_summary(results)
+    print_summary(results, args.task)
 
     logger.success("Plotting completed!")
-    logger.info("Plots saved to './results/bench/stats/'")
+    logger.info(f"Plots saved to '{args.output_dir}'")
+
+
+def parse_args():
+    """Parse command line arguments."""
+    import argparse
+
+    parser = argparse.ArgumentParser("plot-stats")
+    parser.add_argument(
+        "--input-file", type=str, default="./results/bench/results.json", help="Input results file path"
+    )
+    parser.add_argument("--output-dir", type=str, default="./results/bench/stats", help="Output directory for plots")
+    parser.add_argument("--task", type=str, default="mlp_intervene", help="Task to summarize in the output")
+    return parser.parse_args()
 
 
 if __name__ == "__main__":
-    main()
+    args = parse_args()
+    main(args)
