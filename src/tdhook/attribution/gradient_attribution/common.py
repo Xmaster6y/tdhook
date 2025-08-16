@@ -3,13 +3,12 @@ Gradient attribution
 """
 
 from abc import ABCMeta, abstractmethod
-from typing import Callable, Optional, List
+from typing import Callable, Optional, Tuple, Dict, List
 
 import torch
-from tensordict import TensorDict
-from torch import nn
+from tensordict.nn import TensorDictModule, TensorDictSequential
 
-from tdhook.contexts import HookingContextFactory, HookingContext
+from tdhook.contexts import HookingContextFactory
 from tdhook.module import HookedModule
 from tdhook.hooks import MultiHookHandle
 
@@ -17,85 +16,96 @@ from tdhook.hooks import MultiHookHandle
 class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
     def __init__(
         self,
-        init_target: Optional[Callable] = None,
-        init_grad: Optional[Callable] = None,
+        init_targets: Optional[
+            Callable[[Dict[str, torch.Tensor], Dict[str, torch.Tensor]], Dict[str, torch.Tensor]]
+        ] = None,
+        init_grads: Optional[
+            Callable[[Dict[str, torch.Tensor], Dict[str, torch.Tensor]], Dict[str, torch.Tensor]]
+        ] = None,
         multiply_by_inputs: bool = False,
+        additional_init_keys: Optional[List[str]] = None,
     ):
-        self._init_target = init_target
-        self._init_grad = init_grad
+        self._init_targets = init_targets
+        self._init_grads = init_grads
         self._multiply_by_inputs = multiply_by_inputs
+        self._additional_init_keys = additional_init_keys or []
 
-    def _spawn_hooked_module(
-        self, prep_module: nn.Module, in_keys: List[str], out_keys: List[str], hooking_context: HookingContext
-    ):
-        out_keys = out_keys + [f"{in_key}_attr" for in_key in in_keys]
+    def _prepare_module(self, module: TensorDictModule) -> TensorDictModule:
+        n_in_keys = len(module.in_keys)
+        attr_keys = [f"{in_key}_attr" for in_key in module.in_keys]
 
-        return super()._spawn_hooked_module(prep_module, in_keys, out_keys, hooking_context)
+        if set(self._additional_init_keys) & (set(module.in_keys) | set(module.out_keys)):
+            raise ValueError("Additional init keys must not be in the module's in_keys or out_keys")
 
-    def _hook_module(self, module: HookedModule) -> MultiHookHandle:
-        handles = []
-
-        handles.append(
-            module.register_submodule_hook(
-                "module",
-                self._input_grad_hook,
-                direction="fwd_pre",
-                relative=False,
-            )
+        modules = [module]
+        modules.append(
+            TensorDictModule(
+                lambda **tensors: self._attributor_fn(tensors, module.in_keys, module.out_keys),
+                in_keys={k: k for k in module.in_keys + module.out_keys + self._additional_init_keys},
+                out_keys=attr_keys,
+                inplace=True,
+            )  # TODO: replace with custom module to pass TensorDict to _attributor_fn
         )
-
-        handles.append(
-            module.register_submodule_hook(
-                "module",
-                self._output_backward_hook,
-                direction="fwd",
-                relative=False,
-            )
-        )
-
         if self._multiply_by_inputs:
-            handles.append(
-                module.register_submodule_hook(
-                    "",
-                    self._attr_multiply_hook,
-                    direction="fwd",
-                    relative=False,
+            modules.append(
+                TensorDictModule(
+                    lambda *tensors: self._multiply_by_inputs_fn(tensors[:n_in_keys], tensors[n_in_keys:]),
+                    in_keys=module.in_keys + attr_keys,
+                    out_keys=attr_keys,
+                    inplace=True,
                 )
             )
+        return TensorDictSequential(*modules)
 
-        return MultiHookHandle(handles)
+    def _hook_module(self, module: HookedModule) -> MultiHookHandle:
+        handle = module.register_submodule_hook(
+            "td_module",
+            lambda *args: self._set_requires_grad_hook(*args, module.in_keys),
+            direction="fwd_pre",
+            relative=False,
+        )
+        return MultiHookHandle([handle])
 
-    def _input_grad_hook(self, module, args):
+    def _set_requires_grad_hook(self, module, args, in_keys):  # TODO: needed with autograd?
         for arg in args:
             arg.requires_grad_(True)
 
-    def _output_backward_hook(self, module, args, output):
-        if self._init_target is not None:
-            target = self._init_target(output)  # TODO: pass kwargs to init_target (e.g. labels)
-        else:
-            target = output
-        if self._init_grad is not None:
-            init_grad = self._init_grad(output)
-        else:
-            init_grad = torch.ones_like(target)
-        attrs = self._grad_attr(target, args, init_grad)
-        if isinstance(output, tuple):
-            return *output, *attrs
-        else:
-            return output, *attrs
+    def _attributor_fn(
+        self, tensors: Dict[str, torch.Tensor], in_keys: List[str], out_keys: List[str]
+    ) -> Dict[str, torch.Tensor]:
+        outputs = {k: tensors[k] for k in out_keys}
+        additional_init_tensors = {k: tensors[k] for k in self._additional_init_keys}
 
-    def _attr_multiply_hook(self, module, args, output):
-        self._multiply_by_inputs_(output, module.in_keys)
-        return output
+        if self._init_targets is not None:
+            targets = self._init_targets(outputs, additional_init_tensors)
+        else:
+            targets = outputs
+        if self._init_grads is not None:
+            init_grads = self._init_grads(targets, additional_init_tensors)
+        else:
+            init_grads = {k: torch.ones_like(target) for k, target in targets.items()}
+
+        if set(targets.keys()) != set(init_grads.keys()):
+            raise ValueError("Targets and init_grads must have the same keys")
+
+        tup_targets = tuple(targets[k] for k in targets.keys())
+        tup_init_grads = tuple(init_grads[k] for k in targets.keys())
+        tup_inputs = tuple(tensors[k] for k in in_keys)
+
+        return self._grad_attr(tup_targets, tup_inputs, tup_init_grads)
 
     @abstractmethod
-    def _grad_attr(self, target, args, init_grad):
+    def _grad_attr(
+        self,
+        targets: Tuple[torch.Tensor, ...],
+        inputs: Tuple[torch.Tensor, ...],
+        init_grads: Tuple[torch.Tensor, ...],
+    ) -> Tuple[torch.Tensor, ...]:
         pass
 
     @torch.no_grad()
-    def _multiply_by_inputs_(self, output, in_keys):
-        for key in in_keys:
-            output[f"{key}_attr"] *= output[key]
+    def _multiply_by_inputs_fn(self, inputs, attrs):
+        return tuple(attr * inp for attr, inp in zip(attrs, inputs))
 
 
 class GradientAttributionWithBaseline(GradientAttribution):
@@ -103,31 +113,72 @@ class GradientAttributionWithBaseline(GradientAttribution):
         super().__init__(*args, **kwargs)
         self._compute_convergence_delta = compute_convergence_delta
 
-    def _spawn_hooked_module(
-        self, prep_module: nn.Module, in_keys: List[str], out_keys: List[str], hooking_context: HookingContext
-    ):
-        hooked_module = super()._spawn_hooked_module(prep_module, in_keys, out_keys, hooking_context)
-        hooked_module.td_module.in_keys = in_keys + [f"{in_key}_baseline" for in_key in in_keys]
+    def _prepare_module(self, module: TensorDictModule) -> TensorDictModule:
+        n_in_keys = len(module.in_keys)
+        attr_keys = [f"{in_key}_attr" for in_key in module.in_keys]
+        original_in_keys = [f"{in_key}_original" for in_key in module.in_keys]
+        baseline_keys = [f"{in_key}_baseline" for in_key in module.in_keys]
+        (_, attributor_module, *_) = super()._prepare_module(module)
+
+        modules = []
+        modules.append(
+            TensorDictModule(
+                lambda *tensors: tensors,
+                in_keys=module.in_keys,
+                out_keys=original_in_keys,
+                inplace=True,
+            )
+        )
+        modules.append(
+            TensorDictModule(
+                lambda *tensors: self._reduce_baselines_fn(tensors[:n_in_keys], tensors[n_in_keys:]),
+                in_keys=original_in_keys + baseline_keys,
+                out_keys=module.in_keys,
+                inplace=True,
+            )
+        )
+
+        modules.append(
+            TensorDictModule(
+                lambda *inputs: self._module_call_fn(inputs, module),
+                in_keys=module.in_keys,
+                out_keys=module.out_keys,
+                inplace=True,
+            )
+        )
+        modules.append(attributor_module)
+        if self._multiply_by_inputs:
+            modules.append(
+                TensorDictModule(
+                    lambda *tensors: self._multiply_by_inputs_fn(
+                        tensors[:n_in_keys], tensors[n_in_keys : n_in_keys * 2], tensors[n_in_keys * 2 :]
+                    ),
+                    in_keys=original_in_keys + baseline_keys + attr_keys,
+                    out_keys=attr_keys,
+                    inplace=True,
+                )
+            )
         if self._compute_convergence_delta:
-            hooked_module.td_module._out_keys = hooked_module.td_module._out_keys + ["convergence_delta"]
-        return hooked_module
+            modules.append(
+                TensorDictModule(
+                    lambda **tensors: self._compute_convergence_delta_fn(
+                        tensors, module.in_keys, module.out_keys, module
+                    ),
+                    in_keys={k: k for k in original_in_keys + baseline_keys + attr_keys + self._additional_init_keys},
+                    out_keys=["convergence_delta"],
+                    inplace=True,
+                )
+            )
+
+        return TensorDictSequential(*modules)
 
     def _hook_module(self, module: HookedModule) -> MultiHookHandle:
         handles = []
 
         handles.append(
             module.register_submodule_hook(
-                "",
-                self._assert_batched_hook,
-                direction="fwd_pre",
-                relative=False,
-            )
-        )
-
-        handles.append(
-            module.register_submodule_hook(
-                "module",
-                self._reduce_baselines_hook,
+                "td_module",
+                self._assert_batched_hook,  # TODO: support unbatched inputs
                 direction="fwd_pre",
                 relative=False,
             )
@@ -135,77 +186,55 @@ class GradientAttributionWithBaseline(GradientAttribution):
 
         handles.append(super()._hook_module(module))
 
-        if self._compute_convergence_delta:
-            handles.append(
-                module.register_submodule_hook(
-                    "module",
-                    self._convergence_delta_placeholder_hook,
-                    direction="fwd",
-                    relative=False,
-                )
-            )
-
-            handles.append(
-                module.register_submodule_hook(
-                    "",
-                    self._compute_convergence_delta_hook,
-                    direction="fwd",
-                    relative=False,
-                )
-            )
-
         return MultiHookHandle(handles)
 
     def _assert_batched_hook(self, module, args):
         if args[0].ndim == 0:
             raise NotImplementedError("This attribution method requires batched inputs")
 
-    def _reduce_baselines_hook(self, module, args):
-        inputs = args[: len(args) // 2]
-        baselines = args[len(args) // 2 :]
-        return self._reduce_baselines(inputs, baselines)
-
-    def _convergence_delta_placeholder_hook(self, module, args, output):
-        if isinstance(output, tuple):
-            return *output, torch.empty(output[0].shape[0], 1)
-        else:
-            return output, torch.empty(output.shape[0], 1)
-
-    def _compute_convergence_delta_hook(self, module, args, output):
-        return self._compute_convergence_delta_(module, output)
-
-    def _multiply_by_inputs_(self, output, in_keys):
-        for key in in_keys:
-            if not key.endswith("_baseline"):
-                output[f"{key}_attr"] *= output[key] - output[f"{key}_baseline"]
-
     @abstractmethod
-    def _reduce_baselines(self, inputs, baselines):
+    def _reduce_baselines_fn(
+        self, inputs: Tuple[torch.Tensor, ...], baselines: Tuple[torch.Tensor, ...]
+    ) -> Tuple[torch.Tensor, ...]:
         pass
 
-    def _compute_convergence_delta_(
+    @abstractmethod
+    def _module_call_fn(self, inputs: Tuple[torch.Tensor, ...], module: TensorDictModule) -> Tuple[torch.Tensor, ...]:
+        pass
+
+    @torch.no_grad()
+    def _multiply_by_inputs_fn(
+        self, inputs: Tuple[torch.Tensor, ...], baselines: Tuple[torch.Tensor, ...], attrs: Tuple[torch.Tensor, ...]
+    ) -> Tuple[torch.Tensor, ...]:
+        return tuple(attr * (inp - baseline) for attr, inp, baseline in zip(attrs, inputs, baselines))
+
+    @torch.no_grad()
+    def _compute_convergence_delta_fn(
         self,
-        hooked_module: HookedModule,
-        output: TensorDict,
-    ):
-        module_in_keys = [key for key in hooked_module.in_keys if not key.endswith("_baseline")]
+        tensors: Dict[str, torch.Tensor],
+        in_keys: List[str],
+        out_keys: List[str],
+        module: TensorDictModule,
+    ) -> torch.Tensor:
+        tup_inputs = tuple(tensors[f"{k}_original"] for k in in_keys)
+        tup_baselines = tuple(tensors[f"{k}_baseline"] for k in in_keys)
+        tup_attrs = tuple(tensors[f"{k}_attr"] for k in in_keys)
 
-        with torch.no_grad():
-            with hooked_module.disable_context() as raw_module:
-                if self._init_target is not None:
-                    start_out = self._init_target(raw_module(*(output[f"{key}_baseline"] for key in module_in_keys)))
-                else:
-                    start_out = raw_module(*(output[f"{key}_baseline"] for key in module_in_keys))
-                start_out_sum = start_out.reshape(output.shape[0], -1).sum(dim=1)
-                if self._init_target is not None:
-                    end_out = self._init_target(raw_module(*(output[key] for key in module_in_keys)))
-                else:
-                    end_out = raw_module(*(output[key] for key in module_in_keys))
-                end_out_sum = end_out.reshape(output.shape[0], -1).sum(dim=1)
+        additional_init_tensors = {k: tensors[k] for k in self._additional_init_keys}
 
-                row_sums = torch.stack(
-                    [output[f"{key}_attr"].reshape(output.shape[0], -1).sum(dim=1) for key in module_in_keys]
-                )
-                attr_sum = row_sums.sum(dim=0)
-                output["convergence_delta"] = attr_sum - (end_out_sum - start_out_sum)
-                return output
+        batch_size = tup_inputs[0].shape[0]
+
+        if self._init_targets is not None:
+            start_out = self._init_targets(dict(zip(out_keys, module(*tup_baselines))), additional_init_tensors)
+        else:
+            start_out = dict(zip(out_keys, module(*tup_baselines)))
+        start_out_sum = sum(start_out[k].reshape(batch_size, -1).sum(dim=1) for k in start_out.keys())
+        if self._init_targets is not None:
+            end_out = self._init_targets(dict(zip(out_keys, module(*tup_inputs))), additional_init_tensors)
+        else:
+            end_out = dict(zip(out_keys, module(*tup_inputs)))
+        end_out_sum = sum(end_out[k].reshape(batch_size, -1).sum(dim=1) for k in end_out.keys())
+
+        inputs_sums = torch.stack([attr.reshape(batch_size, -1).sum(dim=1) for attr in tup_attrs])
+        attr_sum = inputs_sums.sum(dim=0)
+        return attr_sum - (end_out_sum - start_out_sum)

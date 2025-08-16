@@ -28,6 +28,10 @@ class ActivationCaching(HookingContextFactory):
         self._directions = directions or ["fwd"]
 
     @property
+    def cache(self) -> TensorDict:
+        return self._cache
+
+    @property
     def key_pattern(self) -> str:
         return self._key_pattern
 

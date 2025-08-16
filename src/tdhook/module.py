@@ -24,6 +24,15 @@ if TYPE_CHECKING:
     from tdhook.contexts import HookingContext
 
 
+def get_best_device():
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    elif torch.backends.mps.is_available():
+        return torch.device("mps")
+    else:
+        return torch.device("cpu")
+
+
 class HookedModuleRun:
     def __init__(
         self,
@@ -320,7 +329,7 @@ class HookedModule(TensorDictModuleWrapper):
     def forward(self, *args, **kwargs):
         if self._hooking_context is not None and not self._hooking_context._in_context:
             raise RuntimeError("Contextual HookedModule must be called in context")
-        return super().forward(*args, **kwargs)
+        return self.td_module(*args, **kwargs)
 
     @contextmanager
     def disable_context_hooks(self):

@@ -3,6 +3,8 @@ Integrated gradients
 """
 
 import torch
+from typing import Tuple
+from tensordict.nn import TensorDictModule
 
 from .helpers import approximation_parameters
 
@@ -16,54 +18,36 @@ class IntegratedGradients(GradientAttributionWithBaseline):
         self._n_steps = n_steps
         self._step_sizes = None
 
-    def _output_backward_hook(self, module, args, output):
-        if isinstance(output, tuple):
-            full_bs, *rest = output[0].shape
-            new_shape = (full_bs // self._n_steps, self._n_steps, *rest)
-            perm = (0,) + tuple(range(2, len(new_shape))) + (1,)
-            output = tuple(out.reshape(new_shape).permute(perm) for out in output)
-        else:
-            full_bs, *rest = output.shape
-            new_shape = (full_bs // self._n_steps, self._n_steps, *rest)
-            perm = (0,) + tuple(range(2, len(new_shape))) + (1,)
-            output = output.reshape(new_shape).permute(perm)
-
-        if self._init_target is not None:
-            target = self._init_target(output)
-        else:
-            target = output
-        if self._init_grad is not None:
-            init_grad = self._init_grad(output)
-        else:
-            init_grad = torch.ones_like(target)
-        attrs = self._grad_attr(target, args, init_grad)
-        if isinstance(output, tuple):
-            return *output, *attrs
-        else:
-            return output, *attrs
-
-    def _reduce_baselines(self, inputs, baselines):
+    def _reduce_baselines_fn(self, inputs, baselines):
         step_sizes_func, alphas_func = approximation_parameters(self._method)
         step_sizes, alphas = step_sizes_func(self._n_steps), alphas_func(self._n_steps)
         self._step_sizes = step_sizes
 
-        bs, *rest = inputs[0].shape
-
         return tuple(
-            torch.stack([baseline + alpha * (input - baseline) for alpha in alphas], dim=1)
-            .reshape(bs * self._n_steps, *rest)
-            .requires_grad_()
+            torch.stack([baseline + alpha * (input - baseline) for alpha in alphas], dim=-1).requires_grad_()
             for input, baseline in zip(inputs, baselines)
         )
 
-    def _grad_attr(self, target, args, init_grad):
-        grads = torch.autograd.grad(target, args, init_grad)
-        full_bs, *rest = grads[0].shape
-        new_shape = (full_bs // self._n_steps, self._n_steps, *rest)
-        perm = (0,) + tuple(range(2, len(new_shape))) + (1,)
-        scaled_grads = tuple(
-            grad.reshape(new_shape).permute(perm) * torch.tensor(self._step_sizes).float().to(grad.device)
-            for grad in grads
-        )
-        total_grads = tuple(torch.sum(scaled_grad, dim=-1) for scaled_grad in scaled_grads)
-        return total_grads
+    def _module_call_fn(self, inputs: Tuple[torch.Tensor, ...], module: TensorDictModule) -> Tuple[torch.Tensor, ...]:
+        n_in_dim = len(inputs[0].shape)
+        bs, *rest, n_steps = inputs[0].shape
+        perm = (0, n_in_dim - 1) + tuple(range(1, n_in_dim - 1))
+
+        outputs = module(*(input.permute(perm).reshape(bs * n_steps, *rest) for input in inputs))
+        if isinstance(outputs, torch.Tensor):
+            outputs = (outputs,)
+
+        n_out_dim = len(outputs[0].shape) + 1
+        _, *rest = outputs[0].shape
+        inv_perm = (0,) + tuple(range(2, n_out_dim)) + (1,)
+        return tuple(output.reshape(bs, n_steps, *rest).permute(inv_perm) for output in outputs)
+
+    def _grad_attr(
+        self,
+        targets: Tuple[torch.Tensor, ...],
+        inputs: Tuple[torch.Tensor, ...],
+        init_grads: Tuple[torch.Tensor, ...],
+    ) -> Tuple[torch.Tensor, ...]:
+        grads = torch.autograd.grad(targets, inputs, init_grads)
+        scaled_grads = tuple(grad * torch.tensor(self._step_sizes).float().to(grad.device) for grad in grads)
+        return tuple(torch.sum(scaled_grad, dim=-1) for scaled_grad in scaled_grads)

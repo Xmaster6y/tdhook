@@ -16,10 +16,9 @@ from tdhook.hooks import MultiHookHandle
 class Context1(HookingContextFactory):
     def _hook_module(self, module: HookedModule) -> MultiHookHandle:
         handle = module.register_submodule_hook(
-            key="module",
+            key="",
             hook=lambda module, args, output: output + 1,
             direction="fwd",
-            relative=False,
         )
         return handle
 
@@ -27,10 +26,9 @@ class Context1(HookingContextFactory):
 class Context2(HookingContextFactory):
     def _hook_module(self, module: HookedModule) -> MultiHookHandle:
         handle = module.register_submodule_hook(
-            key="module",
+            key="",
             hook=lambda module, args, output: output * 2,
             direction="fwd",
-            relative=False,
         )
         return handle
 
@@ -39,12 +37,12 @@ class PrepFlagFactory(HookingContextFactory):
     def __init__(self, flag_name: str = "prep_flag"):
         self.flag_name = flag_name
 
-    def _prepare_module(self, module):
-        setattr(module, self.flag_name, getattr(module, self.flag_name, 0) + 1)
+    def _prepare_module(self, module: TensorDictModule) -> TensorDictModule:
+        setattr(module, self.flag_name, 1)
         return module
 
-    def _restore_module(self, module):
-        setattr(module, self.flag_name, getattr(module, self.flag_name, 0) - 1)
+    def _restore_module(self, module: TensorDictModule) -> TensorDictModule:
+        delattr(module, self.flag_name)
         return module
 
 
@@ -186,13 +184,13 @@ class TestTensorDictModuleContext:
     def test_prepare_and_restore_td_module_calls_wrapped_prepare_restore(self, default_test_model):
         """Prepare/restore of a TensorDictModule uses factory hooks on wrapped module."""
         td_mod = TensorDictModule(module=default_test_model, in_keys=["input"], out_keys=["output"])
-        assert not hasattr(td_mod.module, "prep_flag") or getattr(td_mod.module, "prep_flag") == 0
+        assert not hasattr(td_mod, "prep_flag")
 
         ctx = PrepFlagFactory().prepare(td_mod)
         with ctx as hm:
             assert isinstance(hm, HookedModule)
-            assert getattr(td_mod.module, "prep_flag") == 1
-        assert getattr(td_mod.module, "prep_flag") == 0
+            assert getattr(td_mod, "prep_flag") == 1
+        assert not hasattr(td_mod, "prep_flag")
 
     def test_in_out_keys_default_from_td_module(self, default_test_model):
         """HookingContext defaults in/out keys from the TensorDictModule."""
@@ -213,13 +211,13 @@ class TestCompositeTensorDictModule:
         c1 = PrepFlagFactory("flag1")
         c2 = PrepFlagFactory("flag2")
         composite = CompositeHookingContextFactory(c1, c2)
-        assert getattr(td_mod.module, "flag1", 0) == 0
-        assert getattr(td_mod.module, "flag2", 0) == 0
+        assert not hasattr(td_mod, "flag1")
+        assert not hasattr(td_mod, "flag2")
         with composite.prepare(td_mod):
-            assert getattr(td_mod.module, "flag1", 0) == 1
-            assert getattr(td_mod.module, "flag2", 0) == 1
-        assert getattr(td_mod.module, "flag1", 0) == 0
-        assert getattr(td_mod.module, "flag2", 0) == 0
+            assert getattr(td_mod, "flag1") == 1
+            assert getattr(td_mod, "flag2") == 1
+        assert not hasattr(td_mod, "flag1")
+        assert not hasattr(td_mod, "flag2")
 
     def test_composite_raises_on_bad_spawn_override(self, default_test_model):
         """Composite rejects contexts overriding _spawn_hooked_module."""

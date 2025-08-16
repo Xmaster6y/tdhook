@@ -111,7 +111,7 @@ class MultiHookHandle:
 
     def __add__(self, other: Any):
         if not isinstance(other, MultiHookHandle):
-            raise TypeError(f"MultiHookHandle cannot be added to {type(other)}")
+            raise TypeError(f"MultiHookHandle cannot be added to {type(other).__name__}")
         return MultiHookHandle(self._handles + other._handles)
 
 
@@ -221,7 +221,7 @@ class HookFactory:
                 value = args[value_index]
             if not isinstance(value, torch.Tensor):
                 raise RuntimeError(
-                    f"{type(value)} values are not supported for caching, use a `callback` to return a tensor"
+                    f"{type(value).__name__} values are not supported for caching, use a `callback` to return a tensor"
                 )
             cache[key] = value
 
@@ -251,7 +251,7 @@ class HookFactory:
                 value = callback(**dict(zip(params, args)), value=value)
             if type(value) is not original_type:
                 raise RuntimeError(
-                    f"Callback returned a value of type {type(value)} but the original value was of type {original_type}"
+                    f"Callback returned a value of type {type(value).__name__} but the original value was of type {original_type.__name__}"
                 )
             return value
 

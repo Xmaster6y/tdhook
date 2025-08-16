@@ -19,33 +19,27 @@ class HookingContext:
         in_keys: Optional[List[str]] = None,
         out_keys: Optional[List[str]] = None,
     ):
-        if isinstance(module, TensorDictModule):
-            self._prepare = factory._prepare_td_module
-            self._restore = factory._restore_td_module
-            in_keys = in_keys or module.in_keys
-            out_keys = out_keys or module.out_keys
-        else:
-            self._prepare = factory._prepare_module
-            self._restore = factory._restore_module
-            in_keys = in_keys or ["input"]
-            out_keys = out_keys or ["output"]
-
+        self._prepare = factory._prepare_module
+        self._restore = factory._restore_module
         self._spawn = factory._spawn_hooked_module
         self._hook = factory._hook_module
         self._in_context = False
         self._handle = None
         self._hooked_module = None
 
-        self._module = module
-        self._in_keys = in_keys
-        self._out_keys = out_keys
+        if isinstance(module, TensorDictModule):
+            self._module = module
+        else:
+            in_keys = in_keys or ["input"]
+            out_keys = out_keys or ["output"]
+            self._module = TensorDictModule(module, in_keys, out_keys)
 
     def __enter__(self):
         if self._in_context:
             raise RuntimeError("Cannot enter context twice")
         self._in_context = True
         prep_module = self._prepare(self._module)
-        self._hooked_module = self._spawn(prep_module, self._in_keys, self._out_keys, self)
+        self._hooked_module = self._spawn(prep_module, self)
         self._handle = self._hook(self._hooked_module)
         return self._hooked_module
 
@@ -95,41 +89,22 @@ class HookingContextFactory:
         """
         Prepare the module for execution.
         """
+        if isinstance(module, TensorDictModule) and (in_keys is not None or out_keys is not None):
+            raise ValueError("Cannot override in_keys and out_keys for TensorDictModules")
 
         return self._hooking_context_class(self, module, in_keys, out_keys)
 
     def _prepare_module(
         self,
-        module: nn.Module,
-    ) -> nn.Module:
-        return module
-
-    def _restore_module(self, module: nn.Module) -> nn.Module:
-        return module
-
-    def _prepare_td_module(
-        self,
-        td_module: TensorDictModule,
+        module: TensorDictModule,
     ) -> TensorDictModule:
-        td_module.module = self._prepare_module(td_module.module)
-        return td_module
+        return module
 
-    def _restore_td_module(self, td_module: TensorDictModule) -> TensorDictModule:
-        td_module.module = self._restore_module(td_module.module)
-        return td_module
+    def _restore_module(self, module: TensorDictModule) -> TensorDictModule:
+        return module
 
-    def _spawn_hooked_module(
-        self, prep_module: nn.Module, in_keys: List[str], out_keys: List[str], hooking_context: "HookingContext"
-    ):
-        if isinstance(prep_module, TensorDictModule):
-            prep_module.in_keys = in_keys
-            prep_module.out_keys = out_keys
-            return self._hooked_module_class(prep_module, hooking_context=hooking_context)
-
-        else:
-            return self._hooked_module_class.from_module(
-                prep_module, in_keys, out_keys, hooking_context=hooking_context
-            )
+    def _spawn_hooked_module(self, prep_module: TensorDictModule, hooking_context: "HookingContext") -> HookedModule:
+        return self._hooked_module_class(prep_module, hooking_context=hooking_context)
 
     def _hook_module(self, module: HookedModule) -> MultiHookHandle:
         return MultiHookHandle()
@@ -138,35 +113,26 @@ class HookingContextFactory:
 class CompositeHookingContextFactory(HookingContextFactory):
     def __init__(self, *contexts: HookingContextFactory):
         self._contexts = contexts
+        composite_overriden = type(self)._spawn_hooked_module != HookingContextFactory._spawn_hooked_module
         for context in contexts:
-            if type(context)._spawn_hooked_module != HookingContextFactory._spawn_hooked_module:
-                raise ValueError("Cannot compose factories that override _spawn_hooked_module")
+            context_overriden = type(context)._spawn_hooked_module != HookingContextFactory._spawn_hooked_module
+            if context_overriden and not composite_overriden:
+                raise ValueError(
+                    "Cannot compose factories that override _spawn_hooked_module, consider subclassing this factory to override _spawn_hooked_module"
+                )
 
     def _prepare_module(
         self,
-        module: nn.Module,
-    ) -> nn.Module:
+        module: TensorDictModule,
+    ) -> TensorDictModule:
         for context in self._contexts:
             module = context._prepare_module(module)
         return module
 
-    def _restore_module(self, module: nn.Module) -> nn.Module:
+    def _restore_module(self, module: TensorDictModule) -> TensorDictModule:
         for context in reversed(self._contexts):
             module = context._restore_module(module)
         return module
-
-    def _prepare_td_module(
-        self,
-        td_module: TensorDictModule,
-    ) -> TensorDictModule:
-        for context in self._contexts:
-            td_module = context._prepare_td_module(td_module)
-        return td_module
-
-    def _restore_td_module(self, td_module: TensorDictModule) -> TensorDictModule:
-        for context in reversed(self._contexts):
-            td_module = context._restore_td_module(td_module)
-        return td_module
 
     def _hook_module(self, module: HookedModule) -> MultiHookHandle:
         handles = []
