@@ -39,24 +39,20 @@ class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
 
         if set(self._additional_init_keys) & (set(in_keys) | set(out_keys)):
             raise ValueError("Additional init keys must not be in the in_keys or out_keys")
-        modules = []
-
-        modules.append(
+        modules = [
             TensorDictModule(
                 self._register_inputs_fn,
                 in_keys=in_keys,
                 out_keys=saved_keys,
                 inplace=True,
-            )
-        )
-        modules.append(module)
-        modules.append(
+            ),
+            module,
             FunctionModule(
                 lambda td: self._attributor_fn(td, saved_keys, out_keys),
                 in_keys=saved_keys + out_keys + self._additional_init_keys,
                 out_keys=attr_keys,
-            )
-        )
+            ),
+        ]
         if self._multiply_by_inputs:
             modules.append(
                 TensorDictModule(
@@ -130,31 +126,26 @@ class GradientAttributionWithBaseline(GradientAttribution):
         baseline_keys = [("baseline", in_key) for in_key in in_keys]
         (_, _, attributor_module, *_) = super()._prepare_module(module, in_keys, out_keys)
 
-        modules = []
-        modules.append(
+        modules = [
             TensorDictModule(
                 lambda *tensors: self._reduce_baselines_fn(tensors[:n_in_keys], tensors[n_in_keys:]),
                 in_keys=in_keys + baseline_keys,
                 out_keys=saved_keys,
                 inplace=True,
-            )
-        )
-        modules.append(
+            ),
             TensorDictModule(
                 self._register_inputs_fn,
                 in_keys=saved_keys,
                 out_keys=saved_keys,
                 inplace=True,
-            )
-        )
-        modules.append(
+            ),
             FunctionModule(
                 lambda td: self._module_call_fn(td, module),
                 in_keys=saved_keys,
                 out_keys=out_keys,
-            )
-        )
-        modules.append(attributor_module)
+            ),
+            attributor_module,
+        ]
         if self._multiply_by_inputs:
             modules.append(
                 TensorDictModule(
