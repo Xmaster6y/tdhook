@@ -22,18 +22,20 @@ class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
         init_grads: Optional[Callable[[TensorDict, TensorDict], TensorDict]] = None,
         multiply_by_inputs: bool = False,
         additional_init_keys: Optional[List[UnraveledKey]] = None,
+        attribution_key: Optional[UnraveledKey] = None,
     ):
         self._init_targets = init_targets
         self._init_grads = init_grads
         self._multiply_by_inputs = multiply_by_inputs
         self._additional_init_keys = additional_init_keys or []
+        self._attr_key = attribution_key or "attr"
 
     def _prepare_module(
         self, module: TensorDictModuleBase, in_keys: List[UnraveledKey], out_keys: List[UnraveledKey]
     ) -> TensorDictModuleBase:
         n_in_keys = len(in_keys)
         saved_keys = [("saved", in_key) for in_key in in_keys]
-        attr_keys = [("attr", in_key) for in_key in in_keys]
+        attr_keys = [(self._attr_key, in_key) for in_key in in_keys]
 
         if set(self._additional_init_keys) & (set(in_keys) | set(out_keys)):
             raise ValueError("Additional init keys must not be in the in_keys or out_keys")
@@ -97,7 +99,7 @@ class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
         inputs = td.select(*saved_keys)
 
         grads = self._grad_attr(targets, inputs, init_grads)
-        td["attr"] = grads["saved"]
+        td[self._attr_key] = grads["saved"]
         return td
 
     @abstractmethod
@@ -124,7 +126,7 @@ class GradientAttributionWithBaseline(GradientAttribution):
     ) -> TensorDictModuleBase:
         n_in_keys = len(in_keys)
         saved_keys = [("saved", in_key) for in_key in in_keys]
-        attr_keys = [("attr", in_key) for in_key in in_keys]
+        attr_keys = [(self._attr_key, in_key) for in_key in in_keys]
         baseline_keys = [("baseline", in_key) for in_key in in_keys]
         (_, _, attributor_module, *_) = super()._prepare_module(module, in_keys, out_keys)
 
@@ -220,7 +222,7 @@ class GradientAttributionWithBaseline(GradientAttribution):
         module: TensorDictModuleBase,
     ) -> TensorDict:
         baseline_keys = [("baseline", in_key) for in_key in in_keys]
-        attr_keys = [("attr", in_key) for in_key in in_keys]
+        attr_keys = [(self._attr_key, in_key) for in_key in in_keys]
 
         inputs = td.select(*in_keys)
         baselines = td.select(*baseline_keys)["baseline"]
