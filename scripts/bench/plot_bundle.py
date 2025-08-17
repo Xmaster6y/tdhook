@@ -73,12 +73,12 @@ def reset_environment():
     return True
 
 
-def main():
+def main(args):
     """Main function to measure bundle sizes and create plot."""
     logger.info("Starting bundle size measurement...")
 
     # Packages to test
-    packages = ["tdhook", "nnsight", "transformer_lens", "captum", "zennit"]
+    packages = args.packages
 
     # Store results
     results = {}
@@ -112,12 +112,12 @@ def main():
 
     # Create plot
     if results and base_size is not None:
-        create_plot(results, base_size)
+        create_plot(results, base_size, args.output_dir)
     else:
         logger.error("No results to plot")
 
 
-def create_plot(results, base_size):
+def create_plot(results, base_size, output_dir):
     """Create a bar chart of the results."""
     # Sort packages by size in increasing order
     sorted_packages = sorted(results.keys(), key=lambda pkg: results[pkg]["size"])
@@ -160,7 +160,7 @@ def create_plot(results, base_size):
     plt.tight_layout()
 
     # Save the plot
-    output_path = Path("results/bench/bundle/bundle_sizes.png")
+    output_path = Path(output_dir) / "bundle_sizes.png"
     output_path.parent.mkdir(exist_ok=True, parents=True)
     plt.savefig(output_path, dpi=300, bbox_inches="tight")
     logger.info(f"Plot saved to {output_path}")
@@ -180,5 +180,21 @@ def create_plot(results, base_size):
             logger.info(f"{package}: {int(size)}M")
 
 
+def parse_args():
+    """Parse command line arguments."""
+    import argparse
+
+    parser = argparse.ArgumentParser("plot-bundle")
+    parser.add_argument(
+        "--packages",
+        nargs="+",
+        default=["tdhook", "nnsight", "transformer_lens", "captum", "zennit"],
+        help="Packages to test",
+    )
+    parser.add_argument("--output-dir", type=str, default="results/bench/bundle", help="Output directory for plots")
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
-    main()
+    args = parse_args()
+    main(args)

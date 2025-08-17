@@ -21,11 +21,16 @@ TASKS = {
 }
 
 
-def main():
+def main(args):
     """Run all benchmarks."""
     logger.info("Checking if tasks are accurate...")
 
-    for task_name, scripts in TASKS.items():
+    # Filter tasks if specific ones are requested
+    tasks_to_run = TASKS
+    if args.tasks:
+        tasks_to_run = {k: v for k, v in TASKS.items() if k in args.tasks}
+
+    for task_name, scripts in tasks_to_run.items():
         all_outs = []
         for script in scripts:
             out = import_module(f"scripts.bench.tasks.{task_name}._{script}").main()
@@ -38,5 +43,17 @@ def main():
     logger.success("All tasks are accurate")
 
 
+def parse_args():
+    """Parse command line arguments."""
+    import argparse
+
+    parser = argparse.ArgumentParser("check-accurate")
+    parser.add_argument(
+        "--tasks", nargs="+", choices=list(TASKS.keys()), help="Specific tasks to check (default: all)"
+    )
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
-    main()
+    args = parse_args()
+    main(args)

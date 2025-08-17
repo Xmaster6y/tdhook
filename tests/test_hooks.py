@@ -64,7 +64,7 @@ class TestHookFactory:
         cache = TensorDict()
         hook = HookFactory.make_caching_hook("key", cache)
         assert hook is not None
-        hook(default_test_model, None, 1)
+        hook(default_test_model, None, torch.tensor(1))
         assert cache["key"] == 1
 
     def test_make_setting_hook(self, default_test_model):
@@ -289,10 +289,11 @@ class TestHookSignatureValidation:
             callback=lambda module, args, kwargs, key: args[0],
         )
         module = object()
-        args = ("A",)
+        my_tensor = torch.tensor(1)
+        args = (my_tensor,)
         kwargs = {"unused": 1}
         hook(module, args, kwargs)
-        assert cache["k"] == "A"
+        assert cache["k"] is my_tensor
 
 
 class TestHookEdgeCases:
@@ -380,11 +381,11 @@ class TestHookEdgeCases:
         proxy = CacheProxy("k", cache)
 
         def cb(module, args, output, value):
-            return CacheProxy("k", cache)
+            return value + 1
 
         hook = HookFactory.make_setting_hook(proxy, callback=cb, direction="fwd")
-        result = hook(object(), None, None)
-        assert isinstance(result, CacheProxy)
+        result = hook(object(), None, torch.tensor(-1))
+        assert result == 124
 
     def test_make_setting_hook_type_mismatch_raises(self):
         """Setting hook raises when callback changes the value type."""
@@ -396,3 +397,21 @@ class TestHookEdgeCases:
         hook = HookFactory.make_setting_hook(1, callback=cb, direction="fwd")
         with pytest.raises(RuntimeError):
             hook(object(), None, None)
+
+    def test_caching_hook_non_tensor_value_raises(self):
+        """Caching hook raises when callback returns a non-tensor value."""
+        from tensordict import TensorDict
+        import pytest
+
+        cache = TensorDict()
+        hook = HookFactory.make_caching_hook(
+            "k",
+            cache,
+            direction="fwd_pre_kwargs",
+            callback=lambda module, args, kwargs, key: args[0],
+        )
+        module = object()
+        args = ("A",)
+        kwargs = {"unused": 1}
+        with pytest.raises(RuntimeError):
+            hook(module, args, kwargs)

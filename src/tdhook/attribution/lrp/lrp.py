@@ -2,13 +2,16 @@
 LRP
 """
 
-from typing import Callable, Optional
+from typing import Callable, Optional, List
 
 from torch import nn
-import torch
 from warnings import warn
+from tensordict.nn import TensorDictModule, TensorDictModuleBase
+from tensordict import TensorDict
 
 from tdhook.attribution.gradient_attribution import GradientAttribution
+from tdhook.module import td_grad
+from tdhook._types import UnraveledKey
 
 from .rules import Rule
 
@@ -17,20 +20,25 @@ class LRP(GradientAttribution):
     def __init__(
         self,
         rule_mapper: Callable[[str, nn.Module], Rule | None],
-        init_target: Optional[Callable] = None,
-        init_grad: Optional[Callable] = None,
+        init_targets: Optional[Callable[[TensorDict, TensorDict], TensorDict]] = None,
+        init_grads: Optional[Callable[[TensorDict, TensorDict], TensorDict]] = None,
+        additional_init_keys: Optional[List[UnraveledKey]] = None,
         warn_on_missing_rule: bool = True,
         skip_modules: Optional[Callable[[str, nn.Module], bool]] = None,
     ):
-        super().__init__(init_target, init_grad)
+        super().__init__(
+            init_targets=init_targets,
+            init_grads=init_grads,
+            multiply_by_inputs=False,
+            additional_init_keys=additional_init_keys,
+        )
         self._rule_mapper = rule_mapper
         self._warn_on_missing_rule = warn_on_missing_rule
         self._skip_modules = skip_modules
 
     def _prepare_module(
-        self,
-        module: nn.Module,
-    ) -> nn.Module:
+        self, module: TensorDictModuleBase, in_keys: List[UnraveledKey], out_keys: List[UnraveledKey]
+    ) -> TensorDictModuleBase:
         rule_map = {}
         for name, child in module.named_modules():
             if self._skip_modules and self._skip_modules(name, child):
@@ -40,11 +48,14 @@ class LRP(GradientAttribution):
                 rule.register(child)
                 rule_map[name] = rule
             elif self._warn_on_missing_rule:
-                warn(f"No rule found for module `{name}`")
+                warn(f"No rule found for module `{name}` ({type(child).__name__})")
         module._rule_map = rule_map
-        return module
+        return super()._prepare_module(module, in_keys, out_keys)
 
-    def _restore_module(self, module: nn.Module) -> nn.Module:
+    def _restore_module(
+        self, module: TensorDictModuleBase, in_keys: List[UnraveledKey], out_keys: List[UnraveledKey]
+    ) -> TensorDictModuleBase:
+        module = super()._restore_module(module, in_keys, out_keys)
         for name, child in module.named_modules():
             rule = self._rule_mapper(name, child)
             if rule is not None:
@@ -52,9 +63,16 @@ class LRP(GradientAttribution):
         del module._rule_map
         return module
 
-    def _grad_attr(self, target, args, init_grad):
-        return torch.autograd.grad(target, args, init_grad)
+    def _grad_attr(
+        self,
+        targets: TensorDict,
+        inputs: TensorDict,
+        init_grads: TensorDict,
+    ) -> TensorDict:
+        return td_grad(targets, inputs, init_grads)
 
     @staticmethod
-    def skip_root_and_modulelist(name: str, module: nn.Module) -> bool:
-        return name == "" or isinstance(module, nn.ModuleList)
+    def default_skip(name: str, module: nn.Module) -> bool:
+        names_to_skip = ("", "td_module")
+        classes_to_skip = (nn.ModuleList, nn.Sequential, TensorDictModule)
+        return name in names_to_skip or isinstance(module, classes_to_skip)

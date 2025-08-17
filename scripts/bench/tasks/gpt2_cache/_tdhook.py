@@ -28,7 +28,7 @@ def prepare(
     sentences = ["Hello, world!"] * batch_size
     input_data = tokenizer(sentences, return_tensors="pt")
     input_data = {k: v.to("cuda" if use_cuda else "cpu") for k, v in input_data.items()}
-    return HookedModule(model, in_keys={k: k for k in input_data.keys()}, out_keys=["output"]), input_data
+    return HookedModule.from_module(model, in_keys={k: k for k in input_data.keys()}, out_keys=["output"]), input_data
 
 
 def run(
@@ -43,24 +43,14 @@ def run(
             return kwargs["output"][0]
         return kwargs["output"]
 
-    context = ActivationCaching(key_pattern="^(?!(module)?(\\.transformer)?$).*", callback=callback)
+    context = ActivationCaching(key_pattern="^(?!transformer$).*", callback=callback, relative=True)
     with context._hook_module(model):
         shuttle = TensorDict(input_data)
         model(shuttle)
     return shuttle["output", "logits"], context.cache
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--model_size", type=str, default="gpt2")
-    parser.add_argument("--batch_size", type=int, default=10)
-    parser.add_argument("--variation", type=str, default="specific")
-    parser.add_argument("--run", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--cuda", action=argparse.BooleanOptionalAction, default=True)
-
-    args = parser.parse_args()
-
+def main(args: argparse.Namespace):
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
 
@@ -90,5 +80,17 @@ def main():
         logger.info(f"  Max GPU memory: {torch.cuda.max_memory_allocated() / 1024:.2f} KB")
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser("gpt2-cache-tdhook")
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--model_size", type=str, default="gpt2")
+    parser.add_argument("--batch_size", type=int, default=10)
+    parser.add_argument("--variation", type=str, default="specific")
+    parser.add_argument("--run", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--cuda", action=argparse.BooleanOptionalAction, default=True)
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
-    main()
+    args = parse_args()
+    main(args)

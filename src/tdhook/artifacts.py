@@ -1,5 +1,6 @@
 """
 Artifacts
+TODO: Deprecate this module.
 """
 
 import torch

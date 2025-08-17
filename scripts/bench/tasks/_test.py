@@ -34,15 +34,7 @@ def prepare(
     return model, input_data
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--batch_size", type=int, default=1024 * 1024)
-    parser.add_argument("--run", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--cuda", action=argparse.BooleanOptionalAction, default=True)
-
-    args = parser.parse_args()
-
+def main(args: argparse.Namespace):
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
 
@@ -65,5 +57,15 @@ def main():
     logger.info(f"  Max GPU memory: {torch.cuda.max_memory_allocated() / 1024:.2f} KB")
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser("test-task")
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--batch_size", type=int, default=1024 * 1024)
+    parser.add_argument("--run", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--cuda", action=argparse.BooleanOptionalAction, default=True)
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
-    main()
+    args = parse_args()
+    main(args)

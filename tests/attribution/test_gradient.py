@@ -65,7 +65,7 @@ class TestGradientAttribution:
         with tdhook_context_factory.prepare(module) as hooked_module:
             output = hooked_module(TensorDict({"input": input_data}))
 
-        torch.testing.assert_close(output.get("input_attr"), attributions)
+        torch.testing.assert_close(output.get(("attr", "input")), attributions)
 
     @pytest.mark.parametrize(
         "factory",
@@ -86,7 +86,7 @@ class TestGradientAttribution:
         with tdhook_context_factory.prepare(module) as hooked_module:
             output = hooked_module(TensorDict({"input": input_data}))
 
-        torch.testing.assert_close(output.get("input_attr"), attributions)
+        torch.testing.assert_close(output.get(("attr", "input")), attributions)
 
     @pytest.mark.parametrize(
         "factory",
@@ -114,9 +114,9 @@ class TestGradientAttribution:
             compute_convergence_delta=True, multiply_by_inputs=multiply_by_inputs
         )
         with tdhook_context_factory.prepare(module) as hooked_module:
-            output = hooked_module(TensorDict({"input": input_data, "input_baseline": baseline}, batch_size=1))
+            output = hooked_module(TensorDict({"input": input_data, ("baseline", "input"): baseline}, batch_size=1))
 
-        torch.testing.assert_close(output.get("input_attr"), attributions)
+        torch.testing.assert_close(output.get(("attr", "input")), attributions)
         torch.testing.assert_close(output.get("convergence_delta"), convergence_delta)
 
     def test_requires_batched_hook(self):
@@ -127,7 +127,7 @@ class TestGradientAttribution:
         with pytest.raises(NotImplementedError):
             tdhook_context_factory = IntegratedGradients(compute_convergence_delta=True)
             with tdhook_context_factory.prepare(module) as hooked_module:
-                hooked_module(TensorDict({"input": input_data, "input_baseline": baseline}))
+                hooked_module(TensorDict({"input": input_data, ("baseline", "input"): baseline}))
 
 
 class TestGradientAttributionHelpers:

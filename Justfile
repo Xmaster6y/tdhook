@@ -5,9 +5,6 @@ install:
 checks:
 	uv run pre-commit run --all-files
 
-test-assets:
-	@echo "No test assets to resolve"
-
 tests:
 	uv run pytest tests --cov=src --cov-report=term-missing --cov-fail-under=50 -s -v
 
