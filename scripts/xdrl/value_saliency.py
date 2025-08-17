@@ -58,9 +58,7 @@ def compute_saliency(value_head, batch):
     with saliency_context.prepare(value_head) as hooked_policy:
         output = hooked_policy(batch)
 
-        saliency_maps = output.get(("attr", "observation"))
-
-        return saliency_maps
+        return output.get(("attr", "observation"))
 
 
 def main(args):
