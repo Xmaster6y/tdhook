@@ -249,7 +249,15 @@ class TestRules:
         handle = RemovableRuleHandle(rule, module)
         handle._module_ref = lambda: None
 
-        handle.remove()
+        # Should not raise and should leave handle state unchanged
+        try:
+            handle.remove()
+        except Exception as exc:
+            assert False, f"remove() raised an exception when module is None: {exc}"
+
+        # Assert that rule and _module_ref are still set
+        assert handle.rule is rule
+        assert handle._module_ref() is None
 
     def test_pass_rule_forward_errors(self):
         """Test PassRule.forward() error cases."""
