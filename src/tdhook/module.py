@@ -105,11 +105,7 @@ class HookedModuleRun:
         self._grad_enabled = grad_enabled
         self._run_callback = run_callback or (lambda module, data: module(data))
 
-        if self._outer_cache is None:
-            self._save_cache = self._cache
-        else:
-            self._save_cache = self._outer_cache
-
+        self._save_cache = self._cache if self._outer_cache is None else self._outer_cache
         self._handles = []
         self._in_context = False
 
@@ -276,12 +272,9 @@ class HookedModule(TensorDictModuleWrapper):
         - "layers.attention" -> self.layers.attention
         - "layers[1:3]" -> self.layers[1:3]
         """
-        if relative:
-            root = self.td_module.module
-        else:
-            root = self
+        root = self.td_module.module if relative else self
 
-        if key == "":
+        if not key:
             return root
 
         # Create a safe environment with only the current module
@@ -291,7 +284,7 @@ class HookedModule(TensorDictModuleWrapper):
             # Evaluate the expression in the safe environment
             return eval(f"root.{key}", {"__builtins__": {}}, safe_dict)
         except (AttributeError, IndexError, KeyError, SyntaxError) as e:
-            raise ValueError(f"Invalid submodule path '{key}': {e}")
+            raise ValueError(f"Invalid submodule path '{key}': {e}") from e
 
     def register_submodule_hook(
         self,
