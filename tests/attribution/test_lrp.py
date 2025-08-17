@@ -211,7 +211,7 @@ class TestRules:
 
         lrp = LRP(
             rule_mapper=tdhook_mapper,
-            init_grads=lambda *_: TensorDict({"output": out_relevance}),
+            init_attr_grads=lambda *_: TensorDict({"output": out_relevance}),
             skip_modules=LRP.default_skip,
         )
         with lrp.prepare(tdhook_module) as hooked_module:
@@ -223,7 +223,7 @@ class TestRules:
             zennit_output.backward(out_relevance)
             zennit_in_relevance = zennit_input.grad
 
-        torch.testing.assert_close(original_output, tdhook_output.get("output"))
+        torch.testing.assert_close(original_output, tdhook_output.get(("_mod_out", "output")))
         torch.testing.assert_close(tdhook_in_relevance, zennit_in_relevance)
 
     def test_skip_modules_no_warning(self):
