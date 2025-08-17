@@ -206,11 +206,13 @@ class TestRules:
         original_output = tdhook_module(tdhook_input)
 
         lrp = LRP(
-            rule_mapper=tdhook_mapper, init_grads=lambda *_: {"output": out_relevance}, skip_modules=LRP.default_skip
+            rule_mapper=tdhook_mapper,
+            init_grads=lambda *_: TensorDict({"output": out_relevance}),
+            skip_modules=LRP.default_skip,
         )
         with lrp.prepare(tdhook_module) as hooked_module:
             tdhook_output = hooked_module(TensorDict({"input": tdhook_input}))
-            tdhook_in_relevance = tdhook_output.get("input_attr")
+            tdhook_in_relevance = tdhook_output.get(("attr", "input"))
 
         with zennit_composite.context(zennit_module) as modified_module:
             zennit_output = modified_module(zennit_input)

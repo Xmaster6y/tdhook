@@ -2,10 +2,10 @@
 Saliency attribution
 """
 
-import torch
-from typing import Tuple
+from tensordict import TensorDict
 
 from tdhook.attribution.gradient_attribution import GradientAttribution
+from tdhook.module import td_grad
 
 
 class Saliency(GradientAttribution):
@@ -15,9 +15,11 @@ class Saliency(GradientAttribution):
 
     def _grad_attr(
         self,
-        targets: Tuple[torch.Tensor, ...],
-        inputs: Tuple[torch.Tensor, ...],
-        init_grads: Tuple[torch.Tensor, ...],
+        targets: TensorDict,
+        inputs: TensorDict,
+        init_grads: TensorDict,
     ):
-        grads = torch.autograd.grad(targets, inputs, init_grads)
-        return tuple(grad.abs() if self._absolute else grad for grad in grads)
+        grads = td_grad(targets, inputs, init_grads)
+        if self._absolute:
+            grads.abs_()
+        return grads

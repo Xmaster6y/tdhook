@@ -27,7 +27,7 @@ class InfidelityMetric:
 
         for key in module.in_keys:
             # Get original attribution
-            original_attr = original_data.get(f"{key}_attr")
+            original_attr = original_data.get(("attr", key))
 
             # Generate multiple perturbations
             perturbation_scores = []
@@ -99,8 +99,8 @@ class SensitivityMetric:
         n_batch_dims = len(original_data.batch_size)
 
         for key in module.in_keys:
-            original_attr = original_data.get(f"{key}_attr")
-            perturbed_attr = perturbed_data.get(f"{key}_attr")
+            original_attr = original_data.get(("attr", key))
+            perturbed_attr = perturbed_data.get(("attr", key))
             explanation_diff = (original_attr - perturbed_attr).abs()
 
             # Calculate mean over all dimensions except the batch dimensions

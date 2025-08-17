@@ -5,12 +5,14 @@ Tests for the contexts functionality.
 import torch
 from tensordict import TensorDict
 from tensordict.nn import TensorDictModule
+from typing import List
 
 import pytest
 
 from tdhook.contexts import HookingContextFactory, CompositeHookingContextFactory
 from tdhook.module import HookedModule
 from tdhook.hooks import MultiHookHandle
+from tdhook._types import UnraveledKey
 
 
 class Context1(HookingContextFactory):
@@ -37,11 +39,15 @@ class PrepFlagFactory(HookingContextFactory):
     def __init__(self, flag_name: str = "prep_flag"):
         self.flag_name = flag_name
 
-    def _prepare_module(self, module: TensorDictModule) -> TensorDictModule:
+    def _prepare_module(
+        self, module: TensorDictModule, in_keys: List[UnraveledKey], out_keys: List[UnraveledKey]
+    ) -> TensorDictModule:
         setattr(module, self.flag_name, 1)
         return module
 
-    def _restore_module(self, module: TensorDictModule) -> TensorDictModule:
+    def _restore_module(
+        self, module: TensorDictModule, in_keys: List[UnraveledKey], out_keys: List[UnraveledKey]
+    ) -> TensorDictModule:
         delattr(module, self.flag_name)
         return module
 

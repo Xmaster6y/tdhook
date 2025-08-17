@@ -4,11 +4,13 @@ Integrated gradients
 
 import torch
 from typing import Tuple
-from tensordict.nn import TensorDictModule
+from tensordict.nn import TensorDictModuleBase
+from tensordict import TensorDict, merge_tensordicts
 
 from .helpers import approximation_parameters
 
 from tdhook.attribution.gradient_attribution import GradientAttributionWithBaseline
+from tdhook.module import td_grad
 
 
 class IntegratedGradients(GradientAttributionWithBaseline):
@@ -18,36 +20,44 @@ class IntegratedGradients(GradientAttributionWithBaseline):
         self._n_steps = n_steps
         self._step_sizes = None
 
-    def _reduce_baselines_fn(self, inputs, baselines):
+    def _reduce_baselines_fn(self, inputs: Tuple[torch.Tensor, ...], baselines: Tuple[torch.Tensor, ...]):
         step_sizes_func, alphas_func = approximation_parameters(self._method)
         step_sizes, alphas = step_sizes_func(self._n_steps), alphas_func(self._n_steps)
         self._step_sizes = step_sizes
 
         return tuple(
-            torch.stack([baseline + alpha * (input - baseline) for alpha in alphas], dim=-1).requires_grad_()
+            torch.stack([baseline + alpha * (input - baseline) for alpha in alphas], dim=1).requires_grad_()
             for input, baseline in zip(inputs, baselines)
         )
 
-    def _module_call_fn(self, inputs: Tuple[torch.Tensor, ...], module: TensorDictModule) -> Tuple[torch.Tensor, ...]:
-        n_in_dim = len(inputs[0].shape)
-        bs, *rest, n_steps = inputs[0].shape
-        perm = (0, n_in_dim - 1) + tuple(range(1, n_in_dim - 1))
+    def _module_call_fn(self, td: TensorDict, module: TensorDictModuleBase) -> TensorDict:
+        inputs = td["saved"]
+        inputs.batch_size = (*inputs.batch_size, self._n_steps)
 
-        outputs = module(*(input.permute(perm).reshape(bs * n_steps, *rest) for input in inputs))
-        if isinstance(outputs, torch.Tensor):
-            outputs = (outputs,)
+        outputs = module(inputs.flatten()).select(*module.out_keys).reshape(inputs.shape)
 
-        n_out_dim = len(outputs[0].shape) + 1
-        _, *rest = outputs[0].shape
-        inv_perm = (0,) + tuple(range(2, n_out_dim)) + (1,)
-        return tuple(output.reshape(bs, n_steps, *rest).permute(inv_perm) for output in outputs)
+        inputs.batch_size = inputs.batch_size[:-1]
+        outputs.batch_size = outputs.batch_size[:-1]
+
+        return merge_tensordicts(td, outputs.apply(self._permute_fn))  # TODO: update td inplace?
 
     def _grad_attr(
         self,
-        targets: Tuple[torch.Tensor, ...],
-        inputs: Tuple[torch.Tensor, ...],
-        init_grads: Tuple[torch.Tensor, ...],
-    ) -> Tuple[torch.Tensor, ...]:
-        grads = torch.autograd.grad(targets, inputs, init_grads)
-        scaled_grads = tuple(grad * torch.tensor(self._step_sizes).float().to(grad.device) for grad in grads)
-        return tuple(torch.sum(scaled_grad, dim=-1) for scaled_grad in scaled_grads)
+        targets: TensorDict,
+        inputs: TensorDict,
+        init_grads: TensorDict,
+    ) -> TensorDict:
+        grads = td_grad(targets, inputs, init_grads).apply(self._permute_fn)
+
+        steps = torch.tensor(self._step_sizes).float().to(grads.device)
+
+        def multiply_sum_fn(grad: torch.Tensor) -> torch.Tensor:
+            return torch.sum(grad.mul_(steps), dim=-1)
+
+        return grads.apply(multiply_sum_fn)
+
+    @staticmethod
+    def _permute_fn(out: torch.Tensor) -> torch.Tensor:
+        n_out_dim = len(out.shape)
+        perm = (0,) + tuple(range(2, n_out_dim)) + (1,)
+        return out.permute(perm)
