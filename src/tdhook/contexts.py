@@ -159,7 +159,5 @@ class CompositeHookingContextFactory(HookingContextFactory):
         return module
 
     def _hook_module(self, module: HookedModule) -> MultiHookHandle:
-        handles = []
-        for context in self._contexts:
-            handles.append(context._hook_module(module))
+        handles = [context._hook_module(module) for context in self._contexts]
         return MultiHookHandle(handles)
