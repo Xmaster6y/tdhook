@@ -249,14 +249,13 @@ class TestRules:
         handle = RemovableRuleHandle(rule, module)
         handle._module_ref = lambda: None
 
-        # Should not raise and should leave handle state unchanged
         try:
+            handle.remove()
             handle.remove()
         except Exception as exc:
             assert False, f"remove() raised an exception when module is None: {exc}"
 
-        # Assert that rule and _module_ref are still set
-        assert handle.rule is rule
+        assert handle._rule is rule
         assert handle._module_ref() is None
 
     def test_pass_rule_forward_errors(self):
@@ -269,12 +268,7 @@ class TestRules:
                 self.linear = nn.Linear(10, 10)
 
             def forward(self, *inputs):
-                if len(inputs) == 2:
-                    out1 = self.linear(inputs[0])
-                    out2 = self.linear(inputs[1])
-                    return out1, out2
-                else:
-                    return tuple(self.linear(inp) for inp in inputs)
+                return tuple(self.linear(inp) for inp in inputs)
 
         rule = PassRule()
         module = MultiOutputModule()
