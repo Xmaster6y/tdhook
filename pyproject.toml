@@ -59,6 +59,8 @@ scripts = [
     "captum>=0.8.0",
     "lczerolens",
     "scikit-learn>=1.7.1",
+    "torchrl>=0.9.2",
+    "gymnasium[mujoco]>=1.2.0",
 ]
 notebooks = [
     "ipykernel>=6.29.5",
