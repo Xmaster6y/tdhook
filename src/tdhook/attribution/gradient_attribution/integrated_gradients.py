@@ -69,5 +69,9 @@ class IntegratedGradients(GradientAttributionWithBaseline):
         d = {}
         for k in targets.keys(True, True):
             one_hot_labels = torch.nn.functional.one_hot(labels[k], num_classes=targets[k].shape[-1]).to(bool)
+            if one_hot_labels.shape != targets[k].shape:
+                raise ValueError(
+                    f"One-hot labels shape {one_hot_labels.shape} does not match target shape {targets[k].shape}"
+                )
             d[k] = targets[k][one_hot_labels].reshape(targets.batch_size)
         return TensorDict(d, batch_size=targets.batch_size)

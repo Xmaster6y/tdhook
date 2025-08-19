@@ -42,7 +42,7 @@ def prepare(
     input_data = torch.randn(batch_size, width).to("cuda" if use_cuda else "cpu")
     baseline = torch.zeros_like(input_data)
     context_factory = IntegratedGradients(
-        init_targets=lambda td, _: td[:, (4, 7)],
+        init_attr_targets=lambda td, _: td.apply(lambda t: t[..., (4, 7)]),
         multiply_by_inputs=variation == "multiply",
         compute_convergence_delta=True,
     )
