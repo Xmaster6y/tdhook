@@ -71,6 +71,14 @@ def td_grad(
     return TensorDict(dict(zip(inputs.keys(True, True), tup_grads)), batch_size=inputs.batch_size)
 
 
+def flatten_reshape_call(module: TensorDictModuleBase, td: TensorDict) -> TensorDict:
+    return module(td.flatten()).reshape(td.shape)
+
+
+def flatten_select_reshape_call(module: TensorDictModuleBase, td: TensorDict) -> TensorDict:
+    return module(td.flatten()).select(*module.out_keys).reshape(td.shape)
+
+
 class FunctionModule(TensorDictModuleBase):
     def __init__(
         self, td_fn: Callable[[TensorDict], TensorDict], in_keys: List[UnraveledKey], out_keys: List[UnraveledKey]
@@ -82,6 +90,9 @@ class FunctionModule(TensorDictModuleBase):
 
     def forward(self, tensordict: TensorDict) -> TensorDict:
         return self._td_fn(tensordict)
+
+    def __repr__(self):
+        return f"FunctionModule(in_keys={self.in_keys}, out_keys={self.out_keys}, td_fn={self._td_fn})"
 
 
 class HookedModuleRun:

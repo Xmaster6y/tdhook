@@ -57,7 +57,20 @@ def run(
     return (state1, state2, state3)
 
 
-def main(args: argparse.Namespace):
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser("mlp-intervene-nnsight")
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--width", type=int, default=10)
+    parser.add_argument("--height", type=int, default=10)
+    parser.add_argument("--batch_size", type=int, default=10)
+    parser.add_argument("--variation", type=int, default=10)
+    parser.add_argument("--run", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--cuda", action=argparse.BooleanOptionalAction, default=True)
+    return parser.parse_args()
+
+
+def main():
+    args = parse_args()
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
 
@@ -88,18 +101,5 @@ def main(args: argparse.Namespace):
         logger.info(f"  Max GPU memory: {torch.cuda.max_memory_allocated() / 1024:.2f} KB")
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser("mlp-intervene-nnsight")
-    parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--width", type=int, default=10)
-    parser.add_argument("--height", type=int, default=10)
-    parser.add_argument("--batch_size", type=int, default=10)
-    parser.add_argument("--variation", type=int, default=10)
-    parser.add_argument("--run", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--cuda", action=argparse.BooleanOptionalAction, default=True)
-    return parser.parse_args()
-
-
 if __name__ == "__main__":
-    args = parse_args()
-    main(args)
+    main()

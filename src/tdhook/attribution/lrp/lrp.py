@@ -20,17 +20,13 @@ class LRP(GradientAttribution):
     def __init__(
         self,
         rule_mapper: Callable[[str, nn.Module], Rule | None],
-        init_targets: Optional[Callable[[TensorDict, TensorDict], TensorDict]] = None,
-        init_grads: Optional[Callable[[TensorDict, TensorDict], TensorDict]] = None,
-        additional_init_keys: Optional[List[UnraveledKey]] = None,
         warn_on_missing_rule: bool = True,
         skip_modules: Optional[Callable[[str, nn.Module], bool]] = None,
+        **kwargs,
     ):
+        kwargs["multiply_by_inputs"] = False
         super().__init__(
-            init_targets=init_targets,
-            init_grads=init_grads,
-            multiply_by_inputs=False,
-            additional_init_keys=additional_init_keys,
+            **kwargs,
         )
         self._rule_mapper = rule_mapper
         self._warn_on_missing_rule = warn_on_missing_rule

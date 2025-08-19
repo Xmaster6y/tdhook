@@ -3,14 +3,14 @@ Integrated gradients
 """
 
 import torch
-from typing import Tuple
-from tensordict.nn import TensorDictModuleBase
+from typing import List
 from tensordict import TensorDict, merge_tensordicts
 
 from .helpers import approximation_parameters
 
 from tdhook.attribution.gradient_attribution import GradientAttributionWithBaseline
 from tdhook.module import td_grad
+from tdhook._types import UnraveledKey
 
 
 class IntegratedGradients(GradientAttributionWithBaseline):
@@ -20,26 +20,31 @@ class IntegratedGradients(GradientAttributionWithBaseline):
         self._n_steps = n_steps
         self._step_sizes = None
 
-    def _reduce_baselines_fn(self, inputs: Tuple[torch.Tensor, ...], baselines: Tuple[torch.Tensor, ...]):
+    def _reduce_baselines_fn(self, td: TensorDict, in_keys: List[UnraveledKey]) -> TensorDict:
         step_sizes_func, alphas_func = approximation_parameters(self._method)
         step_sizes, alphas = step_sizes_func(self._n_steps), alphas_func(self._n_steps)
         self._step_sizes = step_sizes
 
-        return tuple(
-            torch.stack([baseline + alpha * (input - baseline) for alpha in alphas], dim=1).requires_grad_()
-            for input, baseline in zip(inputs, baselines)
+        inputs = td.select(*in_keys)
+        baselines = td[self._baseline_key]
+        additional_init_tensors = td.select(*self._additional_init_keys)
+
+        if self._init_attr_inputs is not None:
+            needs_baselines = self._init_attr_inputs(inputs, additional_init_tensors)
+            other_inputs = inputs.select(
+                *(k for k in inputs.keys(True, True) if k not in needs_baselines.keys(True, True))
+            )
+        else:
+            needs_baselines = inputs
+            other_inputs = TensorDict(batch_size=inputs.batch_size)
+
+        new_bs = (*inputs.batch_size, self._n_steps)
+        expanded_other_inputs = other_inputs.unsqueeze(-1).expand(new_bs)
+        reduced_baselines = torch.stack(
+            [baselines + alpha * (needs_baselines - baselines) for alpha in alphas], dim=-1
         )
-
-    def _module_call_fn(self, td: TensorDict, module: TensorDictModuleBase) -> TensorDict:
-        inputs = td["saved"]
-        inputs.batch_size = (*inputs.batch_size, self._n_steps)
-
-        outputs = module(inputs.flatten()).select(*module.out_keys).reshape(inputs.shape)
-
-        inputs.batch_size = inputs.batch_size[:-1]
-        outputs.batch_size = outputs.batch_size[:-1]
-
-        return merge_tensordicts(td, outputs.apply(self._permute_fn))  # TODO: update td inplace?
+        td["_register_in"] = merge_tensordicts(expanded_other_inputs, reduced_baselines)
+        return td
 
     def _grad_attr(
         self,
@@ -47,17 +52,26 @@ class IntegratedGradients(GradientAttributionWithBaseline):
         inputs: TensorDict,
         init_grads: TensorDict,
     ) -> TensorDict:
-        grads = td_grad(targets, inputs, init_grads).apply(self._permute_fn)
-
+        grads = td_grad(targets, inputs, init_grads)
         steps = torch.tensor(self._step_sizes).float().to(grads.device)
 
-        def multiply_sum_fn(grad: torch.Tensor) -> torch.Tensor:
-            return torch.sum(grad.mul_(steps), dim=-1)
-
-        return grads.apply(multiply_sum_fn)
+        return torch.sum(grads * steps, dim=-1)  # TODO: inplace (grads *= steps) not working
 
     @staticmethod
-    def _permute_fn(out: torch.Tensor) -> torch.Tensor:
-        n_out_dim = len(out.shape)
-        perm = (0,) + tuple(range(2, n_out_dim)) + (1,)
-        return out.permute(perm)
+    def init_attr_targets_with_labels(
+        outputs: TensorDict,
+        additional_init_tensors: TensorDict,
+        selected_out_keys: List[UnraveledKey],
+        label_key: UnraveledKey = "label",
+    ) -> TensorDict:
+        targets = outputs.select(*selected_out_keys)
+        labels = additional_init_tensors[label_key].unsqueeze(-1).expand(targets.shape)
+        d = {}
+        for k in targets.keys(True, True):
+            one_hot_labels = torch.nn.functional.one_hot(labels[k], num_classes=targets[k].shape[-1]).to(bool)
+            if one_hot_labels.shape != targets[k].shape:
+                raise ValueError(
+                    f"One-hot labels shape {one_hot_labels.shape} does not match target shape {targets[k].shape}"
+                )
+            d[k] = targets[k][one_hot_labels].reshape(targets.batch_size)
+        return TensorDict(d, batch_size=targets.batch_size)

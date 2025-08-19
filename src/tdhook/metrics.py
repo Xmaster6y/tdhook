@@ -49,8 +49,8 @@ class InfidelityMetric:
                 )
 
                 # Model output change
-                original_output = module(original_data)["output"]
-                perturbed_output = module(perturbed_data)["output"]
+                original_output = module(original_data)[("_mod_out", "output")]
+                perturbed_output = module(perturbed_data)[("_mod_out", "output")]
                 output_change = (original_output - perturbed_output).sum(
                     dim=tuple(range(n_batch_dims, original_output.dim()))
                 )
