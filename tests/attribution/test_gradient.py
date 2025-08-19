@@ -138,7 +138,7 @@ class TestGradientAttribution:
     @pytest.mark.parametrize(
         "batch_size",
         (
-            tuple(),
+            (),
             (3,),
             (2, 3),
         ),
