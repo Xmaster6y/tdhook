@@ -4,7 +4,7 @@ Script to compute saliency maps for a value network using tdhook.
 Run with:
 
 ```
-uv run --group scripts -m scripts.xdrl.value_saliency
+uv run --group scripts -m scripts.torchrl.value_saliency
 ```
 """
 
