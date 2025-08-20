@@ -18,13 +18,13 @@ class IntegratedGradients(GradientAttributionWithBaseline):
         super().__init__(**kwargs)
         self._method = method
         self._n_steps = n_steps
-        self._step_sizes = None
 
-    def _reduce_baselines_fn(self, td: TensorDict, in_keys: List[UnraveledKey]) -> TensorDict:
         step_sizes_func, alphas_func = approximation_parameters(self._method)
         step_sizes, alphas = step_sizes_func(self._n_steps), alphas_func(self._n_steps)
         self._step_sizes = step_sizes
+        self._alphas = alphas
 
+    def _reduce_baselines_fn(self, td: TensorDict, in_keys: List[UnraveledKey]) -> TensorDict:
         inputs = td.select(*in_keys)
         baselines = td[self._baseline_key]
         additional_init_tensors = td.select(*self._additional_init_keys)
@@ -41,7 +41,7 @@ class IntegratedGradients(GradientAttributionWithBaseline):
         new_bs = (*inputs.batch_size, self._n_steps)
         expanded_other_inputs = other_inputs.unsqueeze(-1).expand(new_bs)
         reduced_baselines = torch.stack(
-            [baselines + alpha * (needs_baselines - baselines) for alpha in alphas], dim=-1
+            [baselines + alpha * (needs_baselines - baselines) for alpha in self._alphas], dim=-1
         )
         td["_register_in"] = merge_tensordicts(expanded_other_inputs, reduced_baselines)
         return td

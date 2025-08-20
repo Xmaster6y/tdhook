@@ -68,7 +68,9 @@ def td_grad(
         tup_grad_outputs = tuple(grad_outputs[k] for k in grad_outputs.keys(True, True))
 
     tup_grads = torch.autograd.grad(tup_outputs, tup_inputs, tup_grad_outputs, **kwargs)
-    return TensorDict(dict(zip(inputs.keys(True, True), tup_grads)), batch_size=inputs.batch_size)
+    return TensorDict(
+        dict(zip(inputs.keys(True, True), tup_grads)), batch_size=inputs.batch_size, device=inputs.device
+    )
 
 
 def flatten_reshape_call(module: TensorDictModuleBase, td: TensorDict) -> TensorDict:
