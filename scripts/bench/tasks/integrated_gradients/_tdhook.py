@@ -57,7 +57,11 @@ def run(
     """Benchmark a single model configuration."""
     with hooking_context as hooked_module:
         output = hooked_module(
-            TensorDict({"input": input_data, ("baseline", "input"): baseline}, batch_size=input_data.shape[0])
+            TensorDict(
+                {"input": input_data, ("baseline", "input"): baseline},
+                batch_size=input_data.shape[0],
+                device=input_data.device,
+            )
         )
         return output[("attr", "input")], output["convergence_delta"]
 
