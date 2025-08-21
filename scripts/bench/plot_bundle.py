@@ -139,7 +139,8 @@ def create_plot(results, base_size, output_dir):
         height = bar.get_height()
         if base_size is not None:
             increase_pct = ((size - base_size) / base_size) * 100
-            label = f"{int(size)}M (+{int(increase_pct)}%)"
+            label = f"+{int(increase_pct)}%"
+            # label = f"{int(size)}M (+{int(increase_pct)}%)"
         else:
             label = f"{int(size)}M"
 
@@ -188,7 +189,7 @@ def parse_args():
     parser.add_argument(
         "--packages",
         nargs="+",
-        default=["tdhook", "nnsight", "transformer_lens", "captum", "zennit"],
+        default=["tdhook", "nnsight", "transformer_lens", "captum", "zennit", "pyvene", "inseq"],
         help="Packages to test",
     )
     parser.add_argument("--output-dir", type=str, default="results/bench/bundle", help="Output directory for plots")

@@ -15,9 +15,23 @@ captum = [
 nnsight = [
     "nnsight>=0.4.11",
 ]
+pyvene = [
+    "pyvene>=0.1.8",
+]
 transformer-lens = [
     "transformer-lens>=2.16.1",
 ]
 zennit = [
     "zennit>=0.5.1",
+]
+inseq = [
+    "inseq>=0.6.0",
+]
+
+[tool.uv]
+conflicts = [
+    [
+      { group = "transformer-lens" },
+      { group = "inseq" },
+    ],
 ]
