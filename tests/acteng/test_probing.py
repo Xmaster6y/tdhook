@@ -32,7 +32,6 @@ class TestLinearProbing:
             return nn.Linear(20, 1)
 
         context = LinearProbing("linear2", probe_factory, relative=True)
-        assert isinstance(context, LinearProbing)
 
         inputs = torch.randn(2, 10)
         with context.prepare(default_test_model) as hooked_module:
