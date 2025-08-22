@@ -146,7 +146,6 @@ def create_plot(results, base_size, output_dir):
 
         plt.text(bar.get_x() + bar.get_width() / 2.0, height + 0.1, label, ha="center", va="bottom", fontsize=9)
 
-    plt.title("Bundle Size by Package", fontsize=14, fontweight="bold")
     plt.xlabel("Package", fontsize=12)
     plt.ylabel("Bundle Size (MB)", fontsize=12)
     plt.grid(axis="y", alpha=0.3)
@@ -165,9 +164,6 @@ def create_plot(results, base_size, output_dir):
     output_path.parent.mkdir(exist_ok=True, parents=True)
     plt.savefig(output_path, dpi=300, bbox_inches="tight")
     logger.info(f"Plot saved to {output_path}")
-
-    # Show the plot
-    plt.show()
 
     # Print summary in sorted order
     logger.info("\n--- Summary (sorted by size) ---")

@@ -27,8 +27,6 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 from loguru import logger
 
-sns.set_theme(style="whitegrid")
-
 # ---------------------------------------------------------------------------
 # Data processing helpers
 # ---------------------------------------------------------------------------
@@ -177,7 +175,8 @@ def _plot_relative_summary(agg_df: pd.DataFrame, output_dir: Path):
     for metric in metrics:
         metric_data = agg_df[agg_df["metric"] == metric]
 
-        plt.figure(figsize=(12, 8))
+        # Use smaller figure size to maintain good text-to-figure ratio like plot_bundle.py
+        plt.figure(figsize=(8, 6))
 
         # Sort libraries: TDHook first, then alphabetically
         libs = metric_data["lib"].tolist()
@@ -194,44 +193,40 @@ def _plot_relative_summary(agg_df: pd.DataFrame, output_dir: Path):
             metric_data_ordered.append(lib_row)
         metric_data_ordered = pd.DataFrame(metric_data_ordered).reset_index(drop=True)
 
-        # Create bar plot
+        # Create bar plot with consistent style from plot_bundle.py
         bars = plt.bar(
             range(len(metric_data_ordered)),
             metric_data_ordered["mean"],
             yerr=metric_data_ordered["std"],
             capsize=5,
-            alpha=0.8,
+            color="skyblue",
+            edgecolor="navy",
+            alpha=0.7,
         )
 
-        # Color bars: TDHook in green, others in different colors
-        colors = []
-        for lib in metric_data_ordered["lib"]:
+        # Color bars: TDHook in green, others in skyblue (already set above)
+        for i, lib in enumerate(metric_data_ordered["lib"]):
             if lib == "tdhook":
-                colors.append("green")
-            else:
-                colors.append("steelblue")
+                bars[i].set_color("green")
+                bars[i].set_edgecolor("darkgreen")
 
-        for bar, color in zip(bars, colors):
-            bar.set_color(color)
-
-        # Add labels and formatting
-        plt.xticks(range(len(metric_data_ordered)), metric_data_ordered["lib"], rotation=45)
-        plt.ylabel(f"Relative {metric.replace('_', ' ').title()} (lower is better)")
-        plt.title(f"Relative Performance: {metric.replace('_', ' ').title()} (TDHook = 1.0)")
+        # Add labels and formatting with consistent font sizes from plot_bundle.py
+        plt.xticks(range(len(metric_data_ordered)), metric_data_ordered["lib"], rotation=45, ha="right")
+        plt.ylabel(f"Relative {metric.replace('_', ' ').title()} (lower is better)", fontsize=12)
 
         # Reference line at 1.0 (TDHook)
         plt.axhline(y=1.0, color="red", linestyle="--", alpha=0.7, label="TDHook = 1.0")
 
-        # Add value labels on bars
+        # Add value labels on bars with consistent font size from plot_bundle.py
         for i, (mean, std) in enumerate(zip(metric_data_ordered["mean"], metric_data_ordered["std"])):
             lib = metric_data_ordered.iloc[i]["lib"]
             if lib == "tdhook":
-                plt.text(i, mean + std + 0.02, f"{mean:.2f}", ha="center", va="bottom", fontsize=10)
+                plt.text(i, mean + std + 0.02, f"{mean:.2f}", ha="center", va="bottom", fontsize=9)
             else:
-                plt.text(i, mean + std + 0.02, f"{mean:.2f}±{std:.2f}", ha="center", va="bottom", fontsize=10)
+                plt.text(i, mean + std + 0.02, f"{mean:.2f}±{std:.2f}", ha="center", va="bottom", fontsize=9)
 
         plt.legend()
-        plt.grid(True, alpha=0.3)
+        plt.grid(axis="y", alpha=0.3)
         plt.tight_layout()
 
         # Save plot
@@ -244,11 +239,11 @@ def _plot_relative_summary(agg_df: pd.DataFrame, output_dir: Path):
 def _plot_combined_summary(agg_df: pd.DataFrame, output_dir: Path):
     """Create a combined plot showing run_only, spawn, and run memory metrics for all libraries."""
 
-    # Filter to run_only, spawn, and run memory metrics (run_gpu_vram, run_cpu_ram)
+    # Filter to run_only, spawn, and run memory metrics (run_gpu_ram, run_gpu_vram, run_cpu_ram)
     filtered_agg = agg_df[
         agg_df["metric"].str.startswith("run_only_")
         | agg_df["metric"].str.startswith("spawn_")
-        | agg_df["metric"].isin(["run_gpu_vram", "run_cpu_ram"])
+        | agg_df["metric"].isin(["run_gpu_ram", "run_gpu_vram", "run_cpu_ram"])
     ]
 
     # Pivot data for easier plotting
@@ -256,9 +251,19 @@ def _plot_combined_summary(agg_df: pd.DataFrame, output_dir: Path):
 
     # Sort columns: spawn metrics first, then run memory metrics, then run_only metrics
     spawn_cols = [col for col in pivot_df.columns if col.startswith("spawn_")]
-    run_memory_cols = [col for col in pivot_df.columns if col in ["run_cpu_ram", "run_gpu_vram"]]
+    run_memory_cols = [col for col in pivot_df.columns if col in ["run_gpu_ram", "run_gpu_vram", "run_cpu_ram"]]
     run_only_cols = [col for col in pivot_df.columns if col.startswith("run_only_")]
     ordered_cols = sorted(spawn_cols) + sorted(run_memory_cols) + sorted(run_only_cols)
+    ordered_cols = [
+        "spawn_time",
+        "run_only_cpu_time",
+        "run_only_gpu_time",
+        "spawn_ram",
+        "run_cpu_ram",
+        "run_gpu_ram",
+        "spawn_gpu_vram",
+        "run_gpu_vram",
+    ]
     pivot_df = pivot_df[ordered_cols]
 
     # Sort rows: TDHook first, then alphabetically
@@ -270,22 +275,20 @@ def _plot_combined_summary(agg_df: pd.DataFrame, output_dir: Path):
         libs = sorted(libs)
     pivot_df = pivot_df.reindex(libs)
 
-    plt.figure(figsize=(16, 10))
-
-    # Create heatmap
+    plt.figure(figsize=(8, 6))
+    sns.set_theme(style="whitegrid", font_scale=1)
     sns.heatmap(
         pivot_df,
         annot=True,
         fmt=".2f",
         cmap="RdYlGn_r",  # Red (worse) to Green (better)
         center=1.0,  # TDHook baseline
-        cbar_kws={"label": "Relative Performance (TDHook = 1.0)"},
+        cbar_kws={"label": "Relative Performance", "shrink": 0.61},
         square=True,
     )
 
-    plt.title("Relative Performance Summary: Spawn + Run Memory + Run-Only Metrics (TDHook = 1.0; lower is better)")
-    plt.xlabel("Metrics")
-    plt.ylabel("Libraries")
+    plt.xlabel("Metrics", fontsize=12)
+    plt.ylabel("Libraries", fontsize=12)
     plt.xticks(rotation=45, ha="right")
     plt.tight_layout()
 
