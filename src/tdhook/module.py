@@ -280,10 +280,10 @@ class HookedModule(TensorDictModuleWrapper):
         Resolve a submodule path that may contain indexing expressions.
 
         Supports any valid Python attribute access and indexing:
-        - "layers[-1]" -> self.layers[-1]
-        - "layers['attr']" -> self.layers['attr']
-        - "layers.attention" -> self.layers.attention
-        - "layers[1:3]" -> self.layers[1:3]
+        - "layers[-1]" -> root.layers[-1]
+        - "layers['attr']" -> root.layers['attr']
+        - "layers.attention" -> root.layers.attention
+        - "layers[1:3]" -> root.layers[1:3]
         """
         root = self.td_module.module if relative else self
 
