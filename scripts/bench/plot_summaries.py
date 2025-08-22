@@ -277,15 +277,31 @@ def _plot_combined_summary(agg_df: pd.DataFrame, output_dir: Path):
 
     plt.figure(figsize=(8, 6))
     sns.set_theme(style="whitegrid", font_scale=1)
+
+    log_df = pivot_df.applymap(lambda x: np.log(x) if x > 0 else np.nan)
+
     sns.heatmap(
-        pivot_df,
-        annot=True,
+        log_df,
+        annot=pivot_df,
         fmt=".2f",
-        cmap="RdYlGn_r",  # Red (worse) to Green (better)
-        center=1.0,  # TDHook baseline
+        cmap="RdYlGn_r",
+        center=0.0,
         cbar_kws={"label": "Relative Performance", "shrink": 0.61},
         square=True,
     )
+
+    # Get the colorbar and apply exp formatter to show original values
+    ax = plt.gca()
+    cbar = ax.collections[0].colorbar
+
+    # Create a formatter that shows the original values (exp of log values)
+    from matplotlib.ticker import FuncFormatter
+
+    def exp_formatter(x, pos):
+        return f"{np.exp(x):.1f}"
+
+    # Just apply the formatter without changing tick locations
+    cbar.ax.yaxis.set_major_formatter(FuncFormatter(exp_formatter))
 
     plt.xlabel("Metrics", fontsize=12)
     plt.ylabel("Libraries", fontsize=12)
