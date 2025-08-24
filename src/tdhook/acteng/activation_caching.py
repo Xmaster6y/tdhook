@@ -20,7 +20,8 @@ class ActivationCaching(HookingContextFactory):
         callback: Optional[Callable] = None,
         directions: Optional[List[HookDirection]] = None,
     ):
-        self._cache = TensorDict() if cache is None else cache
+        super().__init__()
+        self._cache = TensorDict() if cache is None else cache  # TODO: make the factory stateless
 
         self._key_pattern = key_pattern
         self._hook_manager = MultiHookManager(key_pattern, relative=relative)

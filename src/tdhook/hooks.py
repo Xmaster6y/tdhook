@@ -1,5 +1,5 @@
 """
-MultiHook
+Hooks
 """
 
 import weakref
@@ -219,9 +219,9 @@ class HookFactory:
                 value = callback(**dict(zip(params, args)), key=key)
             else:
                 value = args[value_index]
-            if not isinstance(value, torch.Tensor):
+            if not isinstance(value, torch.Tensor) and not isinstance(value, TensorDict):
                 raise RuntimeError(
-                    f"{type(value).__name__} values are not supported for caching, use a `callback` to return a tensor"
+                    f"{type(value).__name__} values are not supported for caching, use a `callback` to return a tensor or a tensordict"
                 )
             cache[key] = value
 
@@ -254,6 +254,24 @@ class HookFactory:
                     f"Callback returned a value of type {type(value).__name__} but the original value was of type {original_type.__name__}"
                 )
             return value
+
+        return hook
+
+    @staticmethod
+    def make_reading_hook(*, callback: Callable, direction: HookDirection = "fwd") -> Callable:
+        """
+        Make a reading hook.
+        """
+
+        if direction not in DIRECTION_TO_PARAMS:
+            raise ValueError(f"Invalid direction: {direction}")
+
+        params = DIRECTION_TO_PARAMS[direction]
+        HookFactory._check_callback_signature(callback, set(params))
+
+        def hook(*args):
+            nonlocal callback, params
+            callback(**dict(zip(params, args)))
 
         return hook
 

@@ -36,6 +36,7 @@ dev = [
     "pytest-cov>=6.1.1",
     "nnsight>=0.4.11",
     "zennit>=0.5.1",
+    "scikit-learn>=1.7.1",
 ]
 docs = [
     "nbsphinx>=0.9.6",

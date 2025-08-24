@@ -4,7 +4,7 @@ Task vectors for weight interpretability
 
 import torch
 from torch import nn
-from typing import Optional, Iterable, Callable, Generator, List
+from typing import Optional, Iterable, Callable, Generator
 from tensordict import TensorDict
 from contextlib import contextmanager
 
@@ -88,20 +88,11 @@ class TaskVectors(HookingContextFactory):
         get_test_accuracy: Callable[[nn.Module], float],
         get_control_adequacy: Callable[[nn.Module], bool],
     ):
-        self._context_kwargs = {
-            "alphas": alphas,
-            "get_test_accuracy": get_test_accuracy,
-            "get_control_adequacy": get_control_adequacy,
-        }
-
-    def prepare(
-        self,
-        module: nn.Module,
-        in_keys: Optional[List[str]] = None,
-        out_keys: Optional[List[str]] = None,
-    ) -> "TaskVectorsContext":
-        """
-        Prepare the module for execution.
-        """
-
-        return self._hooking_context_class(self, module, in_keys, out_keys, **self._context_kwargs)
+        super().__init__()
+        self._hooking_context_kwargs.update(
+            {
+                "alphas": alphas,
+                "get_test_accuracy": get_test_accuracy,
+                "get_control_adequacy": get_control_adequacy,
+            }
+        )
