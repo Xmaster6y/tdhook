@@ -2,12 +2,12 @@
 Latents
 """
 
-from .linear_probing import LinearProbing
+from .probing import Probing
 from .activation_caching import ActivationCaching
 
 __all__ = [
     "ActivationCaching",
-    "LinearProbing",
+    "Probing",
 ]
 
 # TODO: Implement Activation Patching

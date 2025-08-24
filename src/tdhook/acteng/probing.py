@@ -1,5 +1,5 @@
 """
-Linear probing
+Probing
 """
 
 from typing import Callable, Optional, List, Protocol, Any, Dict
@@ -15,7 +15,7 @@ class Probe(Protocol):
     def step(self, data: Any, **kwargs) -> Any: ...
 
 
-class LinearProbing(HookingContextFactory):
+class Probing(HookingContextFactory):
     def __init__(
         self,
         key_pattern: str,
@@ -23,6 +23,7 @@ class LinearProbing(HookingContextFactory):
         relative: bool = True,
         directions: Optional[List[HookDirection]] = None,
         additional_keys: Optional[List[str]] = None,
+        submodules_paths: Optional[List[str]] = None,
     ):
         super().__init__()
         self._key_pattern = key_pattern
@@ -30,6 +31,7 @@ class LinearProbing(HookingContextFactory):
         self._probe_factory = probe_factory
         self._directions = directions or ["fwd"]
         self._additional_keys = additional_keys
+        self._submodules_paths = submodules_paths
 
     @property
     def key_pattern(self) -> str:
@@ -70,28 +72,48 @@ class LinearProbing(HookingContextFactory):
 
             return HookFactory.make_reading_hook(callback=callback, direction=direction)
 
-        for direction in self._directions:
-            handles.append(
-                self._hook_manager.register_hook(
-                    module, lambda name: hook_factory(name, direction), direction=direction
+        if self._submodules_paths is not None:
+            submodules_n_prefixes = []
+            for submodule_path in self._submodules_paths:
+                submodule = module._resolve_submodule_path(submodule_path, relative=False)
+                prefix = f"{submodule_path}."
+                submodules_n_prefixes.append((submodule, prefix))
+        else:
+            submodules_n_prefixes = [(module, "")]
+
+        for submodule, prefix in submodules_n_prefixes:
+            for direction in self._directions:
+                handles.append(
+                    self._hook_manager.register_hook(
+                        submodule, lambda name: hook_factory(f"{prefix}{name}", direction), direction=direction
+                    )
                 )
-            )
 
         return MultiHookHandle(handles)
 
 
 class SklearnProbe:
-    def __init__(self, probe: Any, predict_callback: Callable[[Any, Any], Any]):
+    def __init__(
+        self,
+        probe: Any,
+        predict_callback: Callable[[Any, Any], Any],
+        data_preprocess_callback: Optional[Callable[[Any], Any]] = None,
+    ):
         self._probe = probe
         self._predict_callback = predict_callback
+        self._data_preprocess_callback = data_preprocess_callback or self._default_data_preprocess_callback
 
     def step(self, data: Any, labels: Any, step_type: str):
+        data = self._data_preprocess_callback(data)
         if step_type == "fit":
-            self._probe.fit(data.detach(), labels)
+            self._probe.fit(data, labels)
         elif step_type == "predict":
-            self._predict_callback(self._probe.predict(data.detach()), labels)
+            self._predict_callback(self._probe.predict(data), labels)
         else:
             raise ValueError(f"Invalid step type: {step_type}")
+
+    def _default_data_preprocess_callback(self, data: Any) -> Any:
+        return data.detach().flatten(1)
 
 
 class SklearnProbeManager:
@@ -101,11 +123,13 @@ class SklearnProbeManager:
         probe_kwargs: dict,
         compute_metrics: Callable[[Any, Any], Dict[str, Any]],
         allow_overwrite: bool = False,
+        data_preprocess_callback: Callable[[Any], Any] = None,
     ):
         self._probe_class = probe_class
         self._probe_kwargs = probe_kwargs
         self._compute_metrics = compute_metrics
         self._allow_overwrite = allow_overwrite
+        self._data_preprocess_callback = data_preprocess_callback
 
         self._probes = {}
         self._metrics = {}
@@ -135,7 +159,7 @@ class SklearnProbeManager:
                 )
             self._metrics[_key] = self._compute_metrics(predictions, labels)
 
-        return SklearnProbe(probe, predict_callback)
+        return SklearnProbe(probe, predict_callback, self._data_preprocess_callback)
 
     def reset_probes(self):
         self._probes = {}
