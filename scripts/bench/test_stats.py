@@ -16,7 +16,7 @@ from importlib import import_module
 
 from .utils import Measurer
 
-SEEDS = [42, 123, 456]
+SEEDS = [42]  # Use only one seed for testing
 TASKS = {
     "gpt2_cache": ["tdhook", "nnsight", "transformer_lens"],
     "integrated_gradients": ["tdhook", "captum_add", "captum"],
@@ -25,10 +25,21 @@ TASKS = {
 }
 
 
-def run_default_task(task, script_name: str, measurer: Measurer):
-    """Run a task."""
+def run_default_task(task, script_name: str, measurer: Measurer, seed):
+    """Run a task with default parameters for a single seed."""
     default_parameters = task.default_parameters
-    measurer.measure_script(script_name, default_parameters)
+    results = {}
+
+    # Create the same structure as get_stats.py but with default parameters only
+    # We'll use a dummy parameter name "default" to maintain schema consistency
+    results["default"] = {}
+    results["default"]["default"] = {}
+
+    parameters = {**default_parameters, "seed": seed}
+    stats = measurer.measure_script(script_name, parameters)
+    results["default"]["default"][seed] = stats
+
+    return results
 
 
 def save_results(results: Dict, output_file: str):
@@ -43,6 +54,7 @@ def save_results(results: Dict, output_file: str):
 def main(args):
     """Run all benchmarks."""
     logger.info("Starting test stats...")
+    logger.info(f"Using seeds: {args.seeds}")
 
     measurer = Measurer()
     results = {}
@@ -52,13 +64,21 @@ def main(args):
     if args.tasks:
         tasks_to_run = {k: v for k, v in TASKS.items() if k in args.tasks}
 
+    # Run base experiment first (baseline)
+    logger.info("Running `_base` task...")
+    measurer.measure_script("scripts/bench/tasks/_base.py", {})  # Warm up
+    results["base"] = {}
+    for seed in args.seeds:
+        stats = measurer.measure_script("scripts/bench/tasks/_base.py", {})
+        results["base"][seed] = stats
+
     for task_name, scripts in tasks_to_run.items():
         results[task_name] = {}
         for script in scripts:
             logger.info(f"Running task `{task_name}` with script `{script}`")
             script_name = f"scripts/bench/tasks/{task_name}/_{script}.py"
             task = import_module(f"scripts.bench.tasks.{task_name}")
-            results[task_name][script] = run_default_task(task, script_name, measurer)
+            results[task_name][script] = run_default_task(task, script_name, measurer, args.seeds[0])
 
     save_results(results, args.output_file)
 
@@ -72,6 +92,7 @@ def parse_args():
 
     parser = argparse.ArgumentParser("test-stats")
     parser.add_argument("--tasks", nargs="+", choices=list(TASKS.keys()), help="Specific tasks to run (default: all)")
+    parser.add_argument("--seeds", nargs="+", type=int, default=SEEDS, help="Seeds to use for benchmarking")
     parser.add_argument(
         "--output-file", type=str, default="./results/bench/test-results.json", help="Output file path for results"
     )

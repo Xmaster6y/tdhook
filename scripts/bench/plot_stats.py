@@ -19,8 +19,8 @@ plots for:
     • spawn_gpu_ram   (host RAM, MB)
     • run_cpu_ram
     • run_gpu_ram
-    • spawn_cpu_gpu_vram (GPU memory, MB)
-    • spawn_gpu_gpu_vram (GPU memory, MB)
+    • spawn_cpu_vram (GPU memory, MB)
+    • spawn_gpu_vram (GPU memory, MB)
     • run_gpu_vram
 
 Dependencies: pandas, seaborn, matplotlib, loguru
@@ -60,8 +60,7 @@ def _aggregate(df: pd.DataFrame) -> pd.DataFrame:
         "spawn_gpu_ram",
         "run_cpu_ram",
         "run_gpu_ram",
-        "spawn_cpu_gpu_vram",
-        "spawn_gpu_gpu_vram",
+        "spawn_gpu_vram",
         "run_gpu_vram",
     ]
 
@@ -194,8 +193,7 @@ def main(args: argparse.Namespace | None = None) -> None:
         "spawn_gpu_ram",
         "run_cpu_ram",
         "run_gpu_ram",
-        "spawn_cpu_gpu_vram",
-        "spawn_gpu_gpu_vram",
+        "spawn_gpu_vram",
         "run_gpu_vram",
     ]
 
