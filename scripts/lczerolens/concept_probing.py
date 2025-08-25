@@ -16,35 +16,15 @@ import torch
 from datasets import load_dataset, Dataset
 from sklearn.linear_model import LogisticRegression
 from lczerolens import LczeroModel
-from lczerolens.concepts import Concept, HasThreat
+from lczerolens.concepts import HasThreat
 from lczerolens.data import BoardData
 
-from tdhook.acteng import ActivationCaching
-
-
-def train_logistic_regression(cache: TensorDict, labels: TensorDict):
-    """Train a logistic regression model."""
-    models = {}
-    for key, value in cache.items():
-        model = LogisticRegression()
-        model.fit(value.flatten(1), labels)
-        models[key] = model
-    return models
-
-
-def test_logistic_regression(cache: TensorDict, labels: TensorDict, models: dict, concept: Concept):
-    """Test a logistic regression model."""
-    metrics = {}
-    for key, value in cache.items():
-        model = models[key]
-        predictions = model.predict(value.flatten(1))
-        metrics[key] = concept.compute_metrics(predictions, labels)
-    return metrics
+from tdhook.acteng.probing import Probing, SklearnProbeManager
 
 
 def main(args: argparse.Namespace):
-    """Run all benchmarks."""
-    logger.info("Starting test stats...")
+    """Run concept probing."""
+    logger.info("Starting concept probing...")
 
     model = LczeroModel.from_path(args.model_path)
     dataset = load_dataset("lczerolens/tcec-boards", split="train", streaming=True)
@@ -61,20 +41,33 @@ def main(args: argparse.Namespace):
     logger.info(f"Positive examples (train): {sum(train_labels)}")
     logger.info(f"Positive examples (test): {sum(test_labels)}")
 
-    train_cache = TensorDict(batch_size=len(train_boards))
-    test_cache = TensorDict(batch_size=len(test_boards))
+    probe_manager = SklearnProbeManager(LogisticRegression, {}, lambda x, y: concept.compute_metrics(x, y))
 
-    with ActivationCaching("block\d/conv2/relu", cache=train_cache).prepare(model) as hooked_module:
+    with Probing("block\d/conv2/relu", probe_manager.probe_factory, additional_keys=["labels", "step_type"]).prepare(
+        model
+    ) as hooked_module:
         with torch.no_grad():
-            hooked_module(train_boards)
+            train_inputs = TensorDict(
+                {
+                    "boards": model.prepare_boards(*train_boards),
+                    "labels": torch.tensor(train_labels),
+                    "step_type": "fit",
+                },
+                batch_size=len(train_boards),
+            )
+            hooked_module(train_inputs)
 
-    with ActivationCaching("block\d/conv2/relu", cache=test_cache).prepare(model) as hooked_module:
-        with torch.no_grad():
-            hooked_module(test_boards)
+            test_inputs = TensorDict(
+                {
+                    "boards": model.prepare_boards(*test_boards),
+                    "labels": torch.tensor(test_labels),
+                    "step_type": "predict",
+                },
+                batch_size=len(test_boards),
+            )
+            hooked_module(test_inputs)
 
-    train_models = train_logistic_regression(train_cache, train_labels)
-    metrics = test_logistic_regression(test_cache, test_labels, train_models, concept)
-    for key, value in metrics.items():
+    for key, value in probe_manager.metrics.items():
         logger.info(f"{key}: {value}")
 
 
