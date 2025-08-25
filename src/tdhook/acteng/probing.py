@@ -97,16 +97,20 @@ class SklearnProbe:
         self,
         probe: Any,
         predict_callback: Callable[[Any, Any], Any],
+        fit_callback: Optional[Callable[[Any, Any], Any]] = None,
         data_preprocess_callback: Optional[Callable[[Any], Any]] = None,
     ):
         self._probe = probe
         self._predict_callback = predict_callback
+        self._fit_callback = fit_callback
         self._data_preprocess_callback = data_preprocess_callback or self._default_data_preprocess_callback
 
     def step(self, data: Any, labels: Any, step_type: str):
         data = self._data_preprocess_callback(data)
         if step_type == "fit":
             self._probe.fit(data, labels)
+            if self._fit_callback is not None:
+                self._fit_callback(self._probe.predict(data), labels)
         elif step_type == "predict":
             self._predict_callback(self._probe.predict(data), labels)
         else:
@@ -132,15 +136,20 @@ class SklearnProbeManager:
         self._data_preprocess_callback = data_preprocess_callback
 
         self._probes = {}
-        self._metrics = {}
+        self._fit_metrics = {}
+        self._predict_metrics = {}
 
     @property
     def probes(self) -> dict[str, SklearnProbe]:
         return self._probes
 
     @property
-    def metrics(self) -> dict[str, Any]:
-        return self._metrics
+    def fit_metrics(self) -> dict[str, Any]:
+        return self._fit_metrics
+
+    @property
+    def predict_metrics(self) -> dict[str, Any]:
+        return self._predict_metrics
 
     def probe_factory(self, key: str, direction: HookDirection) -> SklearnProbe:
         _key = f"{key}_{direction}"
@@ -153,16 +162,25 @@ class SklearnProbeManager:
 
         def predict_callback(predictions: Any, labels: Any):
             nonlocal self
-            if _key in self._metrics and not self._allow_overwrite:
+            if _key in self._predict_metrics and not self._allow_overwrite:
                 raise ValueError(
                     f"Metrics for {_key} already exist, call reset_metrics() to reset the metrics or use allow_overwrite=True to overwrite the existing metrics"
                 )
-            self._metrics[_key] = self._compute_metrics(predictions, labels)
+            self._predict_metrics[_key] = self._compute_metrics(predictions, labels)
 
-        return SklearnProbe(probe, predict_callback, self._data_preprocess_callback)
+        def fit_callback(predictions: Any, labels: Any):
+            nonlocal self
+            if _key in self._fit_metrics and not self._allow_overwrite:
+                raise ValueError(
+                    f"Metrics for {_key} already exist, call reset_metrics() to reset the metrics or use allow_overwrite=True to overwrite the existing metrics"
+                )
+            self._fit_metrics[_key] = self._compute_metrics(predictions, labels)
+
+        return SklearnProbe(probe, predict_callback, fit_callback, self._data_preprocess_callback)
 
     def reset_probes(self):
         self._probes = {}
 
     def reset_metrics(self):
-        self._metrics = {}
+        self._fit_metrics = {}
+        self._predict_metrics = {}

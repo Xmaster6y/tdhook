@@ -69,8 +69,9 @@ class TestProbing:
             )
             hooked_module(inputs)
             assert storage_key in probe_manager.probes
-            assert storage_key not in probe_manager.metrics
+            assert storage_key in probe_manager.fit_metrics
+            assert storage_key not in probe_manager.predict_metrics
 
             inputs["step_type"] = "predict"
             hooked_module(inputs)
-            assert storage_key in probe_manager.metrics
+            assert storage_key in probe_manager.predict_metrics
