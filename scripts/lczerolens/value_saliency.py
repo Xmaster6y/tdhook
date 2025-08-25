@@ -27,6 +27,21 @@ def main(args: argparse.Namespace):
         board.push_uci(move)
     td = TensorDict(boards=model.prepare_boards(board), batch_size=1)
 
+    def best_logit_init_targets(td: TensorDict, _):
+        policy = td["policy"]
+        best_logit = policy.max(dim=-1).values
+        return TensorDict(out=best_logit, batch_size=td.batch_size)
+
+    logger.info("Computing best move saliency...")
+    saliency_context = Saliency(init_attr_targets=best_logit_init_targets)
+    with saliency_context.prepare(model) as hooked_model:
+        output = hooked_model(td)
+        move = board.decode_move(output[("_mod_out", "policy")][0].argmax())
+        arrows = [(move.from_square, move.to_square)]
+        logger.info(f"Best move: ({move})")
+        attr = output.get(("attr", "boards")).sum(dim=1).view(64)
+        board.render_heatmap(attr, arrows=arrows, save_to="results/lczerolens/best_move_saliency.svg", normalise="abs")
+
     def get_init_targets(idx: int):
         def init_targets(td, _):
             return TensorDict(out=td["wdl"][..., idx], batch_size=td.batch_size)
