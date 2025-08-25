@@ -12,7 +12,7 @@ __all__ = [
     "metrics",
     "module",
     # Methods
-    "acteng",
+    "latent",
     "attribution",
     "auto",
     "weights",

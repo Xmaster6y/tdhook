@@ -19,7 +19,7 @@ from lczerolens import LczeroModel
 from lczerolens.concepts import HasThreat
 from lczerolens.data import BoardData
 
-from tdhook.acteng.probing import Probing, SklearnProbeManager
+from tdhook.latent.probing import Probing, SklearnProbeManager
 
 
 def main(args: argparse.Namespace):

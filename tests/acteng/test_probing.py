@@ -9,7 +9,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score
 from tensordict import TensorDict
 
-from tdhook.acteng.probing import Probing, SklearnProbeManager
+from tdhook.latent.probing import Probing, SklearnProbeManager
 
 
 class TestProbe:

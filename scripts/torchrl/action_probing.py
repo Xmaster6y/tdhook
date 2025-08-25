@@ -28,7 +28,7 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score
 import matplotlib.pyplot as plt
 
-from tdhook.acteng.probing import Probing, SklearnProbeManager
+from tdhook.latent.probing import Probing, SklearnProbeManager
 
 # Set plotting style similar to benchmark plots
 plt.style.use("default")

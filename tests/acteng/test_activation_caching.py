@@ -5,7 +5,7 @@ Tests for the activation caching functionality.
 import torch
 from tensordict import TensorDict, MemoryMappedTensor
 
-from tdhook.acteng.activation_caching import ActivationCaching
+from tdhook.latent.activation_caching import ActivationCaching
 from tdhook.module import get_best_device
 
 

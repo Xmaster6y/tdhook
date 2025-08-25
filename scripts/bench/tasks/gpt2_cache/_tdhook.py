@@ -11,7 +11,7 @@ from tensordict import TensorDict
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from tdhook.module import HookedModule
-from tdhook.acteng.activation_caching import ActivationCaching
+from tdhook.latent.activation_caching import ActivationCaching
 
 
 cuda_available = torch.cuda.is_available()
