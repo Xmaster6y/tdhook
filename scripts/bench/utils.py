@@ -4,7 +4,9 @@ Utils for benchmarking.
 
 import re
 import subprocess
-from typing import Dict, Any
+from typing import Dict, Any, List
+import numpy as np
+import pandas as pd
 from loguru import logger
 
 
@@ -32,6 +34,61 @@ def run_command(command, cwd=None, return_stderr=False):
         if return_stderr:
             return None, None
         return None
+
+
+def flatten_results(raw: Dict) -> pd.DataFrame:
+    """Return a tidy DataFrame from the benchmark json structure.
+
+    This function flattens the nested JSON structure from benchmark results into a pandas DataFrame
+    that can be easily analyzed and plotted. It handles the split spawn experiments (spawn_cpu and spawn_gpu).
+
+    Args:
+        raw: Dictionary containing benchmark results with structure:
+             task -> library -> parameter_name -> parameter_value -> seed -> {spawn_cpu, spawn_gpu, run_cpu, run_gpu}
+
+    Returns:
+        DataFrame with columns: task, lib, parameter, value, seed, and all metrics
+
+    Raises:
+        ValueError: If the results json doesn't contain a 'base' key
+    """
+    if "base" not in raw:
+        raise ValueError("results json must contain a 'base' key with baseline numbers")
+
+    rows: List[Dict] = []
+
+    for task, libs in raw.items():
+        if task == "base":
+            continue
+
+        for lib, params in libs.items():
+            for param_name, param_vals in params.items():
+                for param_val, seeds in param_vals.items():
+                    for seed_str, runs in seeds.items():
+                        row = {
+                            "task": task,
+                            "lib": lib,
+                            "parameter": param_name,
+                            "value": str(param_val),
+                            "seed": int(seed_str),
+                            # times (seconds)
+                            "spawn_cpu_time": runs["spawn_cpu"]["wall_time"],
+                            "spawn_gpu_time": runs["spawn_gpu"]["wall_time"],
+                            "run_cpu_time": runs.get("run_cpu", {}).get("wall_time", np.nan),
+                            "run_gpu_time": runs.get("run_gpu", {}).get("wall_time", np.nan),
+                            # host RAM (MB)
+                            "spawn_cpu_ram": runs["spawn_cpu"]["max_ram_used_kb"] / 1024,
+                            "spawn_gpu_ram": runs["spawn_gpu"]["max_ram_used_kb"] / 1024,
+                            "run_cpu_ram": runs.get("run_cpu", {}).get("max_ram_used_kb", np.nan) / 1024,
+                            "run_gpu_ram": runs.get("run_gpu", {}).get("max_ram_used_kb", np.nan) / 1024,
+                            # vram (MB)
+                            "spawn_cpu_gpu_vram": runs["spawn_cpu"].get("max_gpu_memory_kb", 0.0) / 1024,
+                            "spawn_gpu_gpu_vram": runs["spawn_gpu"].get("max_gpu_memory_kb", 0.0) / 1024,
+                            "run_gpu_vram": runs.get("run_gpu", {}).get("max_gpu_memory_kb", np.nan) / 1024,
+                        }
+                        rows.append(row)
+
+    return pd.DataFrame(rows)
 
 
 class Measurer:
@@ -62,7 +119,8 @@ class Measurer:
         command = f"time -f '{self.time_fmt}' .venv/bin/python {script_name} {params}"
 
         args = {
-            "spawn": "--no-run",
+            "spawn_cpu": "--no-run --no-cuda",
+            "spawn_gpu": "--no-run --cuda",
             "run_cpu": "--run --no-cuda",
             "run_gpu": "--run --cuda",
         }

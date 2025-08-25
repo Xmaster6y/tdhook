@@ -7,17 +7,20 @@ Usage:
         --output-dir ./results/bench/plots
 
 The script assumes the JSON hierarchy:
-    task -> library -> parameter_name -> parameter_value -> seed -> {spawn, run_cpu, run_gpu}
+    task -> library -> parameter_name -> parameter_value -> seed -> {spawn_cpu, spawn_gpu, run_cpu, run_gpu}
 
 It flattens this structure, aggregates mean±std over seeds, and creates grouped bar
 plots for:
-    • spawn_time  (wall-time, seconds)
+    • spawn_cpu_time  (wall-time, seconds)
+    • spawn_gpu_time  (wall-time, seconds)
     • run_cpu_time
     • run_gpu_time
-    • spawn_ram   (host RAM, MB)
+    • spawn_cpu_ram   (host RAM, MB)
+    • spawn_gpu_ram   (host RAM, MB)
     • run_cpu_ram
     • run_gpu_ram
-    • spawn_gpu_vram (GPU memory, MB)
+    • spawn_cpu_gpu_vram (GPU memory, MB)
+    • spawn_gpu_gpu_vram (GPU memory, MB)
     • run_gpu_vram
 
 Dependencies: pandas, seaborn, matplotlib, loguru
@@ -28,13 +31,15 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict
 
 import numpy as np
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 from loguru import logger
+
+from .utils import flatten_results
 
 sns.set_theme(style="whitegrid")
 
@@ -43,56 +48,20 @@ sns.set_theme(style="whitegrid")
 # ---------------------------------------------------------------------------
 
 
-def _flatten_results(raw: Dict) -> pd.DataFrame:
-    """Return a tidy DataFrame from the benchmark json structure."""
-
-    if "base" not in raw:
-        raise ValueError("results json must contain a 'base' key with baseline numbers")
-
-    rows: List[Dict] = []
-
-    for task, libs in raw.items():
-        if task == "base":
-            continue
-
-        for lib, params in libs.items():  # e.g. tdhook / nnsight / transformer_lens
-            for param_name, param_vals in params.items():  # e.g. model_size / width / batch_size / variation …
-                for param_val, seeds in param_vals.items():  # actual value of the varying parameter
-                    for seed_str, runs in seeds.items():  # each seed is a dict with spawn/run_*
-                        row = {
-                            "task": task,
-                            "lib": lib,
-                            "parameter": param_name,
-                            "value": str(param_val),
-                            "seed": int(seed_str),
-                            # times (seconds)
-                            "spawn_time": runs["spawn"]["wall_time"],
-                            "run_cpu_time": runs.get("run_cpu", {}).get("wall_time", np.nan),
-                            "run_gpu_time": runs.get("run_gpu", {}).get("wall_time", np.nan),
-                            # host RAM (MB)
-                            "spawn_ram": runs["spawn"]["max_ram_used_kb"] / 1024,
-                            "run_cpu_ram": runs.get("run_cpu", {}).get("max_ram_used_kb", np.nan) / 1024,
-                            "run_gpu_ram": runs.get("run_gpu", {}).get("max_ram_used_kb", np.nan) / 1024,
-                            # vram (MB)
-                            "spawn_gpu_vram": runs["spawn"].get("max_gpu_memory_kb", 0.0) / 1024,
-                            "run_gpu_vram": runs.get("run_gpu", {}).get("max_gpu_memory_kb", np.nan) / 1024,
-                        }
-                        rows.append(row)
-
-    return pd.DataFrame(rows)
-
-
 def _aggregate(df: pd.DataFrame) -> pd.DataFrame:
     """Return mean & std per (task, lib, parameter, value) combination."""
 
     metrics = [
-        "spawn_time",
+        "spawn_cpu_time",
+        "spawn_gpu_time",
         "run_cpu_time",
         "run_gpu_time",
-        "spawn_ram",
+        "spawn_cpu_ram",
+        "spawn_gpu_ram",
         "run_cpu_ram",
         "run_gpu_ram",
-        "spawn_gpu_vram",
+        "spawn_cpu_gpu_vram",
+        "spawn_gpu_gpu_vram",
         "run_gpu_vram",
     ]
 
@@ -211,19 +180,22 @@ def main(args: argparse.Namespace | None = None) -> None:
     with input_path.open() as f:
         raw: Dict = json.load(f)
 
-    df = _flatten_results(raw)
+    df = flatten_results(raw)
     agg = _aggregate(df)
 
     logger.info(f"Loaded {len(df)} runs → {len(agg)} aggregated rows")
 
     metrics = [
-        "spawn_time",
+        "spawn_cpu_time",
+        "spawn_gpu_time",
         "run_cpu_time",
         "run_gpu_time",
-        "spawn_ram",
+        "spawn_cpu_ram",
+        "spawn_gpu_ram",
         "run_cpu_ram",
         "run_gpu_ram",
-        "spawn_gpu_vram",
+        "spawn_cpu_gpu_vram",
+        "spawn_gpu_gpu_vram",
         "run_gpu_vram",
     ]
 

@@ -19,7 +19,6 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Dict, List
 
 import numpy as np
 import pandas as pd
@@ -27,48 +26,11 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 from loguru import logger
 
+from .utils import flatten_results
+
 # ---------------------------------------------------------------------------
 # Data processing helpers
 # ---------------------------------------------------------------------------
-
-
-def _flatten_results(raw: Dict) -> pd.DataFrame:
-    """Return a tidy DataFrame from the benchmark json structure."""
-
-    if "base" not in raw:
-        raise ValueError("results json must contain a 'base' key with baseline numbers")
-
-    rows: List[Dict] = []
-
-    for task, libs in raw.items():
-        if task == "base":
-            continue
-
-        for lib, params in libs.items():
-            for param_name, param_vals in params.items():
-                for param_val, seeds in param_vals.items():
-                    for seed_str, runs in seeds.items():
-                        row = {
-                            "task": task,
-                            "lib": lib,
-                            "parameter": param_name,
-                            "value": str(param_val),
-                            "seed": int(seed_str),
-                            # times (seconds)
-                            "spawn_time": runs["spawn"]["wall_time"],
-                            "run_cpu_time": runs.get("run_cpu", {}).get("wall_time", np.nan),
-                            "run_gpu_time": runs.get("run_gpu", {}).get("wall_time", np.nan),
-                            # host RAM (MB)
-                            "spawn_ram": runs["spawn"]["max_ram_used_kb"] / 1024,
-                            "run_cpu_ram": runs.get("run_cpu", {}).get("max_ram_used_kb", np.nan) / 1024,
-                            "run_gpu_ram": runs.get("run_gpu", {}).get("max_ram_used_kb", np.nan) / 1024,
-                            # vram (MB)
-                            "spawn_gpu_vram": runs["spawn"].get("max_gpu_memory_kb", 0.0) / 1024,
-                            "run_gpu_vram": runs.get("run_gpu", {}).get("max_gpu_memory_kb", np.nan) / 1024,
-                        }
-                        rows.append(row)
-
-    return pd.DataFrame(rows)
 
 
 def _compute_relative_metrics(df: pd.DataFrame) -> pd.DataFrame:
@@ -80,13 +42,16 @@ def _compute_relative_metrics(df: pd.DataFrame) -> pd.DataFrame:
     """
 
     metrics = [
-        "spawn_time",
+        "spawn_cpu_time",
+        "spawn_gpu_time",
         "run_cpu_time",
         "run_gpu_time",
-        "spawn_ram",
+        "spawn_cpu_ram",
+        "spawn_gpu_ram",
         "run_cpu_ram",
         "run_gpu_ram",
-        "spawn_gpu_vram",
+        "spawn_cpu_gpu_vram",
+        "spawn_gpu_gpu_vram",
         "run_gpu_vram",
     ]
 
@@ -98,8 +63,8 @@ def _compute_relative_metrics(df: pd.DataFrame) -> pd.DataFrame:
     # Add run-only metrics: run_metric - spawn_metric for time metrics only
     # Map run time metrics to their spawn counterparts
     run_spawn_mapping = {
-        "run_cpu_time": "spawn_time",
-        "run_gpu_time": "spawn_time",
+        "run_cpu_time": "spawn_cpu_time",
+        "run_gpu_time": "spawn_gpu_time",
     }
 
     run_only_metrics = []
@@ -255,13 +220,16 @@ def _plot_combined_summary(agg_df: pd.DataFrame, output_dir: Path):
     run_only_cols = [col for col in pivot_df.columns if col.startswith("run_only_")]
     ordered_cols = sorted(spawn_cols) + sorted(run_memory_cols) + sorted(run_only_cols)
     ordered_cols = [
-        "spawn_time",
+        "spawn_cpu_time",
+        "spawn_gpu_time",
         "run_only_cpu_time",
         "run_only_gpu_time",
-        "spawn_ram",
+        "spawn_cpu_ram",
+        "spawn_gpu_ram",
         "run_cpu_ram",
         "run_gpu_ram",
-        "spawn_gpu_vram",
+        "spawn_cpu_gpu_vram",
+        "spawn_gpu_gpu_vram",
         "run_gpu_vram",
     ]
     pivot_df = pivot_df[ordered_cols]
@@ -350,7 +318,7 @@ def main(args: argparse.Namespace | None = None) -> None:
         raw = json.load(f)
 
     # Process data
-    df = _flatten_results(raw)
+    df = flatten_results(raw)
     logger.info(f"Loaded {len(df)} runs")
 
     # Filter out captum_add library
