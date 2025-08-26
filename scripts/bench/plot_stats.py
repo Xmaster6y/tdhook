@@ -94,7 +94,29 @@ def _plot_metric(
 
     for parameter, df_param in subset.groupby("parameter"):
         plt.figure(figsize=(10, 6))
-        order = sorted(df_param["value"].unique(), key=lambda x: (str(x).isdigit(), x))
+        # Sort the x-axis values so that numeric entries are ordered numerically and
+        # non-numeric entries alphabetically. Numeric values (convertible to ``int``)
+        # are displayed first, followed by the remaining values in lexicographic
+        # order. This ensures an intuitive left-to-right progression for plots such
+        # as batch-sizes (8, 16, 32, …) while still handling categorical settings
+        # like "relu" / "tanh" gracefully.
+
+        def _sort_key(v):
+            """Return a tuple usable as a sort key.
+
+            The first element indicates whether the value is *non-numeric* (1) or
+            *numeric* (0). The second element is the numeric value itself or the
+            string representation, so that ``sorted`` arranges numeric values in
+            ascending order and strings alphabetically.
+            """
+
+            try:
+                return (0, int(v))
+            except (ValueError, TypeError):
+                # Fall back to string comparison for non-numeric values.
+                return (1, str(v))
+
+        order = sorted(df_param["value"].unique(), key=_sort_key)
 
         # Reset index to ensure 0..n sequential for bar/error mapping
         df_plot = df_param.reset_index(drop=True)

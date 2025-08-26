@@ -115,7 +115,7 @@ def flatten_results(raw: Dict) -> pd.DataFrame:
 
     Args:
         raw: Dictionary containing benchmark results with structure:
-             base -> {spawn_cpu, spawn_gpu, run_cpu, run_gpu}
+             base -> seed -> {spawn_cpu, spawn_gpu, run_cpu, run_gpu}
              task -> library -> parameter_name -> parameter_value -> seed -> {spawn_cpu, spawn_gpu, run_cpu, run_gpu}
 
     Returns:
@@ -131,9 +131,19 @@ def flatten_results(raw: Dict) -> pd.DataFrame:
 
     # Handle base experiment first
     base_runs = raw["base"]
-    base_metrics = _extract_metrics_from_run(base_runs)
-    base_row = {"task": "base", "lib": "base", "parameter": "baseline", "value": "baseline", "seed": 0, **base_metrics}
-    rows.append(base_row)
+
+    # Base experiments are mapped from seed → runs.
+    for seed_str, runs in base_runs.items():
+        base_metrics = _extract_metrics_from_run(runs)
+        base_row = {
+            "task": "base",
+            "lib": "base",
+            "parameter": "baseline",
+            "value": "baseline",
+            "seed": int(seed_str),
+            **base_metrics,
+        }
+        rows.append(base_row)
 
     # Handle task experiments
     for task, libs in raw.items():
