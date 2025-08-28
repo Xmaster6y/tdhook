@@ -529,7 +529,7 @@ def main():
     # Filter out captum_add if present (it's a duplicate)
     if "captum_add" in df["lib"].values:
         df = df[df["lib"] != "captum_add"]
-        logger.info("Filtered out captum_add, remaining {} runs".format(len(df)))
+        logger.info(f"Filtered out captum_add, remaining {len(df)} runs")
 
     # Compute relative metrics vs TDHook
     df_relative = _compute_relative_metrics(df)
