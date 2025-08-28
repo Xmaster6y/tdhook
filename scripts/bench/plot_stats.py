@@ -220,7 +220,7 @@ def main(args: argparse.Namespace | None = None) -> None:
     ]
 
     sns.set_palette("tab10")
-    palette = {lib: col for lib, col in zip(sorted(df["lib"].unique()), sns.color_palette())}
+    palette = dict(zip(sorted(df["lib"].unique()), sns.color_palette()))
 
     tasks = [args.task] if args.task else sorted(df["task"].unique())
 
