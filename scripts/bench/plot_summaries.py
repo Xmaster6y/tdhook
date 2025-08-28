@@ -165,10 +165,7 @@ def _compute_relative_metrics(flattened_df: pd.DataFrame) -> pd.DataFrame:
 
                 relative_rows.append(relative_row)
 
-    # Convert to DataFrame
-    relative_df = pd.DataFrame(relative_rows)
-
-    return relative_df
+    return pd.DataFrame(relative_rows)
 
 
 def _aggregate_relative_metrics(relative_df: pd.DataFrame) -> pd.DataFrame:
