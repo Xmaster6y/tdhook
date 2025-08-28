@@ -2,39 +2,76 @@
 Tests for the probing functionality.
 """
 
-import torch.nn as nn
+import pytest
 import torch
 
-from tdhook.acteng.linear_probing import LinearProbing
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score
+from tensordict import TensorDict
+
+from tdhook.latent.probing import Probing, SklearnProbeManager
 
 
-class TestLinearProbing:
-    """Test the LinearProbing class."""
+class TestProbe:
+    def __init__(self):
+        self.called = False
 
-    def test_probing_context_creation(self, default_test_model):
-        """Test creating a LinearProbing."""
+    def step(self, data):
+        self.called = True
+
+
+class TestProbing:
+    """Test the Probing class."""
+
+    @pytest.mark.parametrize(
+        "relative_n_key",
+        (
+            (False, "td_module.module.linear2"),
+            (True, "linear2"),
+        ),
+    )
+    def test_simple_probing(self, default_test_model, relative_n_key):
+        """Test creating a Probing."""
+        relative, key = relative_n_key
+
+        probes = {}
 
         def probe_factory(key, direction):
-            return nn.Linear(20, 1)
+            probes[key] = TestProbe()
+            return probes[key]
 
-        context = LinearProbing("td_module\.module\.linear2", probe_factory, relative=False)
-        assert isinstance(context, LinearProbing)
+        context = Probing(key, probe_factory, relative=relative)
 
-        inputs = torch.randn(2, 10)
         with context.prepare(default_test_model) as hooked_module:
+            inputs = TensorDict({"input": torch.randn(2, 10)}, batch_size=2)
             hooked_module(inputs)
-        assert "td_module.module.linear2" in context.cache
+            assert key in probes
+            assert probes[key].called
 
-    def test_probing_context_creation_relative(self, default_test_model):
-        """Test creating a LinearProbing with relative naming."""
+    @pytest.mark.parametrize(
+        "relative_n_key",
+        (
+            (False, "td_module.module.linear2"),
+            (True, "linear2"),
+        ),
+    )
+    def test_sklearn_probing(self, default_test_model, relative_n_key):
+        """Test creating a Probing."""
+        relative, key = relative_n_key
+        storage_key = f"{key}_fwd"
 
-        def probe_factory(key, direction):
-            return nn.Linear(20, 1)
+        probe_manager = SklearnProbeManager(LogisticRegression, {}, lambda x, y: {"accuracy": accuracy_score(x, y)})
+        context = Probing(key, probe_manager.probe_factory, relative=relative, additional_keys=["labels", "step_type"])
 
-        context = LinearProbing("linear2", probe_factory, relative=True)
-        assert isinstance(context, LinearProbing)
-
-        inputs = torch.randn(2, 10)
         with context.prepare(default_test_model) as hooked_module:
+            inputs = TensorDict(
+                {"input": torch.randn(2, 10), "labels": torch.tensor([1, 4]), "step_type": "fit"}, batch_size=2
+            )
             hooked_module(inputs)
-        assert "linear2" in context.cache
+            assert storage_key in probe_manager.probes
+            assert storage_key in probe_manager.fit_metrics
+            assert storage_key not in probe_manager.predict_metrics
+
+            inputs["step_type"] = "predict"
+            hooked_module(inputs)
+            assert storage_key in probe_manager.predict_metrics

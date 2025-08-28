@@ -37,6 +37,7 @@ class Context2(HookingContextFactory):
 
 class PrepFlagFactory(HookingContextFactory):
     def __init__(self, flag_name: str = "prep_flag"):
+        super().__init__()
         self.flag_name = flag_name
 
     def _prepare_module(

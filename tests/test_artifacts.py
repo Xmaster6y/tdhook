@@ -11,7 +11,6 @@ class TestCircuit:
             "bias": torch.randn(10) > 0,
         }
         circuit = Circuit(data)
-        assert isinstance(circuit, Circuit)
         assert circuit.dtype == torch.bool
 
     def test_circuit_merge(self):

@@ -26,6 +26,7 @@ class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
         clean_keys: bool = True,
         keep_output_keys: bool = True,
     ):
+        super().__init__()
         self._init_attr_targets = init_attr_targets
         self._init_attr_inputs = init_attr_inputs
         self._init_attr_grads = init_attr_grads

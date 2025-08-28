@@ -15,8 +15,11 @@ from .utils import Measurer
 
 def log_stats(stats: dict):
     """Log the stats."""
-    logger.info("Spawn stats:")
-    for key, value in stats["spawn"].items():
+    logger.info("Spawn CPU stats:")
+    for key, value in stats["spawn_cpu"].items():
+        logger.info(f"  {key}: {value}")
+    logger.info("Spawn GPU stats:")
+    for key, value in stats["spawn_gpu"].items():
         logger.info(f"  {key}: {value}")
     logger.info("Run CPU stats:")
     for key, value in stats["run_cpu"].items():

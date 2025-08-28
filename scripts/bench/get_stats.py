@@ -35,7 +35,6 @@ def run_task(task, script_name: str, measurer: Measurer, seeds):
         for value in values:
             results[parameter][value] = {}
             for seed in seeds:
-                results[parameter][value][seed] = {}
                 parameters = {**default_parameters, parameter: value, "seed": seed}
                 stats = measurer.measure_script(script_name, parameters)
                 results[parameter][value][seed] = stats
@@ -65,8 +64,11 @@ def main(args):
         tasks_to_run = {k: v for k, v in TASKS.items() if k in args.tasks}
 
     logger.info("Running `_base` task...")
-    stats = measurer.measure_script("scripts/bench/tasks/_base.py", {})
-    results["base"] = stats
+    measurer.measure_script("scripts/bench/tasks/_base.py", {})  # Warm up
+    results["base"] = {}
+    for seed in args.seeds:
+        stats = measurer.measure_script("scripts/bench/tasks/_base.py", {})
+        results["base"][seed] = stats
 
     for task_name, scripts in tasks_to_run.items():
         results[task_name] = {}

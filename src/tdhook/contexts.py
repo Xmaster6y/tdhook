@@ -83,6 +83,10 @@ class HookingContextFactory:
     _hooked_module_class = HookedModule
     _hooking_context_class = HookingContext
 
+    def __init__(self):
+        self._hooking_context_kwargs = {}
+        self._hooked_module_kwargs = {}
+
     def prepare(
         self,
         module: nn.Module,
@@ -106,7 +110,7 @@ class HookingContextFactory:
                     if key not in module.out_keys:
                         raise ValueError(f"Key {key} not in module.out_keys")
 
-        return self._hooking_context_class(self, module, in_keys, out_keys)
+        return self._hooking_context_class(self, module, in_keys, out_keys, **self._hooking_context_kwargs)
 
     def _prepare_module(
         self,
@@ -124,7 +128,7 @@ class HookingContextFactory:
     def _spawn_hooked_module(
         self, prep_module: TensorDictModuleBase, hooking_context: "HookingContext"
     ) -> HookedModule:
-        return self._hooked_module_class(prep_module, hooking_context=hooking_context)
+        return self._hooked_module_class(prep_module, hooking_context=hooking_context, **self._hooked_module_kwargs)
 
     def _hook_module(self, module: HookedModule) -> MultiHookHandle:
         return MultiHookHandle()
@@ -132,14 +136,21 @@ class HookingContextFactory:
 
 class CompositeHookingContextFactory(HookingContextFactory):
     def __init__(self, *contexts: HookingContextFactory):
+        super().__init__()
         self._contexts = contexts
-        composite_overriden = type(self)._spawn_hooked_module != HookingContextFactory._spawn_hooked_module
+        attributes = ("_spawn_hooked_module", "_hooking_context_class", "_hooked_module_class")
+        composite_overriden = {
+            attr: getattr(type(self), attr) != getattr(HookingContextFactory, attr) for attr in attributes
+        }
         for context in contexts:
-            context_overriden = type(context)._spawn_hooked_module != HookingContextFactory._spawn_hooked_module
-            if context_overriden and not composite_overriden:
-                raise ValueError(
-                    "Cannot compose factories that override _spawn_hooked_module, consider subclassing this factory to override _spawn_hooked_module"
-                )
+            for attr in attributes:
+                if (
+                    getattr(type(context), attr) != getattr(HookingContextFactory, attr)
+                    and not composite_overriden[attr]
+                ):
+                    raise ValueError(
+                        f"Cannot compose factories that override {attr}, consider subclassing this factory to override {attr}"
+                    )
 
     def _prepare_module(
         self,

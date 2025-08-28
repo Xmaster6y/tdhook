@@ -68,7 +68,9 @@ def td_grad(
         tup_grad_outputs = tuple(grad_outputs[k] for k in grad_outputs.keys(True, True))
 
     tup_grads = torch.autograd.grad(tup_outputs, tup_inputs, tup_grad_outputs, **kwargs)
-    return TensorDict(dict(zip(inputs.keys(True, True), tup_grads)), batch_size=inputs.batch_size)
+    return TensorDict(
+        dict(zip(inputs.keys(True, True), tup_grads)), batch_size=inputs.batch_size, device=inputs.device
+    )
 
 
 def flatten_reshape_call(module: TensorDictModuleBase, td: TensorDict) -> TensorDict:
@@ -278,10 +280,10 @@ class HookedModule(TensorDictModuleWrapper):
         Resolve a submodule path that may contain indexing expressions.
 
         Supports any valid Python attribute access and indexing:
-        - "layers[-1]" -> self.layers[-1]
-        - "layers['attr']" -> self.layers['attr']
-        - "layers.attention" -> self.layers.attention
-        - "layers[1:3]" -> self.layers[1:3]
+        - "layers[-1]" -> root.layers[-1]
+        - "layers['attr']" -> root.layers['attr']
+        - "layers.attention" -> root.layers.attention
+        - "layers[1:3]" -> root.layers[1:3]
         """
         root = self.td_module.module if relative else self
 
