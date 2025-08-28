@@ -45,29 +45,18 @@ def _extract_metrics_from_run(runs: Dict) -> Dict:
     Returns:
         Dictionary with extracted metrics
     """
-    metrics = {}
-
-    # Extract spawn metrics (same for both base and task experiments)
-    metrics.update(
-        {
-            "spawn_cpu_time": runs["spawn_cpu"]["wall_time"],
-            "spawn_gpu_time": runs["spawn_gpu"]["wall_time"],
-            "spawn_cpu_ram": runs["spawn_cpu"]["max_ram_used_kb"] / 1024,
-            "spawn_gpu_ram": runs["spawn_gpu"]["max_ram_used_kb"] / 1024,
-            "spawn_gpu_vram": runs["spawn_gpu"].get("max_gpu_memory_kb", 0.0) / 1024,
-        }
-    )
-
-    # Extract run metrics (same for both base and task experiments)
-    metrics.update(
-        {
-            "run_cpu_time": runs.get("run_cpu", {}).get("wall_time", np.nan),
-            "run_gpu_time": runs.get("run_gpu", {}).get("wall_time", np.nan),
-            "run_cpu_ram": runs.get("run_cpu", {}).get("max_ram_used_kb", np.nan) / 1024,
-            "run_gpu_ram": runs.get("run_gpu", {}).get("max_ram_used_kb", np.nan) / 1024,
-            "run_gpu_vram": runs.get("run_gpu", {}).get("max_gpu_memory_kb", np.nan) / 1024,
-        }
-    )
+    metrics = {
+        "spawn_cpu_time": runs["spawn_cpu"]["wall_time"],
+        "spawn_gpu_time": runs["spawn_gpu"]["wall_time"],
+        "spawn_cpu_ram": runs["spawn_cpu"]["max_ram_used_kb"] / 1024,
+        "spawn_gpu_ram": runs["spawn_gpu"]["max_ram_used_kb"] / 1024,
+        "spawn_gpu_vram": runs["spawn_gpu"].get("max_gpu_memory_kb", 0.0) / 1024,
+        "run_cpu_time": runs.get("run_cpu", {}).get("wall_time", np.nan),
+        "run_gpu_time": runs.get("run_gpu", {}).get("wall_time", np.nan),
+        "run_cpu_ram": runs.get("run_cpu", {}).get("max_ram_used_kb", np.nan) / 1024,
+        "run_gpu_ram": runs.get("run_gpu", {}).get("max_ram_used_kb", np.nan) / 1024,
+        "run_gpu_vram": runs.get("run_gpu", {}).get("max_gpu_memory_kb", np.nan) / 1024,
+    }
 
     # Calculate run_only metrics (actual execution time minus spawn overhead)
     if "task" in runs or "run_cpu" in runs:

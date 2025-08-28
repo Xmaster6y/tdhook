@@ -3,6 +3,8 @@ Tests for the activation caching functionality.
 """
 
 import torch
+import shutil
+from pathlib import Path
 from tensordict import TensorDict, MemoryMappedTensor
 
 from tdhook.latent.activation_caching import ActivationCaching
@@ -54,5 +56,13 @@ class TestActivationCaching:
         inputs = torch.randn(2, 10)
         with context.prepare(default_test_model) as hooked_module:
             hooked_module(inputs)
-        memmap_cache = cache.memmap("results/tests/test_memmap_cache.pt", True)
+        path = "results/tests/test_memmap_cache.pt"
+        memmap_cache = cache.memmap(path, True)
         assert isinstance(memmap_cache["linear2"], MemoryMappedTensor)
+
+        path_obj = Path(path)
+        if path_obj.exists():
+            if path_obj.is_dir():
+                shutil.rmtree(path_obj)
+            else:
+                path_obj.unlink()

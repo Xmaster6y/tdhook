@@ -250,13 +250,11 @@ def parse_layer_number(key: str) -> tuple[str, int]:
     if key == "baseline":
         return "baseline", -1
     elif "actor_network" in key:
-        match = re.search(r"actor_network\[0\]\.module\[0\]\.(\d+)_fwd", key)
-        if match:
-            return "actor", int(match.group(1))
+        if match := re.search(r"actor_network\[0\]\.module\[0\]\.(\d+)_fwd", key):
+            return "actor", int(match[1])
     elif "critic_network" in key:
-        match = re.search(r"critic_network\.(\d+)_fwd", key)
-        if match:
-            return "critic", int(match.group(1))
+        if match := re.search(r"critic_network\.(\d+)_fwd", key):
+            return "critic", int(match[1])
     return None, None
 
 

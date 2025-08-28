@@ -28,18 +28,11 @@ TASKS = {
 def run_default_task(task, script_name: str, measurer: Measurer, seed):
     """Run a task with default parameters for a single seed."""
     default_parameters = task.default_parameters
-    results = {}
-
-    # Create the same structure as get_stats.py but with default parameters only
-    # We'll use a dummy parameter name "default" to maintain schema consistency
-    results["default"] = {}
-    results["default"]["default"] = {}
 
     parameters = {**default_parameters, "seed": seed}
     stats = measurer.measure_script(script_name, parameters)
-    results["default"]["default"][seed] = stats
 
-    return results
+    return {"default": {"default": {seed: stats}}}
 
 
 def save_results(results: Dict, output_file: str):
