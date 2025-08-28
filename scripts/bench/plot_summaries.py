@@ -187,7 +187,7 @@ def _aggregate_relative_metrics(relative_df: pd.DataFrame) -> pd.DataFrame:
     # Group by library, task, parameter, and value, then average over seeds
     for (lib, task, param, value), group in relative_df.groupby(["lib", "task", "parameter", "value"]):
         # Check if this is the base experiment
-        is_baseline = group["is_base"].iloc[0] if not group.empty else False
+        is_baseline = False if group.empty else group["is_base"].iloc[0]
 
         # For each metric, compute mean and std across seeds
         for metric_rel in relative_metric_cols:
