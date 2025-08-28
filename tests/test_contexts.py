@@ -10,7 +10,7 @@ from typing import List
 import pytest
 
 from tdhook.contexts import HookingContextFactory, CompositeHookingContextFactory
-from tdhook.module import HookedModule
+from tdhook.modules import HookedModule
 from tdhook.hooks import MultiHookHandle
 from tdhook._types import UnraveledKey
 

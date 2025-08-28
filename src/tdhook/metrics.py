@@ -6,7 +6,7 @@ import torch
 from tensordict import TensorDict
 from typing import List
 
-from tdhook.module import HookedModule
+from tdhook.modules import HookedModule
 
 
 # TODO: test against captum

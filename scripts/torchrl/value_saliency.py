@@ -17,7 +17,7 @@ from torchrl.envs.libs.gym import GymEnv
 from torchrl.modules import ValueOperator
 
 from tdhook.attribution.gradient_attribution import Saliency
-from tdhook.module import get_best_device
+from tdhook.modules import get_best_device
 
 device = get_best_device()
 

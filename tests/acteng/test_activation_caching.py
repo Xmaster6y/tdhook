@@ -8,7 +8,7 @@ from pathlib import Path
 from tensordict import TensorDict, MemoryMappedTensor
 
 from tdhook.latent.activation_caching import ActivationCaching
-from tdhook.module import get_best_device
+from tdhook.modules import get_best_device
 
 
 class TestActivationCaching:
@@ -22,7 +22,7 @@ class TestActivationCaching:
         inputs = torch.randn(2, 10)
         with context.prepare(default_test_model) as hooked_module:
             hooked_module(inputs)
-        assert "td_module.module.linear2" in context.cache
+        assert "td_module.module.linear2" in hooked_module.hooking_context.cache
 
     def test_activation_caching_context_creation_relative(self, default_test_model):
         """Test creating a ActivationCaching with relative naming."""
@@ -32,7 +32,7 @@ class TestActivationCaching:
         inputs = torch.randn(2, 10)
         with context.prepare(default_test_model) as hooked_module:
             hooked_module(inputs)
-        assert "linear2" in context.cache
+        assert "linear2" in hooked_module.hooking_context.cache
 
     def test_different_device_cache(self, default_test_model):
         """Test creating a ActivationCaching with cache on a different device."""
@@ -45,7 +45,7 @@ class TestActivationCaching:
         with context.prepare(default_test_model) as hooked_module:
             output = hooked_module(inputs)
         assert output.device.type == "cpu"
-        assert context.cache["linear2"].device.type == device.type
+        assert hooked_module.hooking_context.cache["linear2"].device.type == device.type
 
     def test_memmap_cache(self, default_test_model):
         """Test creating a ActivationCaching with memmap cache."""

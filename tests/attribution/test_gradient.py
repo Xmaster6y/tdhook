@@ -18,6 +18,7 @@ from captum.attr._utils import approximation_methods
 
 from tdhook.attribution.gradient_attribution import helpers
 from tdhook.attribution.gradient_attribution import Saliency, IntegratedGradients
+from tdhook.attribution.grad_cam import GradCAM, DimsConfig
 
 
 def get_sequential_linear_module(seed: int):
@@ -254,3 +255,16 @@ class TestInitAttrTargetsWithLabels:
         assert result.batch_size == full_batch_size
         assert "output" in result
         assert result["output"].shape == full_batch_size
+
+
+class TestGradCAM:
+    def test_grad_cam(self, default_test_model):
+        input_data = torch.randn(3, 10)
+
+        tdhook_context_factory = GradCAM(
+            modules_to_attribute={"linear2": DimsConfig(feature_dims=None, pooling_dims=None)},
+        )
+        with tdhook_context_factory.prepare(default_test_model) as hooked_module:
+            output = hooked_module(TensorDict({"input": input_data}, batch_size=3))
+
+        assert output.get(("attr", "linear2")).shape == (3, 20)

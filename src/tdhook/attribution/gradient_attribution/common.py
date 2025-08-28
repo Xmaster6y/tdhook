@@ -10,7 +10,7 @@ from tensordict.nn import TensorDictModule, TensorDictSequential, TensorDictModu
 from tensordict import TensorDict
 
 from tdhook.contexts import HookingContextFactory
-from tdhook.module import FunctionModule, flatten_select_reshape_call
+from tdhook.modules import FunctionModule, flatten_select_reshape_call
 from tdhook._types import UnraveledKey
 
 

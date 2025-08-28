@@ -6,8 +6,9 @@ from contextlib import contextmanager
 from typing import List, Optional, Generator
 from torch import nn
 from tensordict.nn import TensorDictModuleBase, TensorDictModule
+from tensordict import TensorDict
 
-from tdhook.module import HookedModule
+from tdhook.modules import HookedModule
 from tdhook.hooks import MultiHookHandle
 from tdhook._types import UnraveledKey
 
@@ -50,7 +51,6 @@ class HookingContext:
         self._handle.remove()
         self._restore(self._module, self._in_keys, self._out_keys)
         self._in_context = False
-        del self._hooked_module  # TODO: check impact of this
         self._hooked_module = None
         self._handle = None
 
@@ -73,6 +73,16 @@ class HookingContext:
                 yield self._restore(self._hooked_module.module, self._in_keys, self._out_keys)
             finally:
                 self._hooked_module.module = self._prepare(self._module, self._in_keys, self._out_keys)
+
+
+class HookingContextWithCache(HookingContext):
+    def __init__(self, *args, cache: Optional[TensorDict] = None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._cache = TensorDict() if cache is None else cache
+
+    @property
+    def cache(self) -> TensorDict:
+        return self._cache
 
 
 class HookingContextFactory:

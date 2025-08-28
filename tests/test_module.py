@@ -8,7 +8,8 @@ import pytest
 
 from nnsight import NNsight
 
-from tdhook.module import HookedModule
+from tdhook.modules import ModuleWithCache
+from tdhook.modules import HookedModule
 
 
 class TestHookedModule:
@@ -465,3 +466,34 @@ class TestAdditionalCoverage:
             # disable full context manager yields raw module
             with ctx_hm.disable_context() as raw_module:
                 assert callable(getattr(raw_module, "forward"))
+
+
+class TestModuleWithCache:
+    """Test the ModuleWithCache class."""
+
+    def test_module_with_cache_creation(self, default_test_model):
+        """Test creating a ModuleWithCache with basic functionality."""
+
+        td_module = HookedModule.from_module(module=default_test_model, in_keys=["input"], out_keys=["output"])
+
+        caching_module = ModuleWithCache(
+            td_module=td_module, cache_key="cache", stored_keys=["linear2"], module_out_key="outs"
+        )
+
+        td_module.get(
+            cache=caching_module.cache_ref,
+            module_key="linear2",
+            callback=lambda **kwargs: kwargs["output"].requires_grad_(True),
+        )
+
+        input_data = torch.randn(2, 10)
+        input_td = TensorDict({"input": input_data}, batch_size=[2])
+
+        output_td = caching_module(input_td)
+
+        assert "cache" in output_td
+        assert "linear2_output" in output_td["cache"]
+        assert output_td["cache"]["linear2_output"].shape == (2, 20)
+
+        expected_output = default_test_model(input_data)
+        assert torch.allclose(output_td[("outs", "output")], expected_output)

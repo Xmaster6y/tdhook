@@ -3,9 +3,9 @@ Hooks
 """
 
 import weakref
-from typing import Callable, Any, Optional, List, Literal, Protocol
+from typing import Callable, Any, Optional, List, Literal, Protocol, Generic, TypeVar
 import inspect
-
+from weakref import ReferenceType
 from tensordict import TensorDict
 import re
 from torch.utils.hooks import RemovableHandle
@@ -14,6 +14,7 @@ import torch
 
 
 HookDirection = Literal["fwd", "bwd", "fwd_pre", "bwd_pre", "fwd_kwargs", "fwd_pre_kwargs"]
+T = TypeVar("T")
 
 DIRECTION_TO_PARAMS = {
     "fwd": ("module", "args", "output"),
@@ -71,6 +72,30 @@ def _check_hook_signature(hook: Callable, direction: HookDirection):
 
     if param_len != len(expected_params) + num_optional_params:
         raise ValueError(f"Hook ({direction}) must have the signature {expected_params}")
+
+
+def resolve_submodule_path(root: nn.Module, key: str):
+    """
+    Resolve a submodule path that may contain indexing expressions.
+
+    Supports any valid Python attribute access and indexing:
+    - "layers[-1]" -> root.layers[-1]
+    - "layers['attr']" -> root.layers['attr']
+    - "layers.attention" -> root.layers.attention
+    - "layers[1:3]" -> root.layers[1:3]
+    """
+
+    if not key:
+        return root
+
+    # Create a safe environment with only the current module
+    safe_dict = {"root": root}
+
+    try:
+        # Evaluate the expression in the safe environment
+        return eval(f"root.{key}", {"__builtins__": {}}, safe_dict)
+    except (AttributeError, IndexError, KeyError, SyntaxError) as e:
+        raise ValueError(f"Invalid submodule path '{key}': {e}") from e
 
 
 def register_hook_to_module(
@@ -171,6 +196,20 @@ class CacheProxy:
         return value
 
 
+class MutableWeakRef(Generic[T]):
+    def __init__(self, ref: ReferenceType[T]):
+        self._ref = ref
+
+    def resolve(self) -> T:
+        value = self._ref()
+        if value is None:
+            raise ValueError("Dead reference")
+        return value
+
+    def set(self, ref: ReferenceType[T]):
+        self._ref = ref
+
+
 class EarlyStoppingException(Exception):
     def __init__(self, key: str):
         self._key = key
@@ -200,7 +239,11 @@ class HookFactory:
 
     @staticmethod
     def make_caching_hook(
-        key: str, cache: TensorDict, *, callback: Optional[Callable] = None, direction: HookDirection = "fwd"
+        key: str,
+        cache: TensorDict | MutableWeakRef,
+        *,
+        callback: Optional[Callable] = None,
+        direction: HookDirection = "fwd",
     ) -> Callable:
         """
         Make a caching hook.
@@ -223,6 +266,8 @@ class HookFactory:
                 raise RuntimeError(
                     f"{type(value).__name__} values are not supported for caching, use a `callback` to return a tensor or a tensordict"
                 )
+            if isinstance(cache, MutableWeakRef):
+                cache = cache.resolve()
             cache[key] = value
 
         return hook

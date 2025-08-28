@@ -5,7 +5,7 @@ Saliency attribution
 from tensordict import TensorDict
 
 from tdhook.attribution.gradient_attribution import GradientAttribution
-from tdhook.module import td_grad
+from tdhook.modules import td_grad
 
 
 class Saliency(GradientAttribution):

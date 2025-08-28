@@ -8,7 +8,7 @@ from tensordict import TensorDict
 
 from tdhook.contexts import HookingContextFactory
 from tdhook.hooks import MultiHookManager, HookFactory, HookDirection, MultiHookHandle, DIRECTION_TO_RETURN
-from tdhook.module import HookedModule
+from tdhook.modules import HookedModule
 
 
 class Probe(Protocol):

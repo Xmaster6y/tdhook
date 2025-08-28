@@ -10,7 +10,7 @@ import numpy as np
 from loguru import logger
 from tensordict import TensorDict
 
-from tdhook.module import HookedModule
+from tdhook.modules import HookedModule
 from tdhook.contexts import HookingContext
 from tdhook.attribution.lrp import LRP, EpsilonPlus
 

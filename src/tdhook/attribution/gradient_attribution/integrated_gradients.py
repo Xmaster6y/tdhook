@@ -9,7 +9,7 @@ from tensordict import TensorDict, merge_tensordicts
 from .helpers import approximation_parameters
 
 from tdhook.attribution.gradient_attribution import GradientAttributionWithBaseline
-from tdhook.module import td_grad
+from tdhook.modules import td_grad
 from tdhook._types import UnraveledKey
 
 
