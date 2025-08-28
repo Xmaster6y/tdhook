@@ -230,7 +230,7 @@ def _plot_relative_summary(agg_df: pd.DataFrame, output_dir: Path):
 
     for (lib, metric), group in agg_df.groupby(["lib", "metric"]):
         # Check if this is the base experiment
-        is_baseline = group["is_baseline"].iloc[0] if not group.empty else False
+        is_baseline = False if group.empty else group["is_baseline"].iloc[0]
 
         # Aggregate across all configurations for this lib-metric combination
         all_means = group["mean"].dropna()
