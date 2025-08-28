@@ -77,7 +77,7 @@ def _extract_metrics_from_run(runs: Dict) -> Dict:
 
         # Calculate run_only metrics and filter out negative values
         run_only_cpu_time = np.nan if np.isnan(run_cpu_time) else run_cpu_time - runs["spawn_cpu"]["wall_time"]
-        run_only_gpu_time = run_gpu_time - runs["spawn_gpu"]["wall_time"] if not np.isnan(run_gpu_time) else np.nan
+        run_only_gpu_time = np.nan if np.isnan(run_gpu_time) else run_gpu_time - runs["spawn_gpu"]["wall_time"]
 
         # Filter out negative values (they don't make sense for run_only)
         if run_only_cpu_time is not None and run_only_cpu_time < 0:
