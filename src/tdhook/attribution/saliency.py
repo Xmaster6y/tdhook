@@ -4,7 +4,7 @@ Saliency attribution
 
 from tensordict import TensorDict
 
-from tdhook.attribution.gradient_attribution import GradientAttribution
+from tdhook.attribution.gradient_helpers import GradientAttribution
 from tdhook.modules import td_grad
 
 

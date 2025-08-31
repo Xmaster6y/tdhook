@@ -8,7 +8,7 @@ import pytest
 
 from nnsight import NNsight
 
-from tdhook.modules import ModuleWithCache
+from tdhook.modules import ModuleCallWithCache, IntermediateKeysCleaner
 from tdhook.modules import HookedModule
 
 
@@ -39,8 +39,7 @@ class TestHookedModule:
 
         with hooked_module.run(data) as run:
             proxy = run.get("linear3")
-            with pytest.raises(ValueError):
-                proxy.resolve()
+            assert proxy.resolve() is None
 
         assert torch.allclose(proxy.resolve(), data["output"])
 
@@ -468,16 +467,16 @@ class TestAdditionalCoverage:
                 assert callable(getattr(raw_module, "forward"))
 
 
-class TestModuleWithCache:
-    """Test the ModuleWithCache class."""
+class TestModuleCallWithCache:
+    """Test the ModuleCallWithCache class."""
 
     def test_module_with_cache_creation(self, default_test_model):
-        """Test creating a ModuleWithCache with basic functionality."""
+        """Test creating a ModuleCallWithCache with basic functionality."""
 
         td_module = HookedModule.from_module(module=default_test_model, in_keys=["input"], out_keys=["output"])
 
-        caching_module = ModuleWithCache(
-            td_module=td_module, cache_key="cache", stored_keys=["linear2"], module_out_key="outs"
+        caching_module = ModuleCallWithCache(
+            td_module=td_module, cache_key="cache", stored_keys=["linear2"], out_key="outs"
         )
 
         td_module.get(
@@ -497,3 +496,14 @@ class TestModuleWithCache:
 
         expected_output = default_test_model(input_data)
         assert torch.allclose(output_td[("outs", "output")], expected_output)
+
+
+class TestIntermediateKeysCleaner:
+    def test_intermediate_keys_cleaner(self):
+        """Test the IntermediateKeysCleaner class."""
+        td = TensorDict({"a": torch.randn(2, 10), "b": torch.randn(2, 20), "c": torch.randn(2, 30)}, batch_size=[2])
+        cleaner = IntermediateKeysCleaner(intermediate_keys=["b"])
+        output_td = cleaner(td)
+        assert "a" in output_td
+        assert "b" not in output_td
+        assert "c" in output_td

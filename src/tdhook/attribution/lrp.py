@@ -9,11 +9,10 @@ from warnings import warn
 from tensordict.nn import TensorDictModule, TensorDictModuleBase
 from tensordict import TensorDict
 
-from tdhook.attribution.gradient_attribution import GradientAttribution
+from tdhook.attribution.gradient_helpers import GradientAttribution
 from tdhook.modules import td_grad
 from tdhook._types import UnraveledKey
-
-from .rules import Rule
+from tdhook.attribution.lrp_helpers.rules import Rule
 
 
 class LRP(GradientAttribution):

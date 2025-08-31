@@ -3,7 +3,7 @@ Hooks
 """
 
 import weakref
-from typing import Callable, Any, Optional, List, Literal, Protocol, Generic, TypeVar
+from typing import Callable, Any, Optional, List, Literal, Protocol, Generic, TypeVar, Type, Tuple
 import inspect
 from weakref import ReferenceType
 from tensordict import TensorDict
@@ -141,10 +141,16 @@ class MultiHookHandle:
 
 
 class MultiHookManager:
-    def __init__(self, pattern: Optional[str] = None, relative: bool = False):
+    def __init__(
+        self,
+        pattern: Optional[str] = None,
+        module_classes: Tuple[Type[nn.Module], ...] = (nn.Module,),
+        relative: bool = False,
+    ):
         if pattern is None:
             pattern = r"a^"  # match nothing by default
         self._pattern = pattern
+        self._module_classes = module_classes
         self._reg_exp = re.compile(pattern)
         self._relative = relative
 
@@ -176,24 +182,11 @@ class MultiHookManager:
                     name = name[len("module") :].lstrip(".")
                 if name == "":
                     continue
+            if not isinstance(module, self._module_classes):
+                continue
             if self._reg_exp.match(name):
                 handles.append(register_hook_to_module(module, hook_factory(name), direction, prepend))
         return MultiHookHandle(handles)
-
-
-class CacheProxy:
-    def __init__(self, key: str, cache: TensorDict):
-        self._key = key
-        self._cache = weakref.ref(cache)
-
-    def resolve(self) -> Any:
-        cache = self._cache()
-        if cache is None:
-            raise ValueError("Dead reference to cache")
-        value = cache.get(self._key)
-        if value is None:
-            raise ValueError(f"Key {self._key} not found in cache")
-        return value
 
 
 class MutableWeakRef(Generic[T]):
@@ -201,13 +194,24 @@ class MutableWeakRef(Generic[T]):
         self._ref = ref
 
     def resolve(self) -> T:
-        value = self._ref()
-        if value is None:
-            raise ValueError("Dead reference")
-        return value
+        return self._ref()
 
     def set(self, ref: ReferenceType[T]):
         self._ref = ref
+
+
+class CacheProxy:
+    def __init__(self, key: str, cache: TensorDict | MutableWeakRef[TensorDict]):
+        self._key = key
+        self._cache = weakref.ref(cache)
+
+    def resolve(self) -> Any:
+        cache = self._cache()
+        if isinstance(cache, MutableWeakRef):
+            cache = cache.resolve()
+        if cache is None:
+            raise ValueError("Dead reference to cache")
+        return cache.get(self._key)
 
 
 class EarlyStoppingException(Exception):
@@ -267,8 +271,12 @@ class HookFactory:
                     f"{type(value).__name__} values are not supported for caching, use a `callback` to return a tensor or a tensordict"
                 )
             if isinstance(cache, MutableWeakRef):
-                cache = cache.resolve()
-            cache[key] = value
+                _cache = cache.resolve()
+                if _cache is None:
+                    raise ValueError("Dead reference to cache")
+            else:
+                _cache = cache
+            _cache[key] = value
 
         return hook
 
@@ -291,14 +299,16 @@ class HookFactory:
             nonlocal value, callback, params, return_index
             original_type = type(args[return_index])
             if isinstance(value, CacheProxy):
-                value = value.resolve()
+                _value = value.resolve()
+            else:
+                _value = value
             if callback is not None:
-                value = callback(**dict(zip(params, args)), value=value)
-            if type(value) is not original_type:
+                _value = callback(**dict(zip(params, args)), value=_value)
+            if type(_value) is not original_type:
                 raise RuntimeError(
-                    f"Callback returned a value of type {type(value).__name__} but the original value was of type {original_type.__name__}"
+                    f"Callback returned a value of type {type(_value).__name__} but the original value was of type {original_type.__name__}"
                 )
-            return value
+            return _value
 
         return hook
 

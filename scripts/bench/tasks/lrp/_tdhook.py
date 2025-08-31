@@ -12,7 +12,7 @@ from tensordict import TensorDict
 
 from tdhook.modules import HookedModule
 from tdhook.contexts import HookingContext
-from tdhook.attribution.lrp import LRP, EpsilonPlus
+from tdhook.attribution.lrp_helpers import LRP, EpsilonPlus
 
 
 cuda_available = torch.cuda.is_available()

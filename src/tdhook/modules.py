@@ -100,23 +100,59 @@ class FunctionModule(TensorDictModuleBase):
         return f"FunctionModule(in_keys={self.in_keys}, out_keys={self.out_keys}, td_fn={self._td_fn})"
 
 
-class ModuleWithCache(TensorDictModuleBase):
+class ModuleCall(TensorDictModuleBase):
+    def __init__(
+        self,
+        td_module: TensorDictModuleBase,
+        in_key: Optional[UnraveledKey] = None,
+        out_key: Optional[UnraveledKey] = None,
+        use_flatten: bool = True,
+    ):
+        super().__init__()
+        self.in_keys = [k if in_key is None else (in_key, k) for k in td_module.in_keys]
+        self.out_keys = [k if out_key is None else (out_key, k) for k in td_module.out_keys]
+
+        self._td_module = td_module
+        self._in_key = in_key
+        self._out_key = out_key
+        self._use_flatten = use_flatten
+
+    def forward(self, tensordict: TensorDict) -> TensorDict:
+        inputs = tensordict if self._in_key is None else tensordict[self._in_key]
+        outputs = (
+            flatten_select_reshape_call(self._td_module, inputs) if self._use_flatten else self._td_module(inputs)
+        )
+        if self._out_key is not None:
+            tensordict[self._out_key] = outputs
+            return tensordict
+
+        return tensordict.update(outputs)
+
+
+class ModuleCallWithCache(TensorDictModuleBase):
     def __init__(
         self,
         td_module: TensorDictModuleBase,
         cache_key: str,
         stored_keys: List[UnraveledKey],
-        module_out_key: Optional[UnraveledKey] = None,
+        in_key: Optional[UnraveledKey] = None,
+        out_key: Optional[UnraveledKey] = None,
+        cache_ref: Optional[MutableWeakRef] = None,
+        use_flatten: bool = True,
     ):
         super().__init__()
-        self.in_keys = td_module.in_keys
-        self.out_keys = td_module.out_keys + [(cache_key, k) for k in stored_keys]
+        self.in_keys = [k if in_key is None else (in_key, k) for k in td_module.in_keys]
+        self.out_keys = [k if out_key is None else (out_key, k) for k in td_module.out_keys] + [
+            (cache_key, k) for k in stored_keys
+        ]
 
         self._td_module = td_module
         self._cache_key = cache_key
-        self._module_out_key = module_out_key
+        self._in_key = in_key
+        self._out_key = out_key
+        self._use_flatten = use_flatten
 
-        self._cache_ref = MutableWeakRef(weakref.ref(TensorDict()))
+        self._cache_ref = cache_ref or MutableWeakRef(weakref.ref(TensorDict()))
 
     @property
     def cache_ref(self) -> MutableWeakRef:
@@ -126,13 +162,30 @@ class ModuleWithCache(TensorDictModuleBase):
         cache = TensorDict(batch_size=tensordict.batch_size, device=tensordict.device)
         self._cache_ref.set(weakref.ref(cache))
 
-        if self._module_out_key is not None:
-            module_outputs = flatten_select_reshape_call(self._td_module, tensordict)
-            return TensorDict({self._module_out_key: module_outputs, self._cache_key: cache})
+        inputs = tensordict if self._in_key is None else tensordict[self._in_key]
+        outputs = (
+            flatten_select_reshape_call(self._td_module, inputs) if self._use_flatten else self._td_module(inputs)
+        )
 
-        module_outputs = self._td_module(tensordict)
-        module_outputs[self._cache_key] = cache
-        return module_outputs
+        if self._out_key is not None:
+            tensordict[self._out_key] = outputs
+            tensordict[self._cache_key] = cache
+            return tensordict
+
+        tensordict[self._cache_key] = cache
+        return tensordict.update(outputs)
+
+
+class IntermediateKeysCleaner(TensorDictModuleBase):
+    def __init__(self, intermediate_keys: List[UnraveledKey]):
+        super().__init__()
+        self.in_keys = intermediate_keys
+        self.out_keys = []
+
+        self._intermediate_keys = intermediate_keys
+
+    def forward(self, tensordict: TensorDict) -> TensorDict:
+        return tensordict.exclude(*self._intermediate_keys)
 
 
 class HookedModuleRun:

@@ -9,8 +9,8 @@ from tensordict import TensorDict
 from tensordict.nn import TensorDictSequential, TensorDictModuleBase
 
 from tdhook._types import UnraveledKey
-from tdhook.attribution.gradient_attribution import GradientAttribution
-from tdhook.modules import td_grad, HookedModule, ModuleWithCache, FunctionModule
+from tdhook.attribution.gradient_helpers import GradientAttribution
+from tdhook.modules import td_grad, HookedModule, ModuleCallWithCache, FunctionModule
 from tdhook.hooks import MultiHookHandle
 from tdhook.contexts import HookingContextWithCache
 
@@ -60,10 +60,10 @@ class GradCAM(GradientAttribution):
         if set(self._additional_init_keys) & (set(in_keys) | set(out_keys)):
             raise ValueError("Additional init keys must not be in the in_keys or out_keys")
         modules = [
-            ModuleWithCache(
+            ModuleCallWithCache(
                 module,
                 cache_key="_mod_in",
-                module_out_key="_mod_out",
+                out_key="_mod_out",
                 stored_keys=stored_keys,
             ),
             FunctionModule(
@@ -76,14 +76,16 @@ class GradCAM(GradientAttribution):
 
     def _hook_module(self, module: HookedModule) -> MultiHookHandle:
         cache_ref = module.td_module[0].cache_ref
+        handles = []
         for module_key in self._modules_to_attribute:
-            module.get(
+            handle, _ = module.get(
                 cache=cache_ref,
                 cache_key=module_key,
                 module_key=module_key,
                 callback=lambda **kwargs: kwargs["output"].requires_grad_(True),
             )
-        return MultiHookHandle()
+            handles.append(handle)
+        return MultiHookHandle(handles)
 
     def _grad_attr(
         self,

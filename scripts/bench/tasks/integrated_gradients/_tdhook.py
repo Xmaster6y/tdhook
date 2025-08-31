@@ -11,7 +11,7 @@ from loguru import logger
 from tensordict import TensorDict
 
 
-from tdhook.attribution.gradient_attribution.integrated_gradients import IntegratedGradients
+from tdhook.attribution.gradient_helpers.integrated_gradients import IntegratedGradients
 from tdhook.modules import HookedModule
 from tdhook.contexts import HookingContext
 

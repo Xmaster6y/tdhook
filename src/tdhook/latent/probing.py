@@ -65,10 +65,10 @@ class Probing(HookingContextFactory):
             def callback(**kwargs):
                 nonlocal additional_items
                 if additional_items is not None:
-                    resolved_additional_items = additional_items.resolve()
+                    _additional_items = additional_items.resolve()
                 else:
-                    resolved_additional_items = {}
-                return probe.step(kwargs[DIRECTION_TO_RETURN[direction]], **resolved_additional_items)
+                    _additional_items = {}
+                return probe.step(kwargs[DIRECTION_TO_RETURN[direction]], **_additional_items)
 
             return HookFactory.make_reading_hook(callback=callback, direction=direction)
 

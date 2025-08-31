@@ -10,7 +10,7 @@ from tensordict.nn import TensorDictModule, TensorDictSequential, TensorDictModu
 from tensordict import TensorDict
 
 from tdhook.contexts import HookingContextFactory
-from tdhook.modules import FunctionModule, flatten_select_reshape_call
+from tdhook.modules import FunctionModule, flatten_select_reshape_call, ModuleCall
 from tdhook._types import UnraveledKey
 
 
@@ -59,10 +59,10 @@ class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
                 in_keys=register_in_keys,
                 out_keys=mod_in_keys,
             ),
-            FunctionModule(
-                lambda td: self._module_call_fn(td, module),
-                in_keys=mod_in_keys,
-                out_keys=mod_out_keys,
+            ModuleCall(
+                module,
+                in_key="_mod_in",
+                out_key="_mod_out",
             ),
             FunctionModule(
                 self._attributor_fn,
@@ -92,12 +92,6 @@ class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
         needs_grad.requires_grad_(True)
         inputs.update(needs_grad)
         td["_mod_in"] = inputs
-        return td
-
-    def _module_call_fn(self, td: TensorDict, module: TensorDictModuleBase) -> TensorDict:
-        inputs = td["_mod_in"]
-        outputs = flatten_select_reshape_call(module, inputs)
-        td["_mod_out"] = outputs
         return td
 
     def _attributor_fn(self, td: TensorDict) -> TensorDict:

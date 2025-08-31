@@ -16,8 +16,8 @@ from captum.attr import (
 )
 from captum.attr._utils import approximation_methods
 
-from tdhook.attribution.gradient_attribution import helpers
-from tdhook.attribution.gradient_attribution import Saliency, IntegratedGradients
+from tdhook.attribution.gradient_helpers import helpers
+from tdhook.attribution import Saliency, IntegratedGradients, GuidedBackpropagation
 from tdhook.attribution.grad_cam import GradCAM, DimsConfig
 
 
@@ -268,3 +268,14 @@ class TestGradCAM:
             output = hooked_module(TensorDict({"input": input_data}, batch_size=3))
 
         assert output.get(("attr", "linear2")).shape == (3, 20)
+
+
+class TestGuidedBackpropagation:
+    def test_guided_backpropagation(self, default_test_model):
+        input_data = torch.randn(3, 10)
+
+        tdhook_context_factory = GuidedBackpropagation()
+        with tdhook_context_factory.prepare(default_test_model) as hooked_module:
+            output = hooked_module(TensorDict({"input": input_data}, batch_size=3))
+
+        assert output.get(("attr", "input")).shape == (3, 10)
