@@ -3,6 +3,7 @@ Context
 """
 
 from contextlib import contextmanager
+from contextlib import ExitStack
 from typing import List, Optional, Generator
 from torch import nn
 from tensordict.nn import TensorDictModuleBase, TensorDictModule
@@ -20,6 +21,7 @@ class HookingContext:
         module: nn.Module,
         in_keys: Optional[List[UnraveledKey]] = None,
         out_keys: Optional[List[UnraveledKey]] = None,
+        pre_factories: Optional[List["HookingContextFactory"]] = None,
     ):
         self._prepare = factory._prepare_module
         self._restore = factory._restore_module
@@ -28,6 +30,8 @@ class HookingContext:
         self._in_context = False
         self._handle = None
         self._hooked_module = None
+        self._pre_factories = pre_factories or []
+        self._stack = None
 
         if isinstance(module, TensorDictModuleBase):
             self._module = module
@@ -42,7 +46,14 @@ class HookingContext:
         if self._in_context:
             raise RuntimeError("Cannot enter context twice")
         self._in_context = True
-        prep_module = self._prepare(self._module, self._in_keys, self._out_keys)
+
+        working_module = self._module
+        with ExitStack() as stack:
+            for factory in self._pre_factories:
+                working_module = stack.enter_context(factory.prepare(working_module, self._in_keys, self._out_keys))
+            self._stack = stack.pop_all()
+
+        prep_module = self._prepare(working_module, self._in_keys, self._out_keys)
         self._hooked_module = self._spawn(prep_module, self)
         self._handle = self._hook(self._hooked_module)
         return self._hooked_module
@@ -53,6 +64,7 @@ class HookingContext:
         self._in_context = False
         self._hooked_module = None
         self._handle = None
+        self._stack.__exit__(exc_type, exc_value, traceback)
 
     @contextmanager
     def disable_hooks(self) -> Generator[None, None, None]:

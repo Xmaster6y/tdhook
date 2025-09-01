@@ -13,9 +13,10 @@ from tdhook.attribution.gradient_helpers import GradientAttribution
 
 
 class GuidedBackpropagation(GradientAttribution):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, multiply_by_inputs: bool = False, **kwargs):
         super().__init__(*args, **kwargs)
         self._hook_manager = MultiHookManager(pattern=r".*", module_classes=(nn.ReLU,))
+        self._multiply_by_inputs = multiply_by_inputs
 
     def _hook_module(self, module: HookedModule) -> MultiHookHandle:
         def hook_factory(name: str) -> Callable:
@@ -32,4 +33,7 @@ class GuidedBackpropagation(GradientAttribution):
         inputs: TensorDict,
         init_grads: TensorDict,
     ):
-        return td_grad(targets, inputs, init_grads)
+        grads = td_grad(targets, inputs, init_grads)
+        if self._multiply_by_inputs:
+            grads.mul_(inputs)
+        return grads

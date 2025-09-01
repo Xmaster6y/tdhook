@@ -23,7 +23,6 @@ class LRP(GradientAttribution):
         skip_modules: Optional[Callable[[str, nn.Module], bool]] = None,
         **kwargs,
     ):
-        kwargs["multiply_by_inputs"] = False
         super().__init__(
             **kwargs,
         )

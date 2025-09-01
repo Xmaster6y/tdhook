@@ -124,17 +124,18 @@ class ModuleCall(TensorDictModuleBase):
         )
         if self._out_key is not None:
             tensordict[self._out_key] = outputs
-            return tensordict
+        else:
+            tensordict.update(outputs)
 
-        return tensordict.update(outputs)
+        return tensordict
 
 
 class ModuleCallWithCache(TensorDictModuleBase):
     def __init__(
         self,
         td_module: TensorDictModuleBase,
-        cache_key: str,
         stored_keys: List[UnraveledKey],
+        cache_key: Optional[UnraveledKey] = None,
         in_key: Optional[UnraveledKey] = None,
         out_key: Optional[UnraveledKey] = None,
         cache_ref: Optional[MutableWeakRef] = None,
@@ -143,7 +144,7 @@ class ModuleCallWithCache(TensorDictModuleBase):
         super().__init__()
         self.in_keys = [k if in_key is None else (in_key, k) for k in td_module.in_keys]
         self.out_keys = [k if out_key is None else (out_key, k) for k in td_module.out_keys] + [
-            (cache_key, k) for k in stored_keys
+            k if cache_key is None else (cache_key, k) for k in stored_keys
         ]
 
         self._td_module = td_module
@@ -169,11 +170,62 @@ class ModuleCallWithCache(TensorDictModuleBase):
 
         if self._out_key is not None:
             tensordict[self._out_key] = outputs
-            tensordict[self._cache_key] = cache
-            return tensordict
+        else:
+            tensordict.update(outputs)
 
-        tensordict[self._cache_key] = cache
-        return tensordict.update(outputs)
+        if self._cache_key is not None:
+            tensordict[self._cache_key] = cache
+        else:
+            tensordict.update(cache)
+
+        return tensordict
+
+
+class PGDModule(TensorDictModuleBase):
+    def __init__(
+        self,
+        td_module: TensorDictModuleBase,
+        alpha: float = 0.1,
+        n_steps: int = 10,
+        min_value: float = -float("Inf"),
+        max_value: float = float("Inf"),
+        grad_key: UnraveledKey = "_grad",
+        working_key: UnraveledKey = "_working",
+        ascent: bool = False,
+        use_sign: bool = True,
+    ):
+        super().__init__()
+        self._td_module = td_module
+
+        self._alpha = alpha
+        self._n_steps = n_steps
+        self._min_value = min_value
+        self._max_value = max_value
+        self._grad_key = grad_key
+        self._working_key = working_key
+        self._ascent = ascent
+        self._use_sign = use_sign
+
+    def forward(self, td: TensorDict) -> TensorDict:
+        working_td = td if self._working_key is None else td[self._working_key]
+        for _ in range(self._n_steps):
+            working_td = self._td_module(working_td)
+            working_td = self._pgd_step(working_td)
+        if self._working_key is not None:
+            td[self._working_key] = working_td
+        else:
+            td.update(working_td)
+        return td
+
+    def _pgd_step(self, td: TensorDict) -> TensorDict:
+        grads: TensorDict = td[self._grad_key]
+        if self._ascent:
+            grads = -grads
+        if self._use_sign:
+            grads = torch.sign(grads)
+        for key in grads.keys(True, True):
+            td[key] = torch.clamp(td[key] - self._alpha * grads[key], min=self._min_value, max=self._max_value)
+        return td
 
 
 class IntermediateKeysCleaner(TensorDictModuleBase):
