@@ -10,8 +10,9 @@ from loguru import logger
 from tensordict import TensorDict
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from tdhook.module import HookedModule
+from tdhook.modules import HookedModule
 from tdhook.latent.activation_caching import ActivationCaching
+from tdhook.contexts import HookingContext
 
 
 cuda_available = torch.cuda.is_available()
@@ -28,15 +29,6 @@ def prepare(
     sentences = ["Hello, world!"] * batch_size
     input_data = tokenizer(sentences, return_tensors="pt")
     input_data = {k: v.to("cuda" if use_cuda else "cpu") for k, v in input_data.items()}
-    return HookedModule.from_module(model, in_keys={k: k for k in input_data.keys()}, out_keys=["output"]), input_data
-
-
-def run(
-    model: HookedModule,
-    input_data: Dict[str, torch.Tensor],
-    variation: str,
-) -> Dict[str, float]:
-    """Benchmark a single model configuration."""
 
     def callback(**kwargs):
         if isinstance(kwargs["output"], tuple):
@@ -44,10 +36,22 @@ def run(
         return kwargs["output"]
 
     context = ActivationCaching(key_pattern="^(?!transformer$).*", callback=callback, relative=True)
-    with context._hook_module(model):
+    hooking_context = context.prepare(model, in_keys={k: k for k in input_data}, out_keys=["output"])
+
+    return hooking_context, input_data
+
+
+def run(
+    hooking_context: HookingContext,
+    input_data: Dict[str, torch.Tensor],
+    variation: str,
+) -> Dict[str, float]:
+    """Benchmark a single model configuration."""
+
+    with hooking_context as hooked_model:
         shuttle = TensorDict(input_data)
-        model(shuttle)
-    return shuttle["output", "logits"], context.cache
+        hooked_model(shuttle)
+    return shuttle["output", "logits"], hooking_context.cache
 
 
 def parse_args() -> argparse.Namespace:
@@ -78,11 +82,11 @@ def main():
     logger.info(f"  Variation: {args.variation}")
     logger.info(f"  Use CUDA: {use_cuda}")
 
-    model, input_data = prepare(args.model_size, args.batch_size, use_cuda)
+    hooking_context, input_data = prepare(args.model_size, args.batch_size, use_cuda)
 
     if args.run:
         try:
-            result = run(model, input_data, args.variation)
+            result = run(hooking_context, input_data, args.variation)
             logger.info(f"  Max GPU memory: {torch.cuda.max_memory_allocated() / 1024:.2f} KB")
             return result
         except Exception as e:

@@ -10,14 +10,17 @@ import torch
 import warnings
 import torch.nn as nn
 from contextlib import contextmanager
+import weakref
 
 from tdhook.hooks import (
     register_hook_to_module,
     CacheProxy,
     HookFactory,
     EarlyStoppingException,
+    resolve_submodule_path,
     HookDirection,
     DIRECTION_TO_TYPE,
+    MutableWeakRef,
 )
 from tdhook._types import UnraveledKey
 
@@ -95,6 +98,146 @@ class FunctionModule(TensorDictModuleBase):
 
     def __repr__(self):
         return f"FunctionModule(in_keys={self.in_keys}, out_keys={self.out_keys}, td_fn={self._td_fn})"
+
+
+class ModuleCall(TensorDictModuleBase):
+    def __init__(
+        self,
+        td_module: TensorDictModuleBase,
+        in_key: Optional[UnraveledKey] = None,
+        out_key: Optional[UnraveledKey] = None,
+        use_flatten: bool = True,
+    ):
+        super().__init__()
+        self.in_keys = [k if in_key is None else (in_key, k) for k in td_module.in_keys]
+        self.out_keys = [k if out_key is None else (out_key, k) for k in td_module.out_keys]
+
+        self._td_module = td_module
+        self._in_key = in_key
+        self._out_key = out_key
+        self._use_flatten = use_flatten
+
+    def forward(self, tensordict: TensorDict) -> TensorDict:
+        inputs = tensordict if self._in_key is None else tensordict[self._in_key]
+        outputs = (
+            flatten_select_reshape_call(self._td_module, inputs) if self._use_flatten else self._td_module(inputs)
+        )
+        if self._out_key is not None:
+            tensordict[self._out_key] = outputs
+        else:
+            tensordict.update(outputs)
+
+        return tensordict
+
+
+class ModuleCallWithCache(TensorDictModuleBase):
+    def __init__(
+        self,
+        td_module: TensorDictModuleBase,
+        stored_keys: List[UnraveledKey],
+        cache_key: Optional[UnraveledKey] = None,
+        in_key: Optional[UnraveledKey] = None,
+        out_key: Optional[UnraveledKey] = None,
+        cache_ref: Optional[MutableWeakRef] = None,
+        use_flatten: bool = True,
+    ):
+        super().__init__()
+        self.in_keys = [k if in_key is None else (in_key, k) for k in td_module.in_keys]
+        self.out_keys = [k if out_key is None else (out_key, k) for k in td_module.out_keys] + [
+            k if cache_key is None else (cache_key, k) for k in stored_keys
+        ]
+
+        self._td_module = td_module
+        self._cache_key = cache_key
+        self._in_key = in_key
+        self._out_key = out_key
+        self._use_flatten = use_flatten
+
+        self._cache_ref = cache_ref or MutableWeakRef(weakref.ref(TensorDict()))
+
+    @property
+    def cache_ref(self) -> MutableWeakRef:
+        return self._cache_ref
+
+    def forward(self, tensordict: TensorDict) -> TensorDict:
+        cache = TensorDict(batch_size=tensordict.batch_size, device=tensordict.device)
+        self._cache_ref.set(weakref.ref(cache))
+
+        inputs = tensordict if self._in_key is None else tensordict[self._in_key]
+        outputs = (
+            flatten_select_reshape_call(self._td_module, inputs) if self._use_flatten else self._td_module(inputs)
+        )
+
+        if self._out_key is not None:
+            tensordict[self._out_key] = outputs
+        else:
+            tensordict.update(outputs)
+
+        if self._cache_key is not None:
+            tensordict[self._cache_key] = cache
+        else:
+            tensordict.update(cache)
+
+        return tensordict
+
+
+class PGDModule(TensorDictModuleBase):
+    def __init__(
+        self,
+        td_module: TensorDictModuleBase,
+        alpha: float = 0.1,
+        n_steps: int = 10,
+        min_value: float = -float("Inf"),
+        max_value: float = float("Inf"),
+        grad_key: UnraveledKey = "_grad",
+        working_key: UnraveledKey = "_working",
+        ascent: bool = False,
+        use_sign: bool = True,
+    ):
+        super().__init__()
+        self._td_module = td_module
+
+        self._alpha = alpha
+        self._n_steps = n_steps
+        self._min_value = min_value
+        self._max_value = max_value
+        self._grad_key = grad_key
+        self._working_key = working_key
+        self._ascent = ascent
+        self._use_sign = use_sign
+
+    def forward(self, td: TensorDict) -> TensorDict:
+        working_td = td if self._working_key is None else td[self._working_key]
+        for _ in range(self._n_steps):
+            working_td = self._td_module(working_td)
+            working_td = self._pgd_step(working_td)
+        if self._working_key is not None:
+            td[self._working_key] = working_td
+        else:
+            td.update(working_td)
+        return td
+
+    def _pgd_step(self, td: TensorDict) -> TensorDict:
+        grads: TensorDict = td[self._grad_key]
+        if self._ascent:
+            grads = -grads
+        if self._use_sign:
+            grads = torch.sign(grads)
+        for key in grads.keys(True, True):
+            td[key] = torch.clamp(td[key] - self._alpha * grads[key], min=self._min_value, max=self._max_value)
+        return td
+
+
+class IntermediateKeysCleaner(TensorDictModuleBase):
+    def __init__(self, intermediate_keys: List[UnraveledKey]):
+        super().__init__()
+        self.in_keys = intermediate_keys
+        self.out_keys = []
+
+        self._intermediate_keys = intermediate_keys
+
+    def forward(self, tensordict: TensorDict) -> TensorDict:
+        return tensordict.exclude(*self._intermediate_keys)
 
 
 class HookedModuleRun:
@@ -246,9 +389,19 @@ class HookedModuleRun:
 
 
 class HookedModule(TensorDictModuleWrapper):
-    def __init__(self, td_module: TensorDictModule, hooking_context: Optional["HookingContext"] = None):
+    def __init__(
+        self,
+        td_module: TensorDictModule,
+        hooking_context: Optional["HookingContext"] = None,
+        relative_path: str = "td_module.module",
+    ):
         super().__init__(td_module)
         self._hooking_context = hooking_context
+        self._relative_path = relative_path
+
+    @property
+    def hooking_context(self) -> Optional["HookingContext"]:
+        return self._hooking_context
 
     @classmethod
     def from_module(
@@ -275,30 +428,6 @@ class HookedModule(TensorDictModuleWrapper):
     ) -> HookedModuleRun:
         return HookedModuleRun(self, data, cache, run_name, run_sep, run_cache, grad_enabled, run_callback)
 
-    def _resolve_submodule_path(self, key: str, relative: bool = True):
-        """
-        Resolve a submodule path that may contain indexing expressions.
-
-        Supports any valid Python attribute access and indexing:
-        - "layers[-1]" -> root.layers[-1]
-        - "layers['attr']" -> root.layers['attr']
-        - "layers.attention" -> root.layers.attention
-        - "layers[1:3]" -> root.layers[1:3]
-        """
-        root = self.td_module.module if relative else self
-
-        if not key:
-            return root
-
-        # Create a safe environment with only the current module
-        safe_dict = {"root": root}
-
-        try:
-            # Evaluate the expression in the safe environment
-            return eval(f"root.{key}", {"__builtins__": {}}, safe_dict)
-        except (AttributeError, IndexError, KeyError, SyntaxError) as e:
-            raise ValueError(f"Invalid submodule path '{key}': {e}") from e
-
     def register_submodule_hook(
         self,
         key: str,
@@ -307,7 +436,11 @@ class HookedModule(TensorDictModuleWrapper):
         prepend: bool = False,
         relative: bool = True,
     ):
-        submodule = self._resolve_submodule_path(key, relative)
+        if relative:
+            root = resolve_submodule_path(self, self._relative_path)
+        else:
+            root = self
+        submodule = resolve_submodule_path(root, key)
         if isinstance(submodule, nn.ModuleList):
             warnings.warn(f"You are hooking a ModuleList ({key}), which will never be executed.")
         return register_hook_to_module(submodule, hook, direction, prepend)

@@ -10,6 +10,4 @@ __all__ = [
     "Probing",
 ]
 
-# TODO: Implement Activation Patching
-# TODO: Implement Steering Vectors
 # TODO: Implement ATP*

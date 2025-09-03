@@ -14,7 +14,7 @@ from tensordict import TensorDict
 
 from lczerolens import LczeroModel, LczeroBoard
 
-from tdhook.attribution.gradient_attribution import Saliency
+from tdhook.attribution.gradient_helpers import Saliency
 
 
 def main(args: argparse.Namespace):

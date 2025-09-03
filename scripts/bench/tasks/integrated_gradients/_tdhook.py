@@ -11,8 +11,8 @@ from loguru import logger
 from tensordict import TensorDict
 
 
-from tdhook.attribution.gradient_attribution.integrated_gradients import IntegratedGradients
-from tdhook.module import HookedModule
+from tdhook.attribution.gradient_helpers.integrated_gradients import IntegratedGradients
+from tdhook.modules import HookedModule
 from tdhook.contexts import HookingContext
 
 cuda_available = torch.cuda.is_available()

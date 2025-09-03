@@ -6,10 +6,9 @@ import torch
 from typing import List
 from tensordict import TensorDict, merge_tensordicts
 
-from .helpers import approximation_parameters
-
-from tdhook.attribution.gradient_attribution import GradientAttributionWithBaseline
-from tdhook.module import td_grad
+from tdhook.attribution.gradient_helpers.helpers import approximation_parameters
+from tdhook.attribution.gradient_helpers import GradientAttributionWithBaseline
+from tdhook.modules import td_grad
 from tdhook._types import UnraveledKey
 
 

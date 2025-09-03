@@ -9,7 +9,7 @@ from tensordict import TensorDict
 from contextlib import contextmanager
 
 from tdhook.contexts import HookingContextFactory, HookingContext
-from tdhook.module import HookedModule
+from tdhook.modules import HookedModule
 
 
 class TaskVectorsContext(HookingContext):

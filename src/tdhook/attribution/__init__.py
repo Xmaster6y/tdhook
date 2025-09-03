@@ -2,21 +2,22 @@
 Attribution
 """
 
-from .gradient_attribution import GradientAttribution, GradientAttributionWithBaseline, IntegratedGradients, Saliency
-from .lrp import LRP, EpsilonPlus
+from .lrp import LRP
+from .saliency import Saliency
+from .grad_cam import GradCAM
+from .guided_backpropagation import GuidedBackpropagation
+from .activation_maximisation import ActivationMaximisation
+from .integrated_gradients import IntegratedGradients
 
 __all__ = [
-    "GradientAttribution",
-    "GradientAttributionWithBaseline",
+    "ActivationMaximisation",
+    "GradCAM",
+    "GuidedBackpropagation",
     "IntegratedGradients",
     "Saliency",
     "LRP",
-    "EpsilonPlus",
 ]
 
 # TODO: Implement CLRP
-# TODO: Implement GradCAM
-# TODO: Implement Guided Backpropagation
 # TODO: Implement Occlusion
-# TODO: Implement Neuron gradient
-# TODO: Implement Layer Feature Ablation
+# TODO: Implement Conductance

@@ -5,10 +5,14 @@ Tests for the module functionality.
 import torch
 from tensordict import TensorDict
 import pytest
+import gc
+from tdhook.hooks import CacheProxy
 
 from nnsight import NNsight
 
-from tdhook.module import HookedModule
+from tdhook.modules import ModuleCallWithCache, IntermediateKeysCleaner
+from tdhook.modules import HookedModule
+from tdhook.contexts import HookingContextFactory
 
 
 class TestHookedModule:
@@ -38,8 +42,7 @@ class TestHookedModule:
 
         with hooked_module.run(data) as run:
             proxy = run.get("linear3")
-            with pytest.raises(ValueError):
-                proxy.resolve()
+            assert proxy.resolve() is None
 
         assert torch.allclose(proxy.resolve(), data["output"])
 
@@ -455,8 +458,6 @@ class TestAdditionalCoverage:
                 pass
 
         # When context exists, both managers work
-        from tdhook.contexts import HookingContextFactory
-
         ctx = HookingContextFactory().prepare(get_model())
         with ctx as ctx_hm:
             # disable hooks context manager
@@ -465,3 +466,59 @@ class TestAdditionalCoverage:
             # disable full context manager yields raw module
             with ctx_hm.disable_context() as raw_module:
                 assert callable(getattr(raw_module, "forward"))
+
+
+class TestModuleCallWithCache:
+    """Test the ModuleCallWithCache class."""
+
+    def test_module_with_cache_creation(self, default_test_model):
+        """Test creating a ModuleCallWithCache with basic functionality."""
+
+        td_module = HookedModule.from_module(module=default_test_model, in_keys=["input"], out_keys=["output"])
+
+        caching_module = ModuleCallWithCache(
+            td_module=td_module, cache_key="cache", stored_keys=["linear2"], out_key="outs"
+        )
+
+        td_module.get(
+            cache=caching_module.cache_ref,
+            module_key="linear2",
+            callback=lambda **kwargs: kwargs["output"].requires_grad_(True),
+        )
+
+        input_data = torch.randn(2, 10)
+        input_td = TensorDict({"input": input_data}, batch_size=[2])
+
+        output_td = caching_module(input_td)
+
+        assert "cache" in output_td
+        assert "linear2_output" in output_td["cache"]
+        assert output_td["cache"]["linear2_output"].shape == (2, 20)
+
+        expected_output = default_test_model(input_data)
+        assert torch.allclose(output_td[("outs", "output")], expected_output)
+
+    def test_dead_cache_reference_raises(self, default_test_model):
+        """CacheProxy should raise if the underlying cache weak reference is dead."""
+
+        # Create a temporary cache and proxy
+        cache = TensorDict()
+        proxy = CacheProxy("k", cache)
+
+        # Remove strong reference and force GC
+        del cache
+        gc.collect()
+
+        with pytest.raises(ValueError):
+            _ = proxy.resolve()
+
+
+class TestIntermediateKeysCleaner:
+    def test_intermediate_keys_cleaner(self):
+        """Test the IntermediateKeysCleaner class."""
+        td = TensorDict({"a": torch.randn(2, 10), "b": torch.randn(2, 20), "c": torch.randn(2, 30)}, batch_size=[2])
+        cleaner = IntermediateKeysCleaner(intermediate_keys=["b"])
+        output_td = cleaner(td)
+        assert "a" in output_td
+        assert "b" not in output_td
+        assert "c" in output_td

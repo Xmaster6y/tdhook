@@ -6,12 +6,14 @@ from typing import Callable, Optional, List
 
 from tensordict import TensorDict
 
-from tdhook.module import HookedModule
-from tdhook.contexts import HookingContextFactory
+from tdhook.modules import HookedModule
+from tdhook.contexts import HookingContextFactory, HookingContextWithCache
 from tdhook.hooks import MultiHookManager, HookFactory, HookDirection, MultiHookHandle
 
 
 class ActivationCaching(HookingContextFactory):
+    _hooking_context_class = HookingContextWithCache
+
     def __init__(
         self,
         key_pattern: str,
@@ -21,16 +23,12 @@ class ActivationCaching(HookingContextFactory):
         directions: Optional[List[HookDirection]] = None,
     ):
         super().__init__()
-        self._cache = TensorDict() if cache is None else cache  # TODO: make the factory stateless
+        self._hooking_context_kwargs["cache"] = cache
 
         self._key_pattern = key_pattern
         self._hook_manager = MultiHookManager(key_pattern, relative=relative)
         self._callback = callback
         self._directions = directions or ["fwd"]
-
-    @property
-    def cache(self) -> TensorDict:
-        return self._cache
 
     @property
     def key_pattern(self) -> str:
@@ -42,9 +40,11 @@ class ActivationCaching(HookingContextFactory):
         self._hook_manager.pattern = key_pattern
 
     def _hook_module(self, module: HookedModule) -> MultiHookHandle:
+        cache = module.hooking_context.cache
+
         def hook_factory(name: str, direction: HookDirection) -> Callable:
-            nonlocal self
-            return HookFactory.make_caching_hook(name, self._cache, direction=direction, callback=self._callback)
+            nonlocal self, cache
+            return HookFactory.make_caching_hook(name, cache, direction=direction, callback=self._callback)
 
         handles = []
         for direction in self._directions:

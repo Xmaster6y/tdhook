@@ -10,7 +10,7 @@ import numpy as np
 from loguru import logger
 from tensordict import TensorDict
 
-from tdhook.module import HookedModule
+from tdhook.modules import HookedModule
 
 
 cuda_available = torch.cuda.is_available()
