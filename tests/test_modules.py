@@ -5,11 +5,14 @@ Tests for the module functionality.
 import torch
 from tensordict import TensorDict
 import pytest
+import gc
+from tdhook.hooks import CacheProxy
 
 from nnsight import NNsight
 
 from tdhook.modules import ModuleCallWithCache, IntermediateKeysCleaner
 from tdhook.modules import HookedModule
+from tdhook.contexts import HookingContextFactory
 
 
 class TestHookedModule:
@@ -455,8 +458,6 @@ class TestAdditionalCoverage:
                 pass
 
         # When context exists, both managers work
-        from tdhook.contexts import HookingContextFactory
-
         ctx = HookingContextFactory().prepare(get_model())
         with ctx as ctx_hm:
             # disable hooks context manager
@@ -496,6 +497,20 @@ class TestModuleCallWithCache:
 
         expected_output = default_test_model(input_data)
         assert torch.allclose(output_td[("outs", "output")], expected_output)
+
+    def test_dead_cache_reference_raises(self, default_test_model):
+        """CacheProxy should raise if the underlying cache weak reference is dead."""
+
+        # Create a temporary cache and proxy
+        cache = TensorDict()
+        proxy = CacheProxy("k", cache)
+
+        # Remove strong reference and force GC
+        del cache
+        gc.collect()
+
+        with pytest.raises(ValueError):
+            _ = proxy.resolve()
 
 
 class TestIntermediateKeysCleaner:

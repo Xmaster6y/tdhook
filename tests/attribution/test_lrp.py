@@ -23,7 +23,10 @@ from tdhook.attribution.lrp_helpers.rules import (
     StopRule,
     SoftmaxEpsilonRule,
     raise_for_unconserved_rel_factory,
+    RemovableRuleHandle,
+    BaseRuleMapper,
 )
+from tdhook.attribution.lrp_helpers.layers import Sum
 from tdhook.attribution import LRP
 
 
@@ -242,7 +245,6 @@ class TestRules:
 
     def test_removable_rule_handle_module_none(self):
         """Test RemovableRuleHandle.remove() when module reference is None."""
-        from tdhook.attribution.lrp_helpers.rules import RemovableRuleHandle
 
         rule = EpsilonRule(epsilon=1e-6)
         module = get_linear_module(seed=0)
@@ -261,7 +263,6 @@ class TestRules:
 
     def test_pass_rule_forward_errors(self):
         """Test PassRule.forward() error cases."""
-        from tdhook.attribution.lrp_helpers.rules import PassRule
 
         class MultiOutputModule(nn.Module):
             def __init__(self):
@@ -327,7 +328,6 @@ class TestRules:
 
     def test_wsquare_rule(self):
         """Test WSquareRule forward and backward passes."""
-        from tdhook.attribution.lrp_helpers.rules import WSquareRule
 
         rule = WSquareRule(stabilizer=1e-6)
         module = get_linear_module(seed=0)
@@ -344,7 +344,6 @@ class TestRules:
 
     def test_alpha_beta_rule_validation(self):
         """Test AlphaBetaRule parameter validation."""
-        from tdhook.attribution.lrp_helpers.rules import AlphaBetaRule
 
         with pytest.raises(ValueError, match="Both alpha and beta parameters must be non-negative"):
             AlphaBetaRule(alpha=-1.0, beta=1.0)
@@ -357,7 +356,6 @@ class TestRules:
 
     def test_alpha_beta_rule_multiple_inputs(self):
         """Test AlphaBetaRule with multiple inputs (should raise NotImplementedError)."""
-        from tdhook.attribution.lrp_helpers.rules import AlphaBetaRule
 
         class MultiInputModule(nn.Module):
             def __init__(self):
@@ -426,8 +424,6 @@ class TestRules:
 
     def test_base_rule_mapper_call(self):
         """Test BaseRuleMapper._call() method."""
-        from tdhook.attribution.lrp_helpers.rules import BaseRuleMapper
-        from tdhook.attribution.lrp_helpers.layers import Sum
 
         mapper = BaseRuleMapper()
 
@@ -449,7 +445,6 @@ class TestRules:
 
     def test_epsilon_plus_call(self):
         """Test EpsilonPlus._call() method."""
-        from tdhook.attribution.lrp_helpers.rules import EpsilonPlus
 
         mapper = EpsilonPlus()
 
@@ -463,7 +458,6 @@ class TestRules:
 
     def test_raise_for_unconserved_rel_factory_error_handling(self):
         """Test raise_for_unconserved_rel_factory error handling."""
-        from tdhook.attribution.lrp_helpers.rules import raise_for_unconserved_rel_factory
 
         module = get_linear_module(seed=0)
 
@@ -483,7 +477,6 @@ class TestRules:
 
     def test_epsilon_rule_no_input_grad(self):
         """Test EpsilonRule when no inputs require gradients."""
-        from tdhook.attribution.lrp_helpers.rules import EpsilonRule
 
         rule = EpsilonRule(epsilon=1e-6)
         module = get_linear_module(seed=0)
@@ -498,7 +491,6 @@ class TestRules:
 
     def test_epsilon_plus_super_call(self):
         """Test EpsilonPlus._call() when super()._call() is invoked."""
-        from tdhook.attribution.lrp_helpers.rules import EpsilonPlus
 
         mapper = EpsilonPlus()
 

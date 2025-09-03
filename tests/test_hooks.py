@@ -5,6 +5,8 @@ Tests for the hooks functionality.
 import torch
 from tensordict import TensorDict
 import pytest
+import gc
+import weakref
 
 from tdhook.hooks import (
     register_hook_to_module,
@@ -12,6 +14,8 @@ from tdhook.hooks import (
     MultiHookHandle,
     HookFactory,
     EarlyStoppingException,
+    MutableWeakRef,
+    CacheProxy,
 )
 
 
@@ -91,7 +95,7 @@ class TestMultiHookHandle:
     """Tests specific to MultiHookHandle behaviors."""
 
     def test_add_handles_and_remove_all(self, default_test_model):
-        import torch
+        # import moved to module level
 
         input = torch.randn(2, 10)
         original_output = default_test_model(input)
@@ -121,14 +125,11 @@ class TestMultiHookHandle:
         assert torch.allclose(restored_output, original_output)
 
         # Type safety on addition
-        import pytest
 
         with pytest.raises(TypeError):
             _ = combined + 123  # not a MultiHookHandle
 
     def test_context_manager_removes_on_exit(self, default_test_model):
-        import torch
-
         input = torch.randn(2, 10)
         original_output = default_test_model(input)
 
@@ -157,8 +158,6 @@ class TestMultiHookHandle:
 
 class TestMultiHookManagerPattern:
     def test_pattern_setter_changes_selection(self, default_test_model):
-        import torch
-
         input = torch.randn(2, 10)
         original_output = default_test_model(input)
 
@@ -194,7 +193,6 @@ class TestHookRegistrationKwargsAndBackward:
 
     def test_register_forward_hook_with_kwargs(self, default_test_model):
         """Forward hook with with_kwargs=True can modify output."""
-        import torch
 
         def forward_hook(module, args, kwargs, output):
             return output + 1
@@ -210,7 +208,6 @@ class TestHookRegistrationKwargsAndBackward:
 
     def test_register_forward_pre_hook_with_kwargs(self, default_test_model):
         """Forward pre hook with kwargs can modify inputs."""
-        import torch
 
         def pre_hook(module, args, kwargs):
             return (args[0] + 1,), kwargs
@@ -226,7 +223,6 @@ class TestHookRegistrationKwargsAndBackward:
 
     def test_register_backward_and_backward_pre_hooks(self, default_test_model):
         """Backward and backward pre hooks are invoked during autograd."""
-        import torch
 
         calls = []
 
@@ -259,27 +255,22 @@ class TestHookSignatureValidation:
         def bad_hook(module, output):
             return output
 
-        import pytest
-
         with pytest.raises(ValueError):
             register_hook_to_module(default_test_model.linear1, bad_hook, direction="fwd")
 
     def test_callback_missing_params_raises(self):
         """Callback missing required named params is rejected."""
-        from tensordict import TensorDict
 
         def bad_cb(module):
             return 0
 
         cache = TensorDict()
-        import pytest
 
         with pytest.raises(ValueError):
             HookFactory.make_caching_hook("k", cache, callback=bad_cb, direction="fwd")
 
     def test_caching_hook_fwd_pre_kwargs_value_index(self):
         """Caching hook for fwd_pre_kwargs can use callback to store a non-tuple value."""
-        from tensordict import TensorDict
 
         cache = TensorDict()
         hook = HookFactory.make_caching_hook(
@@ -301,7 +292,6 @@ class TestHookEdgeCases:
 
     def test_register_invalid_direction_raises(self, default_test_model):
         """Registering with an invalid direction fails early."""
-        import pytest
 
         def some_hook(module, args, output):
             return output
@@ -311,7 +301,6 @@ class TestHookEdgeCases:
 
     def test_varargs_too_many_positional_params_raises(self, default_test_model):
         """Varargs hooks with too many fixed params are rejected."""
-        import pytest
 
         def bad_varargs_hook(module, a, b, c, d, *args):
             return None
@@ -321,7 +310,6 @@ class TestHookEdgeCases:
 
     def test_multihookmanager_default_pattern_matches_nothing(self, default_test_model):
         """Default manager pattern matches no modules."""
-        import torch
 
         def hook_factory(name: str):
             def hook(module, args, output):
@@ -339,9 +327,6 @@ class TestHookEdgeCases:
 
     def test_cacheproxy_dead_reference_raises(self):
         """Resolving a CacheProxy with a dead cache reference raises."""
-        import gc
-        from tensordict import TensorDict
-        from tdhook.hooks import CacheProxy
 
         def make_proxy():
             cache = TensorDict()
@@ -349,14 +334,12 @@ class TestHookEdgeCases:
 
         proxy = make_proxy()
         gc.collect()
-        import pytest
 
         with pytest.raises(ValueError):
             proxy.resolve()
 
     def test_callback_positional_only_params_rejected(self):
         """Callbacks with positional-only parameters are not allowed."""
-        import pytest
 
         def cb(module, /, args=None, output=None, value=None):
             return value
@@ -366,16 +349,12 @@ class TestHookEdgeCases:
 
     def test_make_caching_hook_invalid_direction_raises(self):
         """Invalid direction for caching hook raises."""
-        from tensordict import TensorDict
-        import pytest
 
         with pytest.raises(ValueError):
             HookFactory.make_caching_hook("k", TensorDict(), direction="nope")
 
     def test_make_setting_hook_cacheproxy_resolve_branch(self):
         """Setting hook resolves CacheProxy and can return a proxy via callback."""
-        from tensordict import TensorDict
-        from tdhook.hooks import CacheProxy
 
         cache = TensorDict({"k": 123})
         proxy = CacheProxy("k", cache)
@@ -389,7 +368,6 @@ class TestHookEdgeCases:
 
     def test_make_setting_hook_type_mismatch_raises(self):
         """Setting hook raises when callback changes the value type."""
-        import pytest
 
         def cb(module, args, output, value):
             return 1.0
@@ -400,8 +378,6 @@ class TestHookEdgeCases:
 
     def test_caching_hook_non_tensor_value_raises(self):
         """Caching hook raises when callback returns a non-tensor value."""
-        from tensordict import TensorDict
-        import pytest
 
         cache = TensorDict()
         hook = HookFactory.make_caching_hook(
@@ -415,3 +391,19 @@ class TestHookEdgeCases:
         kwargs = {"unused": 1}
         with pytest.raises(RuntimeError):
             hook(module, args, kwargs)
+
+    def test_caching_hook_dead_cache_reference_raises(self):
+        """Caching hook raises when underlying cache has been garbage collected."""
+
+        cache = TensorDict()
+        cache_ref = MutableWeakRef(weakref.ref(cache))
+
+        # Remove strong reference to allow garbage collection
+        del cache
+        gc.collect()
+
+        hook = HookFactory.make_caching_hook("k", cache_ref, direction="fwd")
+
+        # Expect ValueError due to dead weak reference resolution inside hook
+        with pytest.raises(ValueError):
+            hook(object(), None, torch.tensor(1))

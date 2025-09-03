@@ -36,7 +36,7 @@ def prepare(
         return kwargs["output"]
 
     context = ActivationCaching(key_pattern="^(?!transformer$).*", callback=callback, relative=True)
-    hooking_context = context.prepare(model, in_keys={k: k for k in input_data.keys()}, out_keys=["output"])
+    hooking_context = context.prepare(model, in_keys={k: k for k in input_data}, out_keys=["output"])
 
     return hooking_context, input_data
 

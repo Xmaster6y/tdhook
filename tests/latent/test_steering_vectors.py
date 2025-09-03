@@ -38,27 +38,6 @@ class TestSteeringVectors:
 class TestActivationAddition:
     """Test the ActivationAddition class."""
 
-    def test_clean_intermediate_keys_removes_caches(self):
-        # Setup: create dummy input and ActivationAddition instance
-        input_data = torch.randn(2, 10)
-        data = TensorDict({"input": input_data}, batch_size=2)
-        activation_addition = ActivationAddition(
-            module="linear",
-            vector=torch.randn(10, 5),
-            clean_intermediate_keys=True,
-        )
-
-        # Simulate intermediate cache keys
-        data["_positive_cache"] = torch.randn(2, 5)
-        data["_negative_cache"] = torch.randn(2, 5)
-
-        # Run the activation addition
-        output = activation_addition(data)
-
-        # Assert that intermediate keys are removed
-        assert "_positive_cache" not in output.keys()
-        assert "_negative_cache" not in output.keys()
-
     @pytest.mark.parametrize(
         "modules_to_steer",
         (

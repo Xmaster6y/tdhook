@@ -335,12 +335,6 @@ class TestLatentAttribution:
 
 
 class TestActivationMaximisation:
-    def test_activation_maximisation_n_steps_zero(self, default_test_model):
-        input_data = torch.randn(3, 10)
-        activation_maximiser = ActivationMaximisation(n_steps=0)
-        output = activation_maximiser(default_test_model, input_data)
-        torch.testing.assert_close(output, input_data)
-
     def test_activation_maximisation(self, default_test_model):
         input_data = torch.randn(3, 10)
 

@@ -298,10 +298,7 @@ class HookFactory:
         def hook(*args):
             nonlocal value, callback, params, return_index
             original_type = type(args[return_index])
-            if isinstance(value, CacheProxy):
-                _value = value.resolve()
-            else:
-                _value = value
+            _value = value.resolve() if isinstance(value, CacheProxy) else value
             if callback is not None:
                 _value = callback(**dict(zip(params, args)), value=_value)
             if type(_value) is not original_type:
