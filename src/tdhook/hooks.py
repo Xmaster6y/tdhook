@@ -79,21 +79,38 @@ def resolve_submodule_path(root: nn.Module, key: str):
     Resolve a submodule path that may contain indexing expressions.
 
     Supports any valid Python attribute access and indexing:
+    - "[0]" -> root[0]
     - "layers[-1]" -> root.layers[-1]
     - "layers['attr']" -> root.layers['attr']
     - "layers.attention" -> root.layers.attention
     - "layers[1:3]" -> root.layers[1:3]
+
+    Supports custom attributes:
+    - ":block0/module:" -> getattr(root, "block0/module")
+    - ":block0/module:layers.attention[0]" -> getattr(root, "block0/module").layers.attention[0]
+    - "m1:block0/module:layers:module:linear[0]" -> getattr(getattr(root.m1, "block0/module").layers, "module").linear[0]
     """
 
     if not key:
         return root
 
+    start_key, *rest = key.split(":", maxsplit=1)
+
+    if rest:
+        start_root = resolve_submodule_path(root, start_key)
+        attr, *rest = rest[0].split(":", maxsplit=1)
+        if not rest:
+            raise ValueError(f"Invalid submodule path '{key}', missing closing ':'")
+        return resolve_submodule_path(getattr(start_root, attr), rest[0])
+
     # Create a safe environment with only the current module
     safe_dict = {"root": root}
 
     try:
-        # Evaluate the expression in the safe environment
-        return eval(f"root.{key}", {"__builtins__": {}}, safe_dict)
+        if key.startswith("["):
+            return eval(f"root{key}", {"__builtins__": {}}, safe_dict)
+        else:
+            return eval(f"root.{key}", {"__builtins__": {}}, safe_dict)
     except (AttributeError, IndexError, KeyError, SyntaxError) as e:
         raise ValueError(f"Invalid submodule path '{key}': {e}") from e
 
