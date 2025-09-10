@@ -22,6 +22,7 @@ from tdhook.attribution.lrp_helpers.rules import (
     UniformRule,
     StopRule,
     SoftmaxEpsilonRule,
+    IgnoreRule,
     raise_for_unconserved_rel_factory,
     RemovableRuleHandle,
     BaseRuleMapper,
@@ -509,3 +510,29 @@ class TestRules:
         custom_module = CustomModule()
         rule = mapper._call("custom", custom_module)
         assert rule is None
+
+    def test_ignore_rule_preserves_gradients(self):
+        """Test IgnoreRule preserves original gradient behavior."""
+
+        module = get_linear_module(seed=0)
+        input_tensor = torch.randn(10, requires_grad=True)
+
+        original_output = module(input_tensor)
+        out_relevance = torch.randn_like(original_output)
+
+        original_output.backward(out_relevance)
+        original_grad = input_tensor.grad.clone()
+
+        input_tensor.grad.zero_()
+
+        rule = IgnoreRule()
+        rule.register(module)
+
+        output_with_rule = module(input_tensor)
+        torch.testing.assert_close(original_output, output_with_rule)
+
+        output_with_rule.backward(out_relevance)
+        rule_grad = input_tensor.grad
+
+        torch.testing.assert_close(original_grad, rule_grad)
+        rule.unregister(module)

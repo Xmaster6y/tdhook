@@ -16,7 +16,7 @@ import torch
 import torch.nn as nn
 from torch.autograd.function import Function, FunctionMeta
 
-from .types import Activation, AvgPool, BatchNorm, Convolution, Linear
+from .types import Activation, AvgPool, BatchNorm, Convolution, Linear, MaxPool
 from .layers import Sum
 
 
@@ -200,6 +200,22 @@ class PassRule(Rule):
         return None, None, None, *out_relevance
 
 
+class IgnoreRule(Rule):
+    def register(self, module: nn.Module):
+        return RemovableRuleHandle(self, module)
+
+    def unregister(self, module: nn.Module):
+        pass
+
+    @staticmethod
+    def forward(ctx, apply_kwargs, module, model_kwargs, *inputs):
+        pass
+
+    @staticmethod
+    def backward(ctx, *out_relevance):
+        pass
+
+
 class WSquareRule(Rule):
     def __init__(self, stabilizer=1e-6):
         super().__init__()
@@ -344,12 +360,15 @@ class BaseRuleMapper:
         self._rules = {
             "pass": PassRule(),
             "norm": EpsilonRule(epsilon=self._stabilizer),
+            "ignore": IgnoreRule(),
         }
 
     def _call(self, name: str, module: nn.Module) -> Rule | None:
-        if isinstance(module, Activation) or isinstance(module, BatchNorm):
+        if isinstance(module, (Activation, BatchNorm)):
             return self._rules["pass"]
-        elif isinstance(module, Sum) or isinstance(module, AvgPool):
+        if isinstance(module, (MaxPool, nn.Identity, nn.Dropout, nn.Flatten)):
+            return self._rules["ignore"]
+        elif isinstance(module, (Sum, AvgPool)):
             return self._rules["norm"]
 
     def __call__(self, name: str, module: nn.Module) -> Rule | None:
