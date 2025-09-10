@@ -262,7 +262,7 @@ class TestGradCAM:
         input_data = torch.randn(3, 10)
 
         tdhook_context_factory = GradCAM(
-            modules_to_attribute={"linear2": DimsConfig(feature_dims=None, pooling_dims=None)},
+            modules_to_attribute={"linear2": DimsConfig(weight_pooling_dims=None, feature_sum_dims=None)},
         )
         with tdhook_context_factory.prepare(default_test_model) as hooked_module:
             output = hooked_module(TensorDict({"input": input_data}, batch_size=3))

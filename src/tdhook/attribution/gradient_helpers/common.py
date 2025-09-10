@@ -3,7 +3,7 @@ Gradient attribution
 """
 
 from abc import ABCMeta, abstractmethod
-from typing import Callable, Optional, Tuple, List
+from typing import Callable, Optional, Tuple, List, Dict
 
 import torch
 from tensordict.nn import TensorDictModule, TensorDictSequential, TensorDictModuleBase
@@ -27,6 +27,7 @@ class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
         init_attr_inputs: Optional[Callable[[TensorDict, TensorDict], TensorDict]] = None,
         init_attr_grads: Optional[Callable[[TensorDict, TensorDict], TensorDict]] = None,
         additional_init_keys: Optional[List[UnraveledKey]] = None,
+        output_grad_callbacks: Optional[Dict[str, Callable]] = None,
         attribution_key: UnraveledKey = "attr",
         clean_intermediate_keys: bool = True,
     ):
@@ -39,6 +40,7 @@ class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
         self._init_attr_targets = init_attr_targets
         self._init_attr_inputs = init_attr_inputs
         self._init_attr_grads = init_attr_grads
+        self._output_grad_callbacks = output_grad_callbacks or {}
 
         self._additional_init_keys = additional_init_keys or []
         self._attr_key = attribution_key
@@ -85,7 +87,11 @@ class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
             ),
         ]
         if self._clean_intermediate_keys:
-            modules.append(IntermediateKeysCleaner(intermediate_keys=["_register_in", "_mod_in", "_mod_out"]))
+            modules.append(
+                IntermediateKeysCleaner(
+                    intermediate_keys=["_register_in", "_mod_in", "_mod_out", "_cache_in", "_cache_out"]
+                )
+            )
         return TensorDictSequential(*modules)
 
     def _hook_module(self, module: HookedModule) -> MultiHookHandle:
@@ -105,6 +111,9 @@ class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
                 cache_key=("_cache_out", module_key),
                 module_key=module_key,
             )
+            handles.append(handle)
+        for module_key, callback in self._output_grad_callbacks.items():
+            handle = module.set_grad_output(module_key, value=None, callback=callback)
             handles.append(handle)
         return MultiHookHandle(handles)
 
