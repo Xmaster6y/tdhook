@@ -10,8 +10,14 @@ from tdhook.hooks import CacheProxy
 
 from nnsight import NNsight
 
-from tdhook.modules import ModuleCallWithCache, IntermediateKeysCleaner
-from tdhook.modules import HookedModule
+from tdhook.modules import (
+    ModuleCallWithCache,
+    IntermediateKeysCleaner,
+    HookedModule,
+    FunctionModule,
+    flatten_select_reshape_call,
+    flatten_reshape_call,
+)
 from tdhook.contexts import HookingContextFactory
 
 
@@ -522,3 +528,34 @@ class TestIntermediateKeysCleaner:
         assert "a" in output_td
         assert "b" not in output_td
         assert "c" in output_td
+
+
+@pytest.mark.parametrize(
+    "batch_size",
+    [
+        (),
+        (3,),
+        (2, 3),
+    ],
+)
+class TestFlattenReshapeCall:
+    @staticmethod
+    def fn(td):
+        assert td["a"].ndim == 2
+        td["b"] = td["a"]
+        return td
+
+    def test_flatten_reshape_call(self, batch_size):
+        """Test the flatten_reshape_call function."""
+        module = FunctionModule(self.fn, in_keys=["a"], out_keys=["b"])
+        td = TensorDict({"a": torch.randn(*batch_size, 10)}, batch_size=batch_size)
+        output_td = flatten_reshape_call(module, td)
+        assert "b" in output_td
+
+    def test_flatten_select_reshape_call(self, batch_size):
+        """Test the flatten_select_reshape_call function."""
+        module = FunctionModule(self.fn, in_keys=["a"], out_keys=["b"])
+        td = TensorDict({"a": torch.randn(*batch_size, 10)}, batch_size=batch_size)
+        output_td = flatten_select_reshape_call(module, td)
+        assert "b" in output_td
+        assert "a" not in output_td

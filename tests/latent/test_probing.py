@@ -12,7 +12,7 @@ from tensordict import TensorDict
 from tdhook.latent.probing import Probing, SklearnProbeManager
 
 
-class TestProbe:
+class ExampleProbe:
     def __init__(self):
         self.called = False
 
@@ -37,7 +37,7 @@ class TestProbing:
         probes = {}
 
         def probe_factory(key, direction):
-            probes[key] = TestProbe()
+            probes[key] = ExampleProbe()
             return probes[key]
 
         context = Probing(key, probe_factory, relative=relative)
