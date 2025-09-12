@@ -340,6 +340,7 @@ class HookedModuleRun:
         self._handles.append(handle)
         return proxy
 
+    # TODO: rename grad_input
     def set_grad(self, *args, **kwargs):
         self._ensure_in_context("set_grad")
         self._grad_enabled = True
