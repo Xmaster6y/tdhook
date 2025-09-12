@@ -21,6 +21,7 @@ class ActivationCaching(HookingContextFactory):
         cache: Optional[TensorDict] = None,
         callback: Optional[Callable] = None,
         directions: Optional[List[HookDirection]] = None,
+        use_nested_keys: bool = False,
     ):
         super().__init__()
         self._hooking_context_kwargs["cache"] = cache
@@ -29,6 +30,7 @@ class ActivationCaching(HookingContextFactory):
         self._hook_manager = MultiHookManager(key_pattern, relative=relative)
         self._callback = callback
         self._directions = directions or ["fwd"]
+        self._use_nested_keys = use_nested_keys or len(self._directions) > 1
 
     @property
     def key_pattern(self) -> str:
@@ -44,7 +46,8 @@ class ActivationCaching(HookingContextFactory):
 
         def hook_factory(name: str, direction: HookDirection) -> Callable:
             nonlocal self, cache
-            return HookFactory.make_caching_hook(name, cache, direction=direction, callback=self._callback)
+            key = (direction, name) if self._use_nested_keys else name
+            return HookFactory.make_caching_hook(key, cache, direction=direction, callback=self._callback)
 
         handles = []
         for direction in self._directions:

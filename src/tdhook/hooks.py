@@ -12,6 +12,8 @@ from torch.utils.hooks import RemovableHandle
 from torch import nn
 import torch
 
+from tdhook._types import UnraveledKey
+
 
 HookDirection = Literal["fwd", "bwd", "fwd_pre", "bwd_pre", "fwd_kwargs", "fwd_pre_kwargs"]
 T = TypeVar("T")
@@ -260,7 +262,7 @@ class HookFactory:
 
     @staticmethod
     def make_caching_hook(
-        key: str,
+        key: UnraveledKey,
         cache: TensorDict | MutableWeakRef,
         *,
         callback: Optional[Callable] = None,
@@ -278,9 +280,9 @@ class HookFactory:
         HookFactory._check_callback_signature(callback, set(params))
 
         def hook(*args):
-            nonlocal key, cache, callback
+            nonlocal key, cache, callback, direction
             if callback is not None:
-                value = callback(**dict(zip(params, args)), key=key)
+                value = callback(**dict(zip(params, args)), key=key, direction=direction)
             else:
                 value = args[value_index]
             if not isinstance(value, torch.Tensor) and not isinstance(value, TensorDict):
@@ -313,11 +315,11 @@ class HookFactory:
         HookFactory._check_callback_signature(callback, set(params))
 
         def hook(*args):
-            nonlocal value, callback, params, return_index
+            nonlocal value, callback, params, return_index, direction
             original_type = type(args[return_index])
             _value = value.resolve() if isinstance(value, CacheProxy) else value
             if callback is not None:
-                _value = callback(**dict(zip(params, args)), value=_value)
+                _value = callback(**dict(zip(params, args)), value=_value, direction=direction)
             if type(_value) is not original_type:
                 raise RuntimeError(
                     f"Callback returned a value of type {type(_value).__name__} but the original value was of type {original_type.__name__}"
@@ -339,8 +341,8 @@ class HookFactory:
         HookFactory._check_callback_signature(callback, set(params))
 
         def hook(*args):
-            nonlocal callback, params
-            callback(**dict(zip(params, args)))
+            nonlocal callback, params, direction
+            callback(**dict(zip(params, args)), direction=direction)
 
         return hook
 

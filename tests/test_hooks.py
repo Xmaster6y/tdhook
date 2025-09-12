@@ -75,7 +75,7 @@ class TestHookFactory:
     def test_make_setting_hook(self, default_test_model):
         """Test making a setting hook."""
 
-        def callback(value, module, args, output):
+        def callback(value, **_):
             return value + 1
 
         hook = HookFactory.make_setting_hook(1, callback=callback)
@@ -278,7 +278,7 @@ class TestHookSignatureValidation:
             "k",
             cache,
             direction="fwd_pre_kwargs",
-            callback=lambda module, args, kwargs, key: args[0],
+            callback=lambda args, **_: args[0],
         )
         module = object()
         my_tensor = torch.tensor(1)
@@ -360,7 +360,7 @@ class TestHookEdgeCases:
         cache = TensorDict({"k": 123})
         proxy = CacheProxy("k", cache)
 
-        def cb(module, args, output, value):
+        def cb(value, **_):
             return value + 1
 
         hook = HookFactory.make_setting_hook(proxy, callback=cb, direction="fwd")
@@ -370,7 +370,7 @@ class TestHookEdgeCases:
     def test_make_setting_hook_type_mismatch_raises(self):
         """Setting hook raises when callback changes the value type."""
 
-        def cb(module, args, output, value):
+        def cb(**_):
             return 1.0
 
         hook = HookFactory.make_setting_hook(1, callback=cb, direction="fwd")
@@ -385,7 +385,7 @@ class TestHookEdgeCases:
             "k",
             cache,
             direction="fwd_pre_kwargs",
-            callback=lambda module, args, kwargs, key: args[0],
+            callback=lambda args, **_: args[0],
         )
         module = object()
         args = ("A",)
