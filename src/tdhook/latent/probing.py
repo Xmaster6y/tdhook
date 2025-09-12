@@ -4,6 +4,7 @@ Probing
 
 from typing import Callable, Optional, List, Protocol, Any, Dict
 
+import numpy as np
 from tensordict import TensorDict
 
 from tdhook.contexts import HookingContextFactory
@@ -184,3 +185,51 @@ class SklearnProbeManager:
     def reset_metrics(self):
         self._fit_metrics = {}
         self._predict_metrics = {}
+
+
+class MeanDifferenceClassifier:
+    def __init__(self, normalize: bool = True):
+        self._normalize = normalize
+        self._coef = None
+        self._intercept = None
+
+    @property
+    def coef_(self):
+        if self._coef is None:
+            raise ValueError("Model not fitted")
+        return self._coef
+
+    @property
+    def intercept_(self):
+        if self._intercept is None:
+            raise ValueError("Model not fitted")
+        return self._intercept
+
+    def fit(self, X, y):
+        if len(y.shape) > 1:
+            raise ValueError("Multiclass classification not supported")
+        y = np.expand_dims(y, 1)
+        pos = (X * y).sum(axis=0) / y.sum()
+        neg = (X * (1 - y)).sum(axis=0) / (1 - y).sum()
+        pos_norm = np.linalg.norm(pos)
+        neg_norm = np.linalg.norm(neg)
+
+        self._coef = pos - neg
+        self._intercept = -0.5 * (pos_norm**2 - neg_norm**2)
+        if self._normalize:
+            self._intercept = self._intercept / np.linalg.norm(self._coef)
+            self._coef = self._coef / np.linalg.norm(self._coef)
+
+        self._intercept = self._intercept.reshape((1,))
+        self._coef = self._coef.reshape((1, -1))
+
+    def _decision_function(self, X):
+        return (X * self._coef).sum(axis=1) + self._intercept
+
+    def predict(self, X):
+        return self._decision_function(X) > 0
+
+    def predict_proba(self, X):
+        pos_proba = 1 / (1 + np.exp(-self._decision_function(X)))
+        neg_proba = 1 - pos_proba
+        return np.stack([neg_proba, pos_proba], axis=1)

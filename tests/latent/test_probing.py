@@ -4,12 +4,13 @@ Tests for the probing functionality.
 
 import pytest
 import torch
+import numpy as np
 
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score
 from tensordict import TensorDict
 
-from tdhook.latent.probing import Probing, SklearnProbeManager
+from tdhook.latent.probing import Probing, SklearnProbeManager, MeanDifferenceClassifier
 
 
 class ExampleProbe:
@@ -75,3 +76,48 @@ class TestProbing:
             inputs["step_type"] = "predict"
             hooked_module(inputs)
             assert storage_key in probe_manager.predict_metrics
+
+
+class TestMeanDifferenceClassifier:
+    """Test the MeanDifferenceClassifier class."""
+
+    @pytest.mark.parametrize(
+        "X,y,normalize,expected_coef,expected_intercept",
+        [
+            (
+                np.array([[1.0, 0.0], [2.0, 0.0], [-1.0, 0.0], [-2.0, 0.0]]),
+                np.array([1, 1, 0, 0]),
+                True,
+                np.array([[1.0, 0.0]]),
+                np.array([0.0]),
+            ),
+            (
+                np.array([[1.0, 0.0], [2.0, 0.0], [-1.0, 0.0], [-2.0, 0.0]]),
+                np.array([1, 1, 0, 0]),
+                False,
+                np.array([[3.0, 0.0]]),
+                np.array([0.0]),
+            ),
+        ],
+    )
+    def test_fit_and_predict(self, X, y, normalize, expected_coef, expected_intercept):
+        """Test fit and predict functionality with expected coefficients and intercept."""
+        classifier = MeanDifferenceClassifier(normalize=normalize)
+        classifier.fit(X, y)
+
+        predictions = classifier.predict(X)
+        assert np.array_equal(predictions, [True, True, False, False])
+
+        proba = classifier.predict_proba(X)
+        assert proba.shape == (4, 2)
+        assert np.allclose(proba.sum(axis=1), 1.0)
+
+        assert np.allclose(classifier.coef_, expected_coef)
+        assert np.allclose(classifier.intercept_, expected_intercept)
+
+        # Test that midpoint between positive and negative means has proba 0.5
+        pos_mean = X[y == 1].mean(axis=0)
+        neg_mean = X[y == 0].mean(axis=0)
+        midpoint = (pos_mean + neg_mean) / 2
+        midpoint_proba = classifier.predict_proba(midpoint.reshape(1, -1))
+        assert np.isclose(midpoint_proba[0, 1], 0.5)
