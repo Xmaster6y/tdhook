@@ -16,7 +16,7 @@ class ActivationPatching(HookingContextFactory):
     def __init__(
         self,
         modules_to_patch: List[str],
-        patch_key: UnraveledKey = "patch",
+        patch_key: UnraveledKey = "patched",
         clean_intermediate_keys: bool = True,
         patch_fn: Optional[Callable] = None,
     ):

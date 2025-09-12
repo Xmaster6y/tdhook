@@ -30,7 +30,7 @@ class TestActivationPatching:
         context = ActivationPatching(modules_to_patch, patch_fn=patch_fn)
 
         with context.prepare(default_test_model) as hooked_module:
-            data = TensorDict({"input": torch.randn(2, 10), ("patch", "input"): torch.randn(2, 10)}, batch_size=2)
+            data = TensorDict({"input": torch.randn(2, 10), ("patched", "input"): torch.randn(2, 10)}, batch_size=2)
             data = hooked_module(data)
-            assert data.get(("patch", "output")).shape == (2, 5)
-            assert not torch.allclose(data.get("output"), data.get(("patch", "output")))
+            assert data.get(("patched", "output")).shape == (2, 5)
+            assert not torch.allclose(data.get("output"), data.get(("patched", "output")))
