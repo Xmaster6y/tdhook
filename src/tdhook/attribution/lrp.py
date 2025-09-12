@@ -67,6 +67,6 @@ class LRP(GradientAttribution):
 
     @staticmethod
     def default_skip(name: str, module: nn.Module) -> bool:
-        names_to_skip = ("", "td_module")
+        names_to_skip = ("", "td_module", "module")
         classes_to_skip = (nn.ModuleList, nn.Sequential, TensorDictModule)
         return name in names_to_skip or isinstance(module, classes_to_skip)

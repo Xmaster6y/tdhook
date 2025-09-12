@@ -33,6 +33,7 @@ class GradCAM(GradientAttribution):
         clean_intermediate_keys: bool = True,
         absolute: bool = False,
         output_grad_callbacks: Optional[Dict[str, Callable]] = None,
+        **kwargs,
     ):
         super().__init__(
             use_inputs=False,
