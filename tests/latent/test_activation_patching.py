@@ -23,9 +23,9 @@ class TestActivationPatching:
     def test_simple_activation_patching(self, default_test_model, modules_to_patch):
         """Test creating a ActivationPatching."""
 
-        def patch_fn(output, patch_output, **_):
-            patch_output[:, 0] = output[:, 0]
-            return patch_output
+        def patch_fn(output, output_to_patch, **_):
+            output[:, 0] = output_to_patch[:, 0]
+            return output
 
         context = ActivationPatching(modules_to_patch, patch_fn=patch_fn)
 

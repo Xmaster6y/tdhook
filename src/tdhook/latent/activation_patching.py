@@ -69,7 +69,7 @@ class ActivationPatching(HookingContextFactory):
                 if value is None:  # clean run
                     return output
                 elif self._patch_fn is not None:
-                    patched_output = self._patch_fn(module_key=module_key, output=value, patch_output=output)
+                    patched_output = self._patch_fn(module_key=module_key, output=output, output_to_patch=value)
                     return value if patched_output is None else patched_output
                 else:
                     return value
