@@ -5,7 +5,6 @@ Hooks
 import weakref
 from typing import Callable, Any, Optional, List, Literal, Protocol, Generic, TypeVar, Type, Tuple
 import inspect
-from weakref import ReferenceType
 from tensordict import TensorDict
 import re
 from torch.utils.hooks import RemovableHandle
@@ -209,24 +208,35 @@ class MultiHookManager:
 
 
 class MutableWeakRef(Generic[T]):
-    def __init__(self, ref: ReferenceType[T]):
-        self._ref = ref
+    def __init__(self, referee: T):
+        self._ref = weakref.ref(referee)
 
     def resolve(self) -> T:
         return self._ref()
 
-    def set(self, ref: ReferenceType[T]):
-        self._ref = ref
+    def set(self, referee: T):
+        self._ref = weakref.ref(referee)
+
+
+class TensorDictRef:
+    def __init__(self, td: Optional[TensorDict]):
+        self._td = td
+
+    def resolve(self) -> TensorDict:
+        return self._td
+
+    def set(self, td: TensorDict):
+        self._td = td
 
 
 class CacheProxy:
-    def __init__(self, key: str, cache: TensorDict | MutableWeakRef[TensorDict]):
+    def __init__(self, key: str, cache: TensorDict | MutableWeakRef[TensorDict] | TensorDictRef):
         self._key = key
         self._cache = weakref.ref(cache)
 
     def resolve(self) -> Any:
         cache = self._cache()
-        if isinstance(cache, MutableWeakRef):
+        if isinstance(cache, (MutableWeakRef, TensorDictRef)):
             cache = cache.resolve()
         if cache is None:
             raise ValueError("Dead reference to cache")
@@ -289,7 +299,7 @@ class HookFactory:
                 raise RuntimeError(
                     f"{type(value).__name__} values are not supported for caching, use a `callback` to return a tensor or a tensordict"
                 )
-            if isinstance(cache, MutableWeakRef):
+            if isinstance(cache, MutableWeakRef | TensorDictRef):
                 _cache = cache.resolve()
                 if _cache is None:
                     raise ValueError("Dead reference to cache")

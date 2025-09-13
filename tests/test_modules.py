@@ -16,7 +16,7 @@ from tdhook.modules import (
     HookedModule,
     FunctionModule,
     flatten_select_reshape_call,
-    flatten_reshape_call,
+    ModuleCall,
 )
 from tdhook.contexts import HookingContextFactory
 
@@ -538,6 +538,8 @@ class TestIntermediateKeysCleaner:
         (2, 3),
     ],
 )
+@pytest.mark.parametrize("select", [True, False])
+@pytest.mark.parametrize("reshape", [True, False])
 class TestFlattenReshapeCall:
     @staticmethod
     def fn(td):
@@ -545,17 +547,40 @@ class TestFlattenReshapeCall:
         td["b"] = td["a"]
         return td
 
-    def test_flatten_reshape_call(self, batch_size):
-        """Test the flatten_reshape_call function."""
-        module = FunctionModule(self.fn, in_keys=["a"], out_keys=["b"])
-        td = TensorDict({"a": torch.randn(*batch_size, 10)}, batch_size=batch_size)
-        output_td = flatten_reshape_call(module, td)
-        assert "b" in output_td
-
-    def test_flatten_select_reshape_call(self, batch_size):
+    def test_flatten_select_reshape_call(self, batch_size, select, reshape):
         """Test the flatten_select_reshape_call function."""
         module = FunctionModule(self.fn, in_keys=["a"], out_keys=["b"])
         td = TensorDict({"a": torch.randn(*batch_size, 10)}, batch_size=batch_size)
-        output_td = flatten_select_reshape_call(module, td)
+        output_td = flatten_select_reshape_call(module, td, select=select, reshape=reshape)
         assert "b" in output_td
-        assert "a" not in output_td
+        if select:
+            assert "a" not in output_td
+        else:
+            assert "a" in output_td
+
+
+class TestModuleRepr:
+    """Brief tests for __repr__ of various module helpers."""
+
+    @staticmethod
+    def _assert_repr_contains(r: str, *substrings: str):
+        for s in substrings:
+            assert s in r
+
+    def test_function_module_repr(self):
+        fm = FunctionModule(lambda td: td, in_keys=["x"], out_keys=["y"])
+        self._assert_repr_contains(repr(fm), "FunctionModule", "in_keys", "out_keys")
+
+    def test_module_call_repr(self, default_test_model):
+        td_module = HookedModule.from_module(default_test_model, in_keys=["input"], out_keys=["output"])
+        mc = ModuleCall(td_module=td_module)
+        self._assert_repr_contains(repr(mc), "ModuleCall", "in_keys", "out_keys")
+
+    def test_module_call_with_cache_repr(self, default_test_model):
+        td_module = HookedModule.from_module(default_test_model, in_keys=["input"], out_keys=["output"])
+        mc_cache = ModuleCallWithCache(td_module=td_module, stored_keys=["linear2"], cache_key="cache")
+        self._assert_repr_contains(repr(mc_cache), "ModuleCallWithCache", "in_keys", "out_keys")
+
+    def test_intermediate_keys_cleaner_repr(self):
+        cleaner = IntermediateKeysCleaner(intermediate_keys=["a", "b"])
+        self._assert_repr_contains(repr(cleaner), "IntermediateKeysCleaner", "in_keys", "out_keys")

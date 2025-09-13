@@ -10,7 +10,6 @@ import torch
 
 from tdhook._types import UnraveledKey
 from tdhook.attribution.gradient_helpers import GradientAttribution
-from tdhook.modules import td_grad
 from tdhook.contexts import HookingContextWithCache
 
 
@@ -54,11 +53,9 @@ class GradCAM(GradientAttribution):
     @torch.no_grad()
     def _grad_attr(
         self,
-        targets: TensorDict,
+        grads: TensorDict,
         inputs: TensorDict,
-        init_grads: TensorDict,
     ) -> TensorDict:
-        grads = td_grad(targets, inputs, init_grads)
         if self._absolute:
             grads.abs_()
         attrs = TensorDict()

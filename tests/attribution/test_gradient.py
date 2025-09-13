@@ -313,6 +313,21 @@ class TestLatentAttribution:
         assert output.get(("attr", "linear1")).shape == (3, 20)
         torch.testing.assert_close(output.get(("attr", "linear1")), grad)
 
+    def test_latent_grad_callback(self, default_test_model):
+        input_data = torch.randn(3, 10)
+
+        def grad_callback(grad_output, **kwargs):
+            return (grad_output[0].abs(),)
+
+        tdhook_context_factory = Saliency(
+            input_modules=["linear1"], use_inputs=False, output_grad_callbacks={"linear1": grad_callback}
+        )
+
+        with tdhook_context_factory.prepare(default_test_model) as hooked_module:
+            output = hooked_module(TensorDict({"input": input_data}, batch_size=3))
+
+        assert torch.all(output.get(("attr", "linear1")) >= 0)
+
     def test_latent_inputs_and_targets_attribution(self, default_test_model):
         input_data = torch.randn(3, 10)
 

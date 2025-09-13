@@ -4,7 +4,7 @@ Context
 
 from contextlib import contextmanager
 from contextlib import ExitStack
-from typing import List, Optional, Generator
+from typing import List, Optional, Generator, Dict
 from torch import nn
 from tensordict.nn import TensorDictModuleBase, TensorDictModule
 from tensordict import TensorDict
@@ -19,7 +19,7 @@ class HookingContext:
         self,
         factory: "HookingContextFactory",
         module: nn.Module,
-        in_keys: Optional[List[UnraveledKey]] = None,
+        in_keys: Optional[List[UnraveledKey] | Dict[UnraveledKey, str]] = None,
         out_keys: Optional[List[UnraveledKey]] = None,
         pre_factories: Optional[List["HookingContextFactory"]] = None,
     ):
@@ -35,12 +35,11 @@ class HookingContext:
 
         if isinstance(module, TensorDictModuleBase):
             self._module = module
-            self._in_keys = in_keys or module.in_keys
-            self._out_keys = out_keys or module.out_keys
         else:
-            self._in_keys = in_keys or ["input"]
-            self._out_keys = out_keys or ["output"]
-            self._module = TensorDictModule(module, self._in_keys, self._out_keys)
+            self._module = TensorDictModule(module, in_keys or ["input"], out_keys or ["output"])
+
+        self._in_keys = self._module.in_keys
+        self._out_keys = self._module.out_keys
 
     def __enter__(self):
         if self._in_context:
@@ -112,7 +111,7 @@ class HookingContextFactory:
     def prepare(
         self,
         module: nn.Module,
-        in_keys: Optional[List[UnraveledKey]] = None,
+        in_keys: Optional[List[UnraveledKey] | Dict[UnraveledKey, str]] = None,
         out_keys: Optional[List[UnraveledKey]] = None,
     ) -> "HookingContext":
         """

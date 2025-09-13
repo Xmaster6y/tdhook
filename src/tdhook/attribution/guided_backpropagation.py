@@ -3,12 +3,12 @@ Guided Backpropagation
 """
 
 from typing import Callable
+import torch
 from torch import nn
 from tensordict import TensorDict
 
 from tdhook.modules import HookedModule
 from tdhook.hooks import MultiHookHandle, MultiHookManager, HookFactory, DIRECTION_TO_RETURN
-from tdhook.modules import td_grad
 from tdhook.attribution.gradient_helpers import GradientAttribution
 
 
@@ -25,15 +25,15 @@ class GuidedBackpropagation(GradientAttribution):
 
             return HookFactory.make_setting_hook(None, callback=callback, direction="bwd")
 
-        return self._hook_manager.register_hook(module, hook_factory, direction="bwd")
+        guided_handle = self._hook_manager.register_hook(module, hook_factory, direction="bwd")
+        return MultiHookHandle([guided_handle, super()._hook_module(module)])
 
+    @torch.no_grad()
     def _grad_attr(
         self,
-        targets: TensorDict,
+        grads: TensorDict,
         inputs: TensorDict,
-        init_grads: TensorDict,
     ):
-        grads = td_grad(targets, inputs, init_grads)
         if self._multiply_by_inputs:
             grads.mul_(inputs)
         return grads

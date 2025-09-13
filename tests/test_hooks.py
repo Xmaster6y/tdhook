@@ -6,7 +6,6 @@ import torch
 from tensordict import TensorDict
 import pytest
 import gc
-import weakref
 
 from tdhook.hooks import (
     register_hook_to_module,
@@ -397,7 +396,7 @@ class TestHookEdgeCases:
         """Caching hook raises when underlying cache has been garbage collected."""
 
         cache = TensorDict()
-        cache_ref = MutableWeakRef(weakref.ref(cache))
+        cache_ref = MutableWeakRef(cache)
 
         # Remove strong reference to allow garbage collection
         del cache

@@ -8,7 +8,6 @@ from tensordict import TensorDict, merge_tensordicts
 
 from tdhook.attribution.gradient_helpers.helpers import approximation_parameters
 from tdhook.attribution.gradient_helpers import GradientAttributionWithBaseline
-from tdhook.modules import td_grad
 from tdhook._types import UnraveledKey
 
 
@@ -47,11 +46,9 @@ class IntegratedGradients(GradientAttributionWithBaseline):
 
     def _grad_attr(
         self,
-        targets: TensorDict,
+        grads: TensorDict,
         inputs: TensorDict,
-        init_grads: TensorDict,
     ) -> TensorDict:
-        grads = td_grad(targets, inputs, init_grads)
         steps = torch.tensor(self._step_sizes).float().to(grads.device)
 
         return torch.sum(grads * steps, dim=-1)  # TODO: inplace (grads *= steps) not working
