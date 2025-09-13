@@ -78,6 +78,12 @@ class RemovableRuleHandle:
         self._rule = rule
         self._module_ref = weakref.ref(module)
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.remove()
+
     def remove(self):
         module = self._module_ref()
         if module is not None:
@@ -350,6 +356,42 @@ class SoftmaxEpsilonRule(EpsilonRule):
         relevance = (out_relevances[0] - (output * out_relevances[0].sum(-1, keepdim=True))) * inputs[0]
 
         return None, None, None, relevance
+
+
+class LayerNormRule(Rule):
+    @staticmethod
+    def forward(ctx, apply_kwargs, module, model_kwargs, *inputs):
+        if len(inputs) > 1:
+            raise NotImplementedError("LayerNormRule does not support multiple inputs")
+
+        x = inputs[0]
+        weight = module.weight
+        bias = module.bias
+        eps = module.eps
+
+        with torch.enable_grad():
+            mean = x.mean(dim=-1, keepdim=True)
+            var = ((x - mean) ** 2).mean(dim=-1, keepdim=True)
+            std = (var + eps).sqrt()
+            y = (
+                (x - mean) / std.detach()
+            )  # detach std operation will remove it from computational graph i.e. identity rule on x/std
+            if weight is not None:
+                y *= weight
+            if bias is not None:
+                y += bias
+
+            ctx.save_for_backward(x, y)
+
+        return y.detach()
+
+    @staticmethod
+    def backward(ctx, *out_relevances):
+        x, y = ctx.saved_tensors
+
+        input_relevances = torch.autograd.grad(y, x, out_relevances[0])
+
+        return (None, None, None, input_relevances[0])
 
 
 class BaseRuleMapper:

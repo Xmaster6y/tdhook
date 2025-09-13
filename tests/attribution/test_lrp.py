@@ -26,6 +26,7 @@ from tdhook.attribution.lrp_helpers.rules import (
     raise_for_unconserved_rel_factory,
     RemovableRuleHandle,
     BaseRuleMapper,
+    LayerNormRule,
 )
 from tdhook.attribution.lrp_helpers.layers import Sum
 from tdhook.attribution import LRP
@@ -59,6 +60,26 @@ def get_sequential_conv_module(seed: int):
         nn.Conv1d(10, 10, 3, padding=1),
         nn.ReLU(),
     )
+
+
+class SimpleLayerNorm(nn.Module):
+    """Simplified LayerNorm for testing detach behavior."""
+
+    def __init__(self, length: int, eps: float = 1e-5):
+        super().__init__()
+        self.eps = eps
+        self.weight = nn.Parameter(torch.randn(length))
+        self.bias = nn.Parameter(torch.randn(length))
+
+    def forward(self, x: torch.Tensor, use_detach: bool = False) -> torch.Tensor:
+        x = x - x.mean(-1, keepdim=True)
+        scale = (x.pow(2).mean(-1, keepdim=True) + self.eps).sqrt()
+
+        if use_detach:
+            x = x / scale.detach()
+        else:
+            x = x / scale
+        return (x * self.weight + self.bias).to(x.dtype)
 
 
 class TestRules:
@@ -536,3 +557,18 @@ class TestRules:
 
         torch.testing.assert_close(original_grad, rule_grad)
         rule.unregister(module)
+
+    def test_layernorm_detach_gradient_conservation(self):
+        """Test that LayerNorm with detach behaves like identity rule for gradient conservation."""
+        x = torch.randn(10, requires_grad=True)
+        init_grad = torch.randn_like(x)
+        ln = SimpleLayerNorm(length=10, eps=1e-5)
+
+        out = ln(x, use_detach=True)
+        grads = torch.autograd.grad(out, x, init_grad)
+
+        with LayerNormRule().register(ln):
+            out = ln(x)
+            hooked_grads = torch.autograd.grad(out, x, init_grad)
+
+        torch.testing.assert_close(grads[0], hooked_grads[0])
