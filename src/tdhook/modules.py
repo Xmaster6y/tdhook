@@ -441,6 +441,10 @@ class HookedModule(TensorDictModuleWrapper):
         self._hooking_context = hooking_context
         self._relative_path = relative_path
 
+    @property
+    def relative_path(self) -> str:
+        return self._relative_path
+
     def __repr__(self):
         fields = indent(
             f"td_module={self.td_module},\nin_keys={self.in_keys},\nout_keys={self.out_keys}",

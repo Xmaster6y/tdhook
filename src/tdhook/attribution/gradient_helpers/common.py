@@ -187,7 +187,7 @@ class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
             grads = _grads["inputs"]
             grads.batch_size = inputs.batch_size
         else:
-            grads = TensorDict()
+            grads = TensorDict(batch_size=cache["_shape"])
         if self._input_modules:
             cache_in_grads = _grads["cache_in"]
             cache_in_grads.batch_size = cache_in.batch_size

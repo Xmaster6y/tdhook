@@ -280,6 +280,28 @@ class TestGuidedBackpropagation:
 
         assert output.get(("attr", "input")).shape == (3, 10)
 
+    def test_guided_backpropagation_positive_gradients(self, default_test_model):
+        input_data = torch.randn(3, 10)
+
+        tdhook_context_factory = GuidedBackpropagation()
+        with tdhook_context_factory.prepare(default_test_model) as hooked_module:
+            output = hooked_module(TensorDict({"input": input_data}, batch_size=3))
+
+        gradients = output.get(("attr", "input"))
+        assert gradients.shape == input_data.shape
+        assert torch.all(gradients >= 0)
+
+    def test_guided_backpropagation_positive_gradients_latent_inputs(self, default_test_model):
+        input_data = torch.randn(3, 10)
+
+        tdhook_context_factory = GuidedBackpropagation(input_modules=["linear1"], use_inputs=False)
+        with tdhook_context_factory.prepare(default_test_model) as hooked_module:
+            output = hooked_module(TensorDict({"input": input_data}, batch_size=3))
+
+        gradients = output.get(("attr", "linear1"))
+        assert gradients.shape == (3, 20)
+        assert torch.all(gradients >= 0)
+
 
 class TestLatentAttribution:
     def test_latent_target_attribution(self, default_test_model):

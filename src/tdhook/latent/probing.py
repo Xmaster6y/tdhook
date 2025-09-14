@@ -28,7 +28,8 @@ class Probing(HookingContextFactory):
     ):
         super().__init__()
         self._key_pattern = key_pattern
-        self._hook_manager = MultiHookManager(key_pattern, relative=relative)
+        self._hook_manager = MultiHookManager(key_pattern)
+        self._relative = relative
         self._probe_factory = probe_factory
         self._directions = directions or ["fwd"]
         self._additional_keys = additional_keys
@@ -86,7 +87,10 @@ class Probing(HookingContextFactory):
             for direction in self._directions:
                 handles.append(
                     self._hook_manager.register_hook(
-                        submodule, lambda name: hook_factory(f"{prefix}{name}", direction), direction=direction
+                        submodule,
+                        (lambda name: hook_factory(f"{prefix}{name}", direction)),
+                        direction=direction,
+                        relative_path=submodule.relative_path if self._relative else None,
                     )
                 )
 

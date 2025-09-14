@@ -27,7 +27,8 @@ class ActivationCaching(HookingContextFactory):
         self._hooking_context_kwargs["cache"] = cache
 
         self._key_pattern = key_pattern
-        self._hook_manager = MultiHookManager(key_pattern, relative=relative)
+        self._relative = relative
+        self._hook_manager = MultiHookManager(key_pattern)
         self._callback = callback
         self._directions = directions or ["fwd"]
         self._use_nested_keys = use_nested_keys or len(self._directions) > 1
@@ -53,7 +54,10 @@ class ActivationCaching(HookingContextFactory):
         for direction in self._directions:
             handles.append(
                 self._hook_manager.register_hook(
-                    module, lambda name: hook_factory(name, direction), direction=direction
+                    module,
+                    (lambda name: hook_factory(name, direction)),
+                    direction=direction,
+                    relative_path=module.relative_path if self._relative else None,
                 )
             )
 

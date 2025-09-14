@@ -162,15 +162,15 @@ class MultiHookManager:
     def __init__(
         self,
         pattern: Optional[str] = None,
-        module_classes: Tuple[Type[nn.Module], ...] = (nn.Module,),
-        relative: bool = False,
+        classes_to_hook: Tuple[Type[nn.Module], ...] = (nn.Module,),
+        classes_to_skip: Tuple[Type[nn.Module], ...] = (),
     ):
         if pattern is None:
             pattern = r"a^"  # match nothing by default
         self._pattern = pattern
-        self._module_classes = module_classes
+        self._classes_to_hook = classes_to_hook
+        self._classes_to_skip = classes_to_skip
         self._reg_exp = re.compile(pattern)
-        self._relative = relative
 
     @property
     def pattern(self) -> str:
@@ -189,21 +189,18 @@ class MultiHookManager:
         *,
         direction: HookDirection = "fwd",
         prepend: bool = False,
+        relative_path: Optional[str] = None,
     ):
         """Register the hook to the module."""
         handles = []
-        for name, module in module.named_modules():
-            if self._relative:
-                if name.startswith("td_module"):
-                    name = name[len("td_module") :].lstrip(".")
-                if name.startswith("module"):
-                    name = name[len("module") :].lstrip(".")
-                if name == "":
-                    continue
-            if not isinstance(module, self._module_classes):
+        root_module = resolve_submodule_path(module, relative_path) if relative_path else module
+        for name, submodule in root_module.named_modules():
+            if name == "":
+                continue
+            if not isinstance(submodule, self._classes_to_hook) or isinstance(submodule, self._classes_to_skip):
                 continue
             if self._reg_exp.match(name):
-                handles.append(register_hook_to_module(module, hook_factory(name), direction, prepend))
+                handles.append(register_hook_to_module(submodule, hook_factory(name), direction, prepend))
         return MultiHookHandle(handles)
 
 

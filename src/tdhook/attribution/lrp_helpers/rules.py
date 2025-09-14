@@ -394,6 +394,45 @@ class LayerNormRule(Rule):
         return (None, None, None, input_relevances[0])
 
 
+class PseudoIdentityRule(Rule):
+    def __init__(self, stabilizer=1e-6):
+        super().__init__()
+        self._apply_kwargs["stabilizer"] = stabilizer
+
+    @staticmethod
+    def forward(ctx, apply_kwargs, module, model_kwargs, *inputs):
+        if len(inputs) > 1:
+            raise NotImplementedError("PseudoIdentityRule does not support multiple inputs")
+        ctx.stabilizer = apply_kwargs["stabilizer"]
+        outputs = module._prev_forward(inputs[0], **model_kwargs)
+        ctx.save_for_backward(outputs, inputs[0])
+        return outputs
+
+    @staticmethod
+    def backward(ctx, *out_relevances):
+        outputs, inputs = ctx.saved_tensors
+        pseudo_identity = outputs / stabilize(inputs, ctx.stabilizer)
+        return None, None, None, pseudo_identity * out_relevances[0]
+
+
+class AHQKVRule(Rule):
+    @staticmethod
+    def forward(ctx, apply_kwargs, module, model_kwargs, *inputs):
+        with torch.enable_grad():
+            outputs = module._prev_forward(*inputs, **model_kwargs)
+            d_model = outputs.shape[-1] // 3
+            query, key, value = outputs.split(d_model, dim=-1)
+            mod_outputs = torch.cat([query.detach(), key.detach(), value], dim=-1)
+            ctx.save_for_backward(*inputs, mod_outputs)
+            return outputs
+
+    @staticmethod
+    def backward(ctx, *out_relevances):
+        *inputs, mod_outputs = ctx.saved_tensors
+        in_relevances = torch.autograd.grad(mod_outputs, inputs, out_relevances[0])
+        return None, None, None, *in_relevances
+
+
 class BaseRuleMapper:
     def __init__(self, stabilizer=1e-6, rule_mapper: Optional[Callable[[str, nn.Module], Rule | None]] = None):
         self._stabilizer = stabilizer
