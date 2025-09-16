@@ -96,6 +96,7 @@ def imshow(array, **kwargs):
     custom_kwargs, plotly_kwargs = split_kwargs(kwargs)
 
     plt.switch_backend("Agg")
+    plt.rcParams.update({"font.size": 12})
 
     if "facet_col" in custom_kwargs:
         n_facets = array.shape[custom_kwargs["facet_col"]]
@@ -126,10 +127,10 @@ def imshow(array, **kwargs):
 
             if "x" in custom_kwargs:
                 axes[i].set_xticks(range(len(custom_kwargs["x"])))
-                axes[i].set_xticklabels(custom_kwargs["x"], rotation=45)
+                axes[i].set_xticklabels(custom_kwargs["x"], rotation=60, ha="right")
 
-        fig.subplots_adjust(right=0.88)
-        fig.colorbar(im, ax=axes, shrink=0.8)
+        fig.subplots_adjust(right=0.85)
+        fig.colorbar(im, ax=axes, shrink=0.8, pad=0.02)
     else:
         fig, ax = plt.subplots(figsize=(8, 6))
         im = ax.imshow(array, cmap="RdBu_r", aspect="auto")
@@ -144,9 +145,9 @@ def imshow(array, **kwargs):
 
         if "x" in custom_kwargs:
             ax.set_xticks(range(len(custom_kwargs["x"])))
-            ax.set_xticklabels(custom_kwargs["x"], rotation=45)
+            ax.set_xticklabels(custom_kwargs["x"], rotation=60, ha="right")
 
-        plt.colorbar(im, ax=ax)
+        plt.colorbar(im, ax=ax, pad=0.02)
 
     if "title" in custom_kwargs:
         fig.suptitle(custom_kwargs["title"])
@@ -256,6 +257,7 @@ def compute_correlations(activation_patching_results, attribution_results, metho
 def plot_all_correlations(all_correlations, module_names, save_path):
     """Create grouped bar chart for all correlation results."""
     plt.switch_backend("Agg")
+    plt.rcParams.update({"font.size": 16})
     method_colors = {
         "relp": "#1f77b4",
         "relp_ah": "#ff7f0e",
@@ -289,12 +291,12 @@ def plot_all_correlations(all_correlations, module_names, save_path):
         )
 
         for j, corr in enumerate(correlations):
-            ax.text(x_pos[j] + offset, corr + 0.02, f"{corr:.3f}", ha="center", va="bottom", fontsize=8, rotation=0)
+            ax.text(x_pos[j] + offset, corr + 0.02, f"{corr:.3f}", ha="center", va="bottom", fontsize=10, rotation=0)
 
     ax.set_xlabel("Module Type")
     ax.set_ylabel("Pearson Correlation Coefficient")
     ax.set_xticks(x_pos)
-    ax.set_xticklabels(module_names, ha="right")
+    ax.set_xticklabels(module_names, ha="center")
     ax.grid(True, alpha=0.3)
     ax.legend(bbox_to_anchor=(1.05, 1), loc="upper left")
 

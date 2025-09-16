@@ -8,11 +8,7 @@ This script implements concept attribution by:
 
 Run with:
 ```
-# Using a random test sample from the dataset
-uv run --group scripts -m scripts.composition.concept_attribution --layer features.15 --concept zigzagged --cav_method logistic --sensitivity_method saliency
-
-# Using a custom test image
-uv run --group scripts -m scripts.composition.concept_attribution --layer features.15 --concept zigzagged --cav_method logistic --sensitivity_method saliency --test_image results/composition/zebra.jpg
+uv run --group scripts -m scripts.composition.concept_attribution
 ```
 """
 
@@ -125,7 +121,7 @@ def collect_relevances(
 
             input_td = TensorDict({"input": batch_tensor}, batch_size=batch_tensor.shape[0])
             relevances = get_sensitivity(
-                input_td, hooked_model, sensitivity_method, layer_number, device, record_layer=True
+                input_td, hooked_model, sensitivity_method, layer_number, device, record_layer=True, use_abs=True
             )
 
             relevances_list.append(relevances.cpu())
@@ -236,12 +232,16 @@ def compute_concept_attribution(
     sensitivity = get_sensitivity_factory(sensitivity_method, layer_number, target_class)
     with sensitivity.prepare(model) as hooked_model:
         input_td = TensorDict({"input": image.unsqueeze(0).to(device)}, batch_size=1)
-        input_sensitivity = get_sensitivity(input_td, hooked_model, sensitivity_method, layer_number, device)
+        input_sensitivity = get_sensitivity(
+            input_td, hooked_model, sensitivity_method, layer_number, device, use_abs=True
+        )
 
     sensitivity = get_sensitivity_factory(sensitivity_method, layer_number, target_class, grad_callback)
     with sensitivity.prepare(model) as hooked_model:
         input_td = TensorDict({"input": image.unsqueeze(0).to(device)}, batch_size=1)
-        input_cond_sensitivity = get_sensitivity(input_td, hooked_model, sensitivity_method, layer_number, device)
+        input_cond_sensitivity = get_sensitivity(
+            input_td, hooked_model, sensitivity_method, layer_number, device, use_abs=True
+        )
 
     return input_sensitivity, input_cond_sensitivity
 
@@ -255,7 +255,8 @@ def visualize_concept_attribution(
             return data / abs_max
         return data
 
-    fig, axes = plt.subplots(1, 3, figsize=(20, 5))
+    plt.rcParams.update({"font.size": 14})
+    fig, axes = plt.subplots(1, 3, figsize=(20, 6))
 
     image_np = image.permute(1, 2, 0).cpu().numpy()
     image_np = (image_np - image_np.min()) / (image_np.max() - image_np.min())
@@ -444,11 +445,11 @@ def batch_evaluate_attribution_robustness(
 def format_method_label(method):
     replacements = {
         "lrp": "LRP",
-        "inputxgradient": "Input*Gradient",
+        "inputxgradient": "In*Grad",
         "cav": "CAV",
         "actmax": "ActMax",
         "saliency": "Saliency",
-        "integrated_gradients": "Integrated Gradients",
+        "integrated_gradients": "Int. Grad",
         "grad_cam": "Grad CAM",
     }
 
@@ -465,6 +466,7 @@ def format_method_label(method):
 
 def plot_evaluation_results(evaluation_results, save_path=None):
     logger.info("Plotting evaluation results...")
+    plt.rcParams.update({"font.size": 12})
 
     first_image = list(evaluation_results.keys())[0]
     first_method = list(evaluation_results[first_image].keys())[0]
@@ -540,7 +542,6 @@ def plot_evaluation_results(evaluation_results, save_path=None):
 
     ax1.set_xlabel("Pixel Flip Percentage (%)")
     ax1.set_ylabel("Relative Logit Drop (Averaged)")
-    ax1.set_title("Averaged Relative Logit Drop vs Pixel Flip")
     ax1.grid(True, alpha=0.3)
     ax1.legend(bbox_to_anchor=(1.05, 1), loc="upper left")
 
@@ -571,7 +572,6 @@ def plot_evaluation_results(evaluation_results, save_path=None):
 
     ax2.set_xlabel("Pixel Flip Percentage (%)")
     ax2.set_ylabel("Relative Concept Drop (Averaged)")
-    ax2.set_title("Averaged Relative Concept Drop vs Pixel Flip")
     ax2.grid(True, alpha=0.3)
     ax2.legend(bbox_to_anchor=(1.05, 1), loc="upper left")
 
@@ -682,12 +682,19 @@ def main():
     logger.info(f"Pooled CAV best channels: {cav.argsort()[-2:]}")
 
     evaluation_results = {}
-    for image_name, target_class in [("lemur_1", 383), ("zebra_1", 340)]:
+    for image_name, target_class in [
+        ("lemur_1", 383),
+        ("zebra_1", 340),
+        ("skunk_1", 361),
+        ("lemur_2", 383),
+        ("zebra_2", 340),
+        ("skunk_2", 361),
+    ]:
         logger.info(f"Using custom test image for visualization: {image_name}")
         test_image_path = os.path.join("results/concept_attribution", image_name + ".jpg")
         test_image = load_and_preprocess_image(test_image_path, transforms, args.device)
         evaluation_results[image_name] = {}
-        for select_method in ["actmax_1", "cav"]:
+        for select_method in ["relmax_1", "actmax_1", "actmax_2", "cav"]:
             for sensitivity_method in ["saliency", "inputxgradient", "lrp"]:
                 if select_method.startswith("relmax"):
                     train_data = collect_relevances(
