@@ -227,6 +227,9 @@ class PGDModule(TensorDictModuleBase):
         super().__init__()
         self._td_module = td_module
 
+        self.in_keys = td_module.in_keys
+        self.out_keys = [k if working_key is None else (working_key, k) for k in td_module.out_keys]
+
         self._alpha = alpha
         self._n_steps = n_steps
         self._min_value = min_value

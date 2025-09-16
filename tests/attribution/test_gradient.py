@@ -393,3 +393,24 @@ class TestActivationMaximisation:
         max_linear1 = default_test_model.linear1(max_input_data)
         max_linear2 = default_test_model.linear2(default_test_model.activation(max_linear1))
         assert max_linear2[..., 0].sum() > linear2[..., 0].sum()
+
+
+class TestInitFunctions:
+    def test_init_attr_inputs(self, default_test_model):
+        input_data = torch.randn(3, 10)
+        additional_data = torch.randn(3, 10)
+
+        def init_attr_inputs(inputs, additional_init_tensors):
+            return TensorDict({"input": additional_init_tensors["additional"]}, batch_size=inputs.batch_size)
+
+        tdhook_context_factory = Saliency(init_attr_inputs=init_attr_inputs, additional_init_keys=["additional"])
+
+        with tdhook_context_factory.prepare(default_test_model) as hooked_module:
+            output = hooked_module(TensorDict({"input": input_data, "additional": additional_data}, batch_size=3))
+
+        expected_grad = torch.autograd.grad(
+            default_test_model(additional_data), additional_data, torch.ones_like(default_test_model(additional_data))
+        )[0]
+
+        assert output.get(("attr", "input")).shape == (3, 10)
+        torch.testing.assert_close(output.get(("attr", "input")), expected_grad)

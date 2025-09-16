@@ -8,7 +8,15 @@ import numpy as np
 from tensordict import TensorDict
 
 from tdhook.contexts import HookingContextFactory
-from tdhook.hooks import MultiHookManager, HookFactory, HookDirection, MultiHookHandle, DIRECTION_TO_RETURN
+from tdhook.hooks import (
+    MultiHookManager,
+    HookFactory,
+    HookDirection,
+    MultiHookHandle,
+    DIRECTION_TO_RETURN,
+    resolve_submodule_path,
+    register_hook_to_module,
+)
 from tdhook.modules import HookedModule
 
 
@@ -77,22 +85,26 @@ class Probing(HookingContextFactory):
         if self._submodules_paths is not None:
             submodules_n_prefixes = []
             for submodule_path in self._submodules_paths:
-                submodule = module._resolve_submodule_path(submodule_path, relative=False)
+                submodule = resolve_submodule_path(module, submodule_path)
                 prefix = f"{submodule_path}."
-                submodules_n_prefixes.append((submodule, prefix))
+                submodules_n_prefixes.append((submodule, prefix, submodule_path))
         else:
-            submodules_n_prefixes = [(module, "")]
+            submodules_n_prefixes = [(module, "", "")]
 
-        for submodule, prefix in submodules_n_prefixes:
+        for submodule, prefix, submodule_path in submodules_n_prefixes:
             for direction in self._directions:
-                handles.append(
-                    self._hook_manager.register_hook(
-                        submodule,
-                        (lambda name: hook_factory(f"{prefix}{name}", direction)),
-                        direction=direction,
-                        relative_path=submodule.relative_path if self._relative else None,
+                if self._submodules_paths is not None:
+                    hook = hook_factory(f"{prefix}{submodule_path}", direction)
+                    handles.append(register_hook_to_module(submodule, hook, direction))
+                else:
+                    handles.append(
+                        self._hook_manager.register_hook(
+                            submodule,
+                            (lambda name: hook_factory(f"{prefix}{name}", direction)),
+                            direction=direction,
+                            relative_path=module.relative_path if self._relative else None,
+                        )
                     )
-                )
 
         return MultiHookHandle(handles)
 

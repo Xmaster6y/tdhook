@@ -17,6 +17,7 @@ from tdhook.modules import (
     FunctionModule,
     flatten_select_reshape_call,
     ModuleCall,
+    PGDModule,
 )
 from tdhook.contexts import HookingContextFactory
 
@@ -584,3 +585,8 @@ class TestModuleRepr:
     def test_intermediate_keys_cleaner_repr(self):
         cleaner = IntermediateKeysCleaner(intermediate_keys=["a", "b"])
         self._assert_repr_contains(repr(cleaner), "IntermediateKeysCleaner", "in_keys", "out_keys")
+
+    def test_pgd_module_repr(self, default_test_model):
+        td_module = HookedModule.from_module(default_test_model, in_keys=["input"], out_keys=["output"])
+        pgd_module = PGDModule(td_module=td_module, alpha=0.1, n_steps=5)
+        self._assert_repr_contains(repr(pgd_module), "PGDModule", "td_module", "in_keys", "out_keys")
