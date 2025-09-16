@@ -3,7 +3,7 @@ Gradient attribution
 """
 
 from abc import ABCMeta, abstractmethod
-from typing import Callable, Optional, Tuple, List
+from typing import Callable, Optional, Tuple, List, Dict
 
 import torch
 from tensordict.nn import TensorDictModule, TensorDictSequential, TensorDictModuleBase
@@ -12,8 +12,8 @@ from tensordict import TensorDict
 from tdhook.contexts import HookingContextFactory
 from tdhook.modules import FunctionModule, flatten_select_reshape_call, IntermediateKeysCleaner, ModuleCallWithCache
 from tdhook._types import UnraveledKey
-from tdhook.modules import HookedModule
-from tdhook.hooks import MultiHookHandle
+from tdhook.modules import HookedModule, td_grad
+from tdhook.hooks import MultiHookHandle, MutableWeakRef, TensorDictRef
 
 
 class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
@@ -27,8 +27,10 @@ class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
         init_attr_inputs: Optional[Callable[[TensorDict, TensorDict], TensorDict]] = None,
         init_attr_grads: Optional[Callable[[TensorDict, TensorDict], TensorDict]] = None,
         additional_init_keys: Optional[List[UnraveledKey]] = None,
+        output_grad_callbacks: Optional[Dict[str, Callable]] = None,
         attribution_key: UnraveledKey = "attr",
         clean_intermediate_keys: bool = True,
+        cache_callback: Optional[Callable] = None,
     ):
         super().__init__()
 
@@ -39,6 +41,8 @@ class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
         self._init_attr_targets = init_attr_targets
         self._init_attr_inputs = init_attr_inputs
         self._init_attr_grads = init_attr_grads
+        self._output_grad_callbacks = output_grad_callbacks or {}
+        self._cache_callback = cache_callback
 
         self._additional_init_keys = additional_init_keys or []
         self._attr_key = attribution_key
@@ -57,6 +61,8 @@ class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
 
         if set(self._additional_init_keys) & (set(in_keys) | set(out_keys)):
             raise ValueError("Additional init keys must not be in the in_keys or out_keys")
+
+        cache_ref = TensorDictRef(TensorDict())
         modules = [
             TensorDictModule(
                 lambda *tensors: tensors,
@@ -73,30 +79,43 @@ class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
                 in_key="_mod_in",
                 out_key="_mod_out",
                 stored_keys=cache_in_keys + cache_out_keys,
+                cache_ref=cache_ref,
+                cache_as_output=False,
             ),
             FunctionModule(
-                self._attributor_fn,
+                lambda td: self._attributor_fn(td, cache_ref),
                 in_keys=(mod_in_keys if self._use_inputs else [])
                 + (mod_out_keys if self._use_outputs else [])
-                + cache_in_keys
-                + cache_out_keys
                 + self._additional_init_keys,
                 out_keys=attr_keys,
             ),
         ]
         if self._clean_intermediate_keys:
-            modules.append(IntermediateKeysCleaner(intermediate_keys=["_register_in", "_mod_in", "_mod_out"]))
+            modules.append(
+                IntermediateKeysCleaner(
+                    intermediate_keys=["_register_in", "_mod_in", "_mod_out", "_cache_in", "_cache_out"]
+                )
+            )
         return TensorDictSequential(*modules)
 
     def _hook_module(self, module: HookedModule) -> MultiHookHandle:
         cache_ref = module.td_module[2].cache_ref
         handles = []
         for module_key in self._input_modules:
-            handle, _ = module.get(
+
+            def callback(**kwargs):
+                nonlocal module_key, self
+                if self._cache_callback is not None:
+                    output = self._cache_callback(**kwargs)
+                else:
+                    output = kwargs["output"]
+                return output.requires_grad_(True)
+
+            handle, _ = module.get(  # TODO: replace by a read
                 cache=cache_ref,
                 cache_key=("_cache_in", module_key),
                 module_key=module_key,
-                callback=lambda **kwargs: kwargs["output"].requires_grad_(True),
+                callback=callback,
             )
             handles.append(handle)
         for module_key in self._target_modules:
@@ -104,7 +123,11 @@ class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
                 cache=cache_ref,
                 cache_key=("_cache_out", module_key),
                 module_key=module_key,
+                callback=self._cache_callback,
             )
+            handles.append(handle)
+        for module_key, callback in self._output_grad_callbacks.items():
+            handle = module.set_grad_output(module_key, value=None, callback=callback)
             handles.append(handle)
         return MultiHookHandle(handles)
 
@@ -114,31 +137,33 @@ class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
             needs_grad = self._init_attr_inputs(inputs, td.select(*self._additional_init_keys))
             if not isinstance(inputs, TensorDict):
                 raise ValueError("init_attr_inputs function must return a TensorDict")
-        else:
+        elif self._use_inputs:
             needs_grad = inputs
+        else:
+            needs_grad = TensorDict()
         needs_grad.requires_grad_(True)
         inputs.update(needs_grad)
         td["_mod_in"] = inputs
         return td
 
-    def _attributor_fn(self, td: TensorDict) -> TensorDict:
+    def _attributor_fn(self, td: TensorDict, cache_ref: MutableWeakRef | TensorDictRef) -> TensorDict:
         additional_init_tensors = td.select(*self._additional_init_keys)
+        cache = cache_ref.resolve()
 
         inputs = td["_mod_in"] if self._use_inputs else TensorDict()
-        inputs.update(td["_cache_in"] if self._input_modules else {})
+        if self._init_attr_inputs is not None and self._use_inputs:
+            inputs = self._init_attr_inputs(inputs, additional_init_tensors)
+            if not isinstance(inputs, TensorDict):
+                raise ValueError("init_attr_inputs function must return a TensorDict")
+        cache_in = cache["_cache_in"] if self._input_modules else TensorDict()
 
         targets = td["_mod_out"] if self._use_outputs else TensorDict()
-        targets.update(td["_cache_out"] if self._target_modules else {})
+        targets.update(cache["_cache_out"].reshape(cache["_shape"]) if self._target_modules else {})
 
         if self._init_attr_targets is not None:
             targets = self._init_attr_targets(targets, additional_init_tensors)
             if not isinstance(targets, TensorDict):
                 raise ValueError("init_attr_targets function must return a TensorDict")
-
-        if self._init_attr_inputs is not None:
-            inputs = self._init_attr_inputs(inputs, additional_init_tensors)
-            if not isinstance(inputs, TensorDict):
-                raise ValueError("init_attr_inputs function must return a TensorDict")
 
         if self._init_attr_grads is not None:
             init_grads = self._init_attr_grads(targets, additional_init_tensors)
@@ -157,16 +182,26 @@ class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
             if target.grad_fn is None:
                 raise ValueError(f"Target {target_key} has no grad_fn")
 
-        grads = self._grad_attr(targets, inputs, init_grads)
-        td[self._attr_key] = grads
+        _grads = td_grad(targets, TensorDict(inputs=inputs, cache_in=cache_in), init_grads)
+        if self._use_inputs:
+            grads = _grads["inputs"]
+            grads.batch_size = inputs.batch_size
+        else:
+            grads = TensorDict(batch_size=cache["_shape"])
+        if self._input_modules:
+            cache_in_grads = _grads["cache_in"]
+            cache_in_grads.batch_size = cache_in.batch_size
+            grads.update(cache_in_grads.reshape(cache["_shape"]))
+            inputs.update(cache_in.reshape(cache["_shape"]))
+        attrs = self._grad_attr(grads, inputs)
+        td[self._attr_key] = attrs
         return td
 
     @abstractmethod
     def _grad_attr(
         self,
-        targets: TensorDict,
+        grads: TensorDict,
         inputs: TensorDict,
-        init_grads: TensorDict,
     ) -> TensorDict:
         pass
 

@@ -10,14 +10,13 @@ import torch
 
 from tdhook._types import UnraveledKey
 from tdhook.attribution.gradient_helpers import GradientAttribution
-from tdhook.modules import td_grad
 from tdhook.contexts import HookingContextWithCache
 
 
 @dataclass
 class DimsConfig:
-    feature_dims: Optional[Tuple[int, ...]] = None
-    pooling_dims: Optional[Tuple[int, ...]] = None
+    weight_pooling_dims: Optional[Tuple[int, ...]] = None
+    feature_sum_dims: Optional[Tuple[int, ...]] = None
 
 
 class GradCAM(GradientAttribution):
@@ -32,6 +31,8 @@ class GradCAM(GradientAttribution):
         attribution_key: UnraveledKey = "attr",
         clean_intermediate_keys: bool = True,
         absolute: bool = False,
+        output_grad_callbacks: Optional[Dict[str, Callable]] = None,
+        **kwargs,
     ):
         super().__init__(
             use_inputs=False,
@@ -44,6 +45,7 @@ class GradCAM(GradientAttribution):
             additional_init_keys=additional_init_keys,
             attribution_key=attribution_key,
             clean_intermediate_keys=clean_intermediate_keys,
+            output_grad_callbacks=output_grad_callbacks,
         )
         self._absolute = absolute
         self._modules_to_attribute = modules_to_attribute
@@ -51,22 +53,20 @@ class GradCAM(GradientAttribution):
     @torch.no_grad()
     def _grad_attr(
         self,
-        targets: TensorDict,
+        grads: TensorDict,
         inputs: TensorDict,
-        init_grads: TensorDict,
     ) -> TensorDict:
-        grads = td_grad(targets, inputs, init_grads)
         if self._absolute:
             grads.abs_()
         attrs = TensorDict()
         for key in grads.keys(True, True):
             dims_config = self._modules_to_attribute[key]
-            if dims_config.feature_dims is not None:
-                weights = grads[key].mean(dim=dims_config.feature_dims, keepdim=True)
+            if dims_config.weight_pooling_dims is not None:
+                weights = grads[key].mean(dim=dims_config.weight_pooling_dims, keepdim=True)
             else:
                 weights = grads[key]
-            if dims_config.pooling_dims is not None:
-                attrs[key] = (weights * inputs[key]).sum(dim=dims_config.pooling_dims)
+            if dims_config.feature_sum_dims is not None:
+                attrs[key] = (weights * inputs[key]).sum(dim=dims_config.feature_sum_dims)
             else:
                 attrs[key] = weights * inputs[key]
         return attrs

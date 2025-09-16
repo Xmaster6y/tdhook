@@ -16,7 +16,7 @@ import torch
 import torch.nn as nn
 from torch.autograd.function import Function, FunctionMeta
 
-from .types import Activation, AvgPool, BatchNorm, Convolution, Linear
+from .types import Activation, AvgPool, BatchNorm, Convolution, Linear, MaxPool
 from .layers import Sum
 
 
@@ -77,6 +77,12 @@ class RemovableRuleHandle:
     def __init__(self, rule: "Rule", module: nn.Module):
         self._rule = rule
         self._module_ref = weakref.ref(module)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.remove()
 
     def remove(self):
         module = self._module_ref()
@@ -198,6 +204,22 @@ class PassRule(Rule):
     @staticmethod
     def backward(ctx, *out_relevance):
         return None, None, None, *out_relevance
+
+
+class IgnoreRule(Rule):
+    def register(self, module: nn.Module):
+        return RemovableRuleHandle(self, module)
+
+    def unregister(self, module: nn.Module):
+        pass
+
+    @staticmethod
+    def forward(ctx, apply_kwargs, module, model_kwargs, *inputs):
+        pass
+
+    @staticmethod
+    def backward(ctx, *out_relevance):
+        pass
 
 
 class WSquareRule(Rule):
@@ -336,6 +358,81 @@ class SoftmaxEpsilonRule(EpsilonRule):
         return None, None, None, relevance
 
 
+class LayerNormRule(Rule):
+    @staticmethod
+    def forward(ctx, apply_kwargs, module, model_kwargs, *inputs):
+        if len(inputs) > 1:
+            raise NotImplementedError("LayerNormRule does not support multiple inputs")
+
+        x = inputs[0]
+        weight = module.weight
+        bias = module.bias
+        eps = module.eps
+
+        with torch.enable_grad():
+            mean = x.mean(dim=-1, keepdim=True)
+            var = ((x - mean) ** 2).mean(dim=-1, keepdim=True)
+            std = (var + eps).sqrt()
+            y = (
+                (x - mean) / std.detach()
+            )  # detach std operation will remove it from computational graph i.e. identity rule on x/std
+            if weight is not None:
+                y *= weight
+            if bias is not None:
+                y += bias
+
+            ctx.save_for_backward(x, y)
+
+        return y.detach()
+
+    @staticmethod
+    def backward(ctx, *out_relevances):
+        x, y = ctx.saved_tensors
+
+        input_relevances = torch.autograd.grad(y, x, out_relevances[0])
+
+        return (None, None, None, input_relevances[0])
+
+
+class PseudoIdentityRule(Rule):
+    def __init__(self, stabilizer=1e-6):
+        super().__init__()
+        self._apply_kwargs["stabilizer"] = stabilizer
+
+    @staticmethod
+    def forward(ctx, apply_kwargs, module, model_kwargs, *inputs):
+        if len(inputs) > 1:
+            raise NotImplementedError("PseudoIdentityRule does not support multiple inputs")
+        ctx.stabilizer = apply_kwargs["stabilizer"]
+        outputs = module._prev_forward(inputs[0], **model_kwargs)
+        ctx.save_for_backward(outputs, inputs[0])
+        return outputs
+
+    @staticmethod
+    def backward(ctx, *out_relevances):
+        outputs, inputs = ctx.saved_tensors
+        pseudo_identity = outputs / stabilize(inputs, ctx.stabilizer)
+        return None, None, None, pseudo_identity * out_relevances[0]
+
+
+class AHQKVRule(Rule):
+    @staticmethod
+    def forward(ctx, apply_kwargs, module, model_kwargs, *inputs):
+        with torch.enable_grad():
+            outputs = module._prev_forward(*inputs, **model_kwargs)
+            d_model = outputs.shape[-1] // 3
+            query, key, value = outputs.split(d_model, dim=-1)
+            mod_outputs = torch.cat([query.detach(), key.detach(), value], dim=-1)
+            ctx.save_for_backward(*inputs, mod_outputs)
+            return outputs
+
+    @staticmethod
+    def backward(ctx, *out_relevances):
+        *inputs, mod_outputs = ctx.saved_tensors
+        in_relevances = torch.autograd.grad(mod_outputs, inputs, out_relevances[0], retain_graph=True)
+        return None, None, None, *in_relevances
+
+
 class BaseRuleMapper:
     def __init__(self, stabilizer=1e-6, rule_mapper: Optional[Callable[[str, nn.Module], Rule | None]] = None):
         self._stabilizer = stabilizer
@@ -344,12 +441,15 @@ class BaseRuleMapper:
         self._rules = {
             "pass": PassRule(),
             "norm": EpsilonRule(epsilon=self._stabilizer),
+            "ignore": IgnoreRule(),
         }
 
     def _call(self, name: str, module: nn.Module) -> Rule | None:
-        if isinstance(module, Activation) or isinstance(module, BatchNorm):
+        if isinstance(module, (Activation, BatchNorm)):
             return self._rules["pass"]
-        elif isinstance(module, Sum) or isinstance(module, AvgPool):
+        if isinstance(module, (MaxPool, nn.Identity, nn.Dropout, nn.Flatten)):
+            return self._rules["ignore"]
+        elif isinstance(module, (Sum, AvgPool)):
             return self._rules["norm"]
 
     def __call__(self, name: str, module: nn.Module) -> Rule | None:

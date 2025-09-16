@@ -22,9 +22,13 @@ from tdhook.attribution.lrp_helpers.rules import (
     UniformRule,
     StopRule,
     SoftmaxEpsilonRule,
+    IgnoreRule,
     raise_for_unconserved_rel_factory,
     RemovableRuleHandle,
     BaseRuleMapper,
+    LayerNormRule,
+    PseudoIdentityRule,
+    AHQKVRule,
 )
 from tdhook.attribution.lrp_helpers.layers import Sum
 from tdhook.attribution import LRP
@@ -58,6 +62,26 @@ def get_sequential_conv_module(seed: int):
         nn.Conv1d(10, 10, 3, padding=1),
         nn.ReLU(),
     )
+
+
+class SimpleLayerNorm(nn.Module):
+    """Simplified LayerNorm for testing detach behavior."""
+
+    def __init__(self, length: int, eps: float = 1e-5):
+        super().__init__()
+        self.eps = eps
+        self.weight = nn.Parameter(torch.randn(length))
+        self.bias = nn.Parameter(torch.randn(length))
+
+    def forward(self, x: torch.Tensor, use_detach: bool = False) -> torch.Tensor:
+        x = x - x.mean(-1, keepdim=True)
+        scale = (x.pow(2).mean(-1, keepdim=True) + self.eps).sqrt()
+
+        if use_detach:
+            x = x / scale.detach()
+        else:
+            x = x / scale
+        return (x * self.weight + self.bias).to(x.dtype)
 
 
 class TestRules:
@@ -509,3 +533,98 @@ class TestRules:
         custom_module = CustomModule()
         rule = mapper._call("custom", custom_module)
         assert rule is None
+
+    def test_ignore_rule_preserves_gradients(self):
+        """Test IgnoreRule preserves original gradient behavior."""
+
+        module = get_linear_module(seed=0)
+        input_tensor = torch.randn(10, requires_grad=True)
+
+        original_output = module(input_tensor)
+        out_relevance = torch.randn_like(original_output)
+
+        original_output.backward(out_relevance)
+        original_grad = input_tensor.grad.clone()
+
+        input_tensor.grad.zero_()
+
+        rule = IgnoreRule()
+        rule.register(module)
+
+        output_with_rule = module(input_tensor)
+        torch.testing.assert_close(original_output, output_with_rule)
+
+        output_with_rule.backward(out_relevance)
+        rule_grad = input_tensor.grad
+
+        torch.testing.assert_close(original_grad, rule_grad)
+        rule.unregister(module)
+
+    def test_layernorm_detach_gradient_conservation(self):
+        """Test that LayerNorm with detach behaves like identity rule for gradient conservation."""
+        x = torch.randn(10, requires_grad=True)
+        init_grad = torch.randn_like(x)
+        ln = SimpleLayerNorm(length=10, eps=1e-5)
+
+        out = ln(x, use_detach=True)
+        grads = torch.autograd.grad(out, x, init_grad)
+
+        with LayerNormRule().register(ln):
+            out = ln(x)
+            hooked_grads = torch.autograd.grad(out, x, init_grad)
+
+        torch.testing.assert_close(grads[0], hooked_grads[0])
+
+    def test_pseudo_identity_rule_grads(self):
+        """Test that PseudoIdentityRule gradients match expected behavior from RelP."""
+        from tdhook.attribution.lrp_helpers.rules import stabilize
+
+        old_module = get_linear_module(seed=0)
+        rule = PseudoIdentityRule(stabilizer=1e-6)
+
+        x = torch.randn(10, requires_grad=True)
+        out_relevance = torch.randn(10, requires_grad=True)
+
+        rule.register(old_module)
+        z = old_module(x)
+        z.backward(out_relevance)
+        rule_grad = x.grad.clone()
+        rule.unregister(old_module)
+
+        x.grad.zero_()
+
+        z = old_module(x)
+        zp = stabilize(x, 1e-6)
+        y = zp * (z / zp).detach()
+
+        y.backward(out_relevance)
+        manual_grad = x.grad
+
+        torch.testing.assert_close(rule_grad, manual_grad, atol=1e-6, rtol=1e-6)
+
+    def test_ahqkv_rule(self):
+        """Test AHQKVRule forward and backward passes."""
+
+        class QKVModule(nn.Module):
+            def __init__(self, d_model=12):
+                super().__init__()
+                self.linear = nn.Linear(10, d_model * 3)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        input_tensor = torch.randn(10, requires_grad=True)
+        rule = AHQKVRule()
+        module = QKVModule(d_model=4)
+        rule.register(module)
+        output = module(input_tensor)
+
+        out_relevance = torch.randn_like(output)
+
+        value_grad = torch.autograd.grad(output[..., -4:], input_tensor, out_relevance[..., -4:], retain_graph=True)
+        output.backward(out_relevance)
+        in_relevance = input_tensor.grad
+
+        assert torch.allclose(in_relevance, value_grad[0])
+
+        rule.unregister(module)

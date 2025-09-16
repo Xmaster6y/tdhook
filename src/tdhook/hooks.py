@@ -5,12 +5,13 @@ Hooks
 import weakref
 from typing import Callable, Any, Optional, List, Literal, Protocol, Generic, TypeVar, Type, Tuple
 import inspect
-from weakref import ReferenceType
 from tensordict import TensorDict
 import re
 from torch.utils.hooks import RemovableHandle
 from torch import nn
 import torch
+
+from tdhook._types import UnraveledKey
 
 
 HookDirection = Literal["fwd", "bwd", "fwd_pre", "bwd_pre", "fwd_kwargs", "fwd_pre_kwargs"]
@@ -79,21 +80,38 @@ def resolve_submodule_path(root: nn.Module, key: str):
     Resolve a submodule path that may contain indexing expressions.
 
     Supports any valid Python attribute access and indexing:
+    - "[0]" -> root[0]
     - "layers[-1]" -> root.layers[-1]
     - "layers['attr']" -> root.layers['attr']
     - "layers.attention" -> root.layers.attention
     - "layers[1:3]" -> root.layers[1:3]
+
+    Supports custom attributes:
+    - ":block0/module:" -> getattr(root, "block0/module")
+    - ":block0/module:layers.attention[0]" -> getattr(root, "block0/module").layers.attention[0]
+    - "m1:block0/module:layers:module:linear[0]" -> getattr(getattr(root.m1, "block0/module").layers, "module").linear[0]
     """
 
     if not key:
         return root
 
+    start_key, *rest = key.split(":", maxsplit=1)
+
+    if rest:
+        start_root = resolve_submodule_path(root, start_key)
+        attr, *rest = rest[0].split(":", maxsplit=1)
+        if not rest:
+            raise ValueError(f"Invalid submodule path '{key}', missing closing ':'")
+        return resolve_submodule_path(getattr(start_root, attr), rest[0])
+
     # Create a safe environment with only the current module
     safe_dict = {"root": root}
 
     try:
-        # Evaluate the expression in the safe environment
-        return eval(f"root.{key}", {"__builtins__": {}}, safe_dict)
+        if key.startswith("["):
+            return eval(f"root{key}", {"__builtins__": {}}, safe_dict)
+        else:
+            return eval(f"root.{key}", {"__builtins__": {}}, safe_dict)
     except (AttributeError, IndexError, KeyError, SyntaxError) as e:
         raise ValueError(f"Invalid submodule path '{key}': {e}") from e
 
@@ -144,15 +162,15 @@ class MultiHookManager:
     def __init__(
         self,
         pattern: Optional[str] = None,
-        module_classes: Tuple[Type[nn.Module], ...] = (nn.Module,),
-        relative: bool = False,
+        classes_to_hook: Tuple[Type[nn.Module], ...] = (nn.Module,),
+        classes_to_skip: Tuple[Type[nn.Module], ...] = (),
     ):
         if pattern is None:
             pattern = r"a^"  # match nothing by default
         self._pattern = pattern
-        self._module_classes = module_classes
+        self._classes_to_hook = classes_to_hook
+        self._classes_to_skip = classes_to_skip
         self._reg_exp = re.compile(pattern)
-        self._relative = relative
 
     @property
     def pattern(self) -> str:
@@ -171,43 +189,51 @@ class MultiHookManager:
         *,
         direction: HookDirection = "fwd",
         prepend: bool = False,
+        relative_path: Optional[str] = None,
     ):
         """Register the hook to the module."""
         handles = []
-        for name, module in module.named_modules():
-            if self._relative:
-                if name.startswith("td_module"):
-                    name = name[len("td_module") :].lstrip(".")
-                if name.startswith("module"):
-                    name = name[len("module") :].lstrip(".")
-                if name == "":
-                    continue
-            if not isinstance(module, self._module_classes):
+        root_module = resolve_submodule_path(module, relative_path) if relative_path else module
+        for name, submodule in root_module.named_modules():
+            if name == "":
+                continue
+            if not isinstance(submodule, self._classes_to_hook) or isinstance(submodule, self._classes_to_skip):
                 continue
             if self._reg_exp.match(name):
-                handles.append(register_hook_to_module(module, hook_factory(name), direction, prepend))
+                handles.append(register_hook_to_module(submodule, hook_factory(name), direction, prepend))
         return MultiHookHandle(handles)
 
 
 class MutableWeakRef(Generic[T]):
-    def __init__(self, ref: ReferenceType[T]):
-        self._ref = ref
+    def __init__(self, referee: T):
+        self._ref = weakref.ref(referee)
 
     def resolve(self) -> T:
         return self._ref()
 
-    def set(self, ref: ReferenceType[T]):
-        self._ref = ref
+    def set(self, referee: T):
+        self._ref = weakref.ref(referee)
+
+
+class TensorDictRef:
+    def __init__(self, td: Optional[TensorDict]):
+        self._td = td
+
+    def resolve(self) -> TensorDict:
+        return self._td
+
+    def set(self, td: TensorDict):
+        self._td = td
 
 
 class CacheProxy:
-    def __init__(self, key: str, cache: TensorDict | MutableWeakRef[TensorDict]):
+    def __init__(self, key: str, cache: TensorDict | MutableWeakRef[TensorDict] | TensorDictRef):
         self._key = key
         self._cache = weakref.ref(cache)
 
     def resolve(self) -> Any:
         cache = self._cache()
-        if isinstance(cache, MutableWeakRef):
+        if isinstance(cache, (MutableWeakRef, TensorDictRef)):
             cache = cache.resolve()
         if cache is None:
             raise ValueError("Dead reference to cache")
@@ -243,7 +269,7 @@ class HookFactory:
 
     @staticmethod
     def make_caching_hook(
-        key: str,
+        key: UnraveledKey,
         cache: TensorDict | MutableWeakRef,
         *,
         callback: Optional[Callable] = None,
@@ -261,16 +287,16 @@ class HookFactory:
         HookFactory._check_callback_signature(callback, set(params))
 
         def hook(*args):
-            nonlocal key, cache, callback
+            nonlocal key, cache, callback, direction
             if callback is not None:
-                value = callback(**dict(zip(params, args)), key=key)
+                value = callback(**dict(zip(params, args)), key=key, direction=direction)
             else:
                 value = args[value_index]
             if not isinstance(value, torch.Tensor) and not isinstance(value, TensorDict):
                 raise RuntimeError(
                     f"{type(value).__name__} values are not supported for caching, use a `callback` to return a tensor or a tensordict"
                 )
-            if isinstance(cache, MutableWeakRef):
+            if isinstance(cache, MutableWeakRef | TensorDictRef):
                 _cache = cache.resolve()
                 if _cache is None:
                     raise ValueError("Dead reference to cache")
@@ -296,11 +322,11 @@ class HookFactory:
         HookFactory._check_callback_signature(callback, set(params))
 
         def hook(*args):
-            nonlocal value, callback, params, return_index
+            nonlocal value, callback, params, return_index, direction
             original_type = type(args[return_index])
             _value = value.resolve() if isinstance(value, CacheProxy) else value
             if callback is not None:
-                _value = callback(**dict(zip(params, args)), value=_value)
+                _value = callback(**dict(zip(params, args)), value=_value, direction=direction)
             if type(_value) is not original_type:
                 raise RuntimeError(
                     f"Callback returned a value of type {type(_value).__name__} but the original value was of type {original_type.__name__}"
@@ -322,8 +348,8 @@ class HookFactory:
         HookFactory._check_callback_signature(callback, set(params))
 
         def hook(*args):
-            nonlocal callback, params
-            callback(**dict(zip(params, args)))
+            nonlocal callback, params, direction
+            callback(**dict(zip(params, args)), direction=direction)
 
         return hook
 

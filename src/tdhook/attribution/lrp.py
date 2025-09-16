@@ -10,7 +10,6 @@ from tensordict.nn import TensorDictModule, TensorDictModuleBase
 from tensordict import TensorDict
 
 from tdhook.attribution.gradient_helpers import GradientAttribution
-from tdhook.modules import td_grad
 from tdhook._types import UnraveledKey
 from tdhook.attribution.lrp_helpers.rules import Rule
 
@@ -59,14 +58,13 @@ class LRP(GradientAttribution):
 
     def _grad_attr(
         self,
-        targets: TensorDict,
+        grads: TensorDict,
         inputs: TensorDict,
-        init_grads: TensorDict,
     ) -> TensorDict:
-        return td_grad(targets, inputs, init_grads)
+        return grads
 
     @staticmethod
     def default_skip(name: str, module: nn.Module) -> bool:
-        names_to_skip = ("", "td_module")
+        names_to_skip = ("", "td_module", "module")
         classes_to_skip = (nn.ModuleList, nn.Sequential, TensorDictModule)
         return name in names_to_skip or isinstance(module, classes_to_skip)

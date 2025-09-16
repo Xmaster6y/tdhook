@@ -49,7 +49,7 @@ def main(args: argparse.Namespace):
         with torch.no_grad():
             train_inputs = TensorDict(
                 {
-                    "boards": model.prepare_boards(*train_boards),
+                    "board": model.prepare_boards(*train_boards),
                     "labels": torch.tensor(train_labels),
                     "step_type": "fit",
                 },
@@ -59,7 +59,7 @@ def main(args: argparse.Namespace):
 
             test_inputs = TensorDict(
                 {
-                    "boards": model.prepare_boards(*test_boards),
+                    "board": model.prepare_boards(*test_boards),
                     "labels": torch.tensor(test_labels),
                     "step_type": "predict",
                 },

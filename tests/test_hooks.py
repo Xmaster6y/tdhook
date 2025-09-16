@@ -6,7 +6,6 @@ import torch
 from tensordict import TensorDict
 import pytest
 import gc
-import weakref
 
 from tdhook.hooks import (
     register_hook_to_module,
@@ -16,6 +15,7 @@ from tdhook.hooks import (
     EarlyStoppingException,
     MutableWeakRef,
     CacheProxy,
+    resolve_submodule_path,
 )
 
 
@@ -74,7 +74,7 @@ class TestHookFactory:
     def test_make_setting_hook(self, default_test_model):
         """Test making a setting hook."""
 
-        def callback(value, module, args, output):
+        def callback(value, **_):
             return value + 1
 
         hook = HookFactory.make_setting_hook(1, callback=callback)
@@ -277,7 +277,7 @@ class TestHookSignatureValidation:
             "k",
             cache,
             direction="fwd_pre_kwargs",
-            callback=lambda module, args, kwargs, key: args[0],
+            callback=lambda args, **_: args[0],
         )
         module = object()
         my_tensor = torch.tensor(1)
@@ -359,7 +359,7 @@ class TestHookEdgeCases:
         cache = TensorDict({"k": 123})
         proxy = CacheProxy("k", cache)
 
-        def cb(module, args, output, value):
+        def cb(value, **_):
             return value + 1
 
         hook = HookFactory.make_setting_hook(proxy, callback=cb, direction="fwd")
@@ -369,7 +369,7 @@ class TestHookEdgeCases:
     def test_make_setting_hook_type_mismatch_raises(self):
         """Setting hook raises when callback changes the value type."""
 
-        def cb(module, args, output, value):
+        def cb(**_):
             return 1.0
 
         hook = HookFactory.make_setting_hook(1, callback=cb, direction="fwd")
@@ -384,7 +384,7 @@ class TestHookEdgeCases:
             "k",
             cache,
             direction="fwd_pre_kwargs",
-            callback=lambda module, args, kwargs, key: args[0],
+            callback=lambda args, **_: args[0],
         )
         module = object()
         args = ("A",)
@@ -396,7 +396,7 @@ class TestHookEdgeCases:
         """Caching hook raises when underlying cache has been garbage collected."""
 
         cache = TensorDict()
-        cache_ref = MutableWeakRef(weakref.ref(cache))
+        cache_ref = MutableWeakRef(cache)
 
         # Remove strong reference to allow garbage collection
         del cache
@@ -407,3 +407,139 @@ class TestHookEdgeCases:
         # Expect ValueError due to dead weak reference resolution inside hook
         with pytest.raises(ValueError):
             hook(object(), None, torch.tensor(1))
+
+
+class TestResolveSubmodulePath:
+    """Test resolve_submodule_path functionality with simple dummy objects."""
+
+    def test_empty_key_returns_root(self):
+        """Empty key should return the root object."""
+
+        class DummyRoot:
+            pass
+
+        root = DummyRoot()
+        assert resolve_submodule_path(root, "") is root
+
+    def test_simple_attribute_access(self):
+        """Test simple attribute access."""
+
+        class DummyRoot:
+            def __init__(self):
+                self.attr1 = "value1"
+                self.attr2 = "value2"
+
+        root = DummyRoot()
+        assert resolve_submodule_path(root, "attr1") == "value1"
+        assert resolve_submodule_path(root, "attr2") == "value2"
+
+    def test_nested_attribute_access(self):
+        """Test nested attribute access."""
+
+        class DummyChild:
+            def __init__(self):
+                self.nested_attr = "nested_value"
+
+        class DummyRoot:
+            def __init__(self):
+                self.child = DummyChild()
+
+        root = DummyRoot()
+        assert resolve_submodule_path(root, "child.nested_attr") == "nested_value"
+
+    def test_list_indexing(self):
+        """Test list indexing patterns."""
+
+        class DummyRoot:
+            def __init__(self):
+                self.items = ["first", "second", "third"]
+
+        root = DummyRoot()
+
+        # Test positive indexing
+        assert resolve_submodule_path(root, "items[0]") == "first"
+        assert resolve_submodule_path(root, "items[1]") == "second"
+
+        # Test negative indexing
+        assert resolve_submodule_path(root, "items[-1]") == "third"
+        assert resolve_submodule_path(root, "items[-2]") == "second"
+
+    def test_dict_indexing(self):
+        """Test dictionary indexing patterns."""
+
+        class DummyRoot:
+            def __init__(self):
+                self.data = {"first": "value1", "second": "value2", "third": "value3"}
+
+        root = DummyRoot()
+
+        # Test string key indexing
+        assert resolve_submodule_path(root, "data['first']") == "value1"
+        assert resolve_submodule_path(root, "data['second']") == "value2"
+
+    def test_custom_attributes_with_colons(self):
+        """Test custom attributes using colon syntax."""
+
+        class DummyChild:
+            def __init__(self):
+                pass
+
+        class DummyRoot:
+            def __init__(self):
+                self.child = DummyChild()
+
+        root = DummyRoot()
+        setattr(root, "block0/module", "custom_value1")
+        setattr(root, "block1/module", ["custom_value2"])
+        setattr(root, "block2/module", DummyChild())
+        setattr(getattr(root, "block2/module"), "subblock0/module", ["custom_value3"])
+        setattr(root.child, "block3/module", {"custom_value4": "custom_value5"})
+
+        # Test custom attribute access
+        assert resolve_submodule_path(root, ":block0/module:") == "custom_value1"
+        assert resolve_submodule_path(root, ":block1/module:[0]") == "custom_value2"
+        assert resolve_submodule_path(root, ":block2/module::subblock0/module:[0]") == "custom_value3"
+        assert resolve_submodule_path(root, "child:block3/module:['custom_value4']") == "custom_value5"
+
+    def test_mixed_attribute_and_indexing(self):
+        """Test mixed attribute access and indexing."""
+
+        class DummyChild:
+            def __init__(self):
+                self.items = ["a", "b", "c"]
+
+        class DummyRoot:
+            def __init__(self):
+                self.layers = [DummyChild(), DummyChild()]
+                self.name = "root"
+
+        root = DummyRoot()
+
+        # Test mixed patterns
+        assert resolve_submodule_path(root, "layers[0].items[1]") == "b"
+        assert resolve_submodule_path(root, "name") == "root"
+
+    def test_invalid_paths_raise_value_error(self):
+        """Test that invalid paths raise ValueError."""
+
+        class DummyRoot:
+            def __init__(self):
+                self.valid_attr = "value"
+
+        root = DummyRoot()
+
+        # Test non-existent attribute
+        with pytest.raises(ValueError):
+            resolve_submodule_path(root, "nonexistent")
+
+        # Test invalid indexing
+        with pytest.raises(ValueError):
+            resolve_submodule_path(root, "valid_attr[999]")
+
+        # Test malformed custom attribute (missing closing colon)
+        with pytest.raises(ValueError):
+            resolve_submodule_path(root, ":block0/module")
+
+        # Test malformed custom attribute (missing opening colon)
+        with pytest.raises(ValueError):
+            resolve_submodule_path(root, "block0/module:")

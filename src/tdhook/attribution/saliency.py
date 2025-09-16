@@ -6,7 +6,6 @@ from tensordict import TensorDict
 import torch
 
 from tdhook.attribution.gradient_helpers import GradientAttribution
-from tdhook.modules import td_grad
 
 
 class Saliency(GradientAttribution):
@@ -18,11 +17,9 @@ class Saliency(GradientAttribution):
     @torch.no_grad()
     def _grad_attr(
         self,
-        targets: TensorDict,
+        grads: TensorDict,
         inputs: TensorDict,
-        init_grads: TensorDict,
     ):
-        grads = td_grad(targets, inputs, init_grads)
         if self._absolute:
             grads.abs_()
         if self._multiply_by_inputs:

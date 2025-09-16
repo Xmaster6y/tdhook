@@ -6,7 +6,6 @@ from typing import Callable, Optional, List
 
 from tensordict import TensorDict
 from tensordict.nn import TensorDictModuleBase, TensorDictSequential
-import weakref
 
 from tdhook.contexts import HookingContextFactory
 from tdhook.hooks import MultiHookHandle
@@ -74,7 +73,7 @@ class ActivationAddition(HookingContextFactory):
         negative_keys = [(self._negative_key, key) for key in stored_keys]
         steer_keys = [(self._steer_key, key) for key in stored_keys]
 
-        cache_ref = MutableWeakRef(weakref.ref(TensorDict()))
+        cache_ref = MutableWeakRef(TensorDict())
         modules = [
             ModuleCallWithCache(
                 module,

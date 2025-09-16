@@ -25,7 +25,7 @@ def main(args: argparse.Namespace):
     board = LczeroBoard(args.fen)
     for move in args.moves.split(" "):
         board.push_uci(move)
-    td = TensorDict(boards=model.prepare_boards(board), batch_size=1)
+    td = TensorDict(board=model.prepare_boards(board), batch_size=1)
 
     def best_logit_init_targets(td: TensorDict, _):
         policy = td["policy"]
@@ -39,7 +39,7 @@ def main(args: argparse.Namespace):
         move = board.decode_move(output[("_mod_out", "policy")][0].argmax())
         arrows = [(move.from_square, move.to_square)]
         logger.info(f"Best move: ({move})")
-        attr = output.get(("attr", "boards")).sum(dim=1).view(64)
+        attr = output.get(("attr", "board")).sum(dim=1).view(64)
         board.render_heatmap(attr, arrows=arrows, save_to="results/lczerolens/best_move_saliency.svg", normalise="abs")
 
     def get_init_targets(idx: int):
@@ -54,7 +54,7 @@ def main(args: argparse.Namespace):
         with saliency_context.prepare(model) as hooked_model:
             output = hooked_model(td)
             logger.info(f"{name} output: {output[('_mod_out', 'wdl')][0, idx]:.2f}")
-            attr = output.get(("attr", "boards")).sum(dim=1).view(64)
+            attr = output.get(("attr", "board")).sum(dim=1).view(64)
             board.render_heatmap(attr, save_to=f"results/lczerolens/{name}_saliency.svg", normalise="abs")
 
 

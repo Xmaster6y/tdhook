@@ -16,9 +16,10 @@ class ActivationPatching(HookingContextFactory):
     def __init__(
         self,
         modules_to_patch: List[str],
-        patch_key: UnraveledKey = "patch",
+        patch_key: UnraveledKey = "patched",
         clean_intermediate_keys: bool = True,
         patch_fn: Optional[Callable] = None,
+        cache_callback: Optional[Callable] = None,
     ):
         super().__init__()
 
@@ -26,6 +27,7 @@ class ActivationPatching(HookingContextFactory):
         self._patch_key = patch_key
         self._clean_intermediate_keys = clean_intermediate_keys
         self._patch_fn = patch_fn
+        self._cache_callback = cache_callback
 
         self._hooked_module_kwargs["relative_path"] = "td_module.module[0]._td_module"
 
@@ -59,6 +61,7 @@ class ActivationPatching(HookingContextFactory):
                 cache=cache_ref,
                 cache_key=module_key,
                 module_key=module_key,
+                callback=self._cache_callback,
             )
             handles.append(handle)
 
@@ -69,7 +72,7 @@ class ActivationPatching(HookingContextFactory):
                 if value is None:  # clean run
                     return output
                 elif self._patch_fn is not None:
-                    patched_output = self._patch_fn(module_key=module_key, output=value, patch_output=output)
+                    patched_output = self._patch_fn(module_key=module_key, output=output, output_to_patch=value)
                     return value if patched_output is None else patched_output
                 else:
                     return value

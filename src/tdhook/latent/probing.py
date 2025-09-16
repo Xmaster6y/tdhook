@@ -4,10 +4,19 @@ Probing
 
 from typing import Callable, Optional, List, Protocol, Any, Dict
 
+import numpy as np
 from tensordict import TensorDict
 
 from tdhook.contexts import HookingContextFactory
-from tdhook.hooks import MultiHookManager, HookFactory, HookDirection, MultiHookHandle, DIRECTION_TO_RETURN
+from tdhook.hooks import (
+    MultiHookManager,
+    HookFactory,
+    HookDirection,
+    MultiHookHandle,
+    DIRECTION_TO_RETURN,
+    resolve_submodule_path,
+    register_hook_to_module,
+)
 from tdhook.modules import HookedModule
 
 
@@ -27,7 +36,8 @@ class Probing(HookingContextFactory):
     ):
         super().__init__()
         self._key_pattern = key_pattern
-        self._hook_manager = MultiHookManager(key_pattern, relative=relative)
+        self._hook_manager = MultiHookManager(key_pattern)
+        self._relative = relative
         self._probe_factory = probe_factory
         self._directions = directions or ["fwd"]
         self._additional_keys = additional_keys
@@ -75,19 +85,26 @@ class Probing(HookingContextFactory):
         if self._submodules_paths is not None:
             submodules_n_prefixes = []
             for submodule_path in self._submodules_paths:
-                submodule = module._resolve_submodule_path(submodule_path, relative=False)
+                submodule = resolve_submodule_path(module, submodule_path)
                 prefix = f"{submodule_path}."
-                submodules_n_prefixes.append((submodule, prefix))
+                submodules_n_prefixes.append((submodule, prefix, submodule_path))
         else:
-            submodules_n_prefixes = [(module, "")]
+            submodules_n_prefixes = [(module, "", "")]
 
-        for submodule, prefix in submodules_n_prefixes:
+        for submodule, prefix, submodule_path in submodules_n_prefixes:
             for direction in self._directions:
-                handles.append(
-                    self._hook_manager.register_hook(
-                        submodule, lambda name: hook_factory(f"{prefix}{name}", direction), direction=direction
+                if self._submodules_paths is not None:
+                    hook = hook_factory(f"{prefix}{submodule_path}", direction)
+                    handles.append(register_hook_to_module(submodule, hook, direction))
+                else:
+                    handles.append(
+                        self._hook_manager.register_hook(
+                            submodule,
+                            (lambda name: hook_factory(f"{prefix}{name}", direction)),
+                            direction=direction,
+                            relative_path=module.relative_path if self._relative else None,
+                        )
                     )
-                )
 
         return MultiHookHandle(handles)
 
@@ -184,3 +201,51 @@ class SklearnProbeManager:
     def reset_metrics(self):
         self._fit_metrics = {}
         self._predict_metrics = {}
+
+
+class MeanDifferenceClassifier:
+    def __init__(self, normalize: bool = True):
+        self._normalize = normalize
+        self._coef = None
+        self._intercept = None
+
+    @property
+    def coef_(self):
+        if self._coef is None:
+            raise ValueError("Model not fitted")
+        return self._coef
+
+    @property
+    def intercept_(self):
+        if self._intercept is None:
+            raise ValueError("Model not fitted")
+        return self._intercept
+
+    def fit(self, X, y):
+        if len(y.shape) > 1:
+            raise ValueError("Multiclass classification not supported")
+        y = np.expand_dims(y, 1)
+        pos = (X * y).sum(axis=0) / y.sum()
+        neg = (X * (1 - y)).sum(axis=0) / (1 - y).sum()
+        pos_norm = np.linalg.norm(pos)
+        neg_norm = np.linalg.norm(neg)
+
+        self._coef = pos - neg
+        self._intercept = -0.5 * (pos_norm**2 - neg_norm**2)
+        if self._normalize:
+            self._intercept = self._intercept / np.linalg.norm(self._coef)
+            self._coef = self._coef / np.linalg.norm(self._coef)
+
+        self._intercept = self._intercept.reshape((1,))
+        self._coef = self._coef.reshape((1, -1))
+
+    def _decision_function(self, X):
+        return (X * self._coef).sum(axis=1) + self._intercept
+
+    def predict(self, X):
+        return self._decision_function(X) > 0
+
+    def predict_proba(self, X):
+        pos_proba = 1 / (1 + np.exp(-self._decision_function(X)))
+        neg_proba = 1 - pos_proba
+        return np.stack([neg_proba, pos_proba], axis=1)

@@ -18,6 +18,4 @@ __all__ = [
     "LRP",
 ]
 
-# TODO: Implement CLRP
 # TODO: Implement Occlusion
-# TODO: Implement Conductance
