@@ -429,7 +429,7 @@ class AHQKVRule(Rule):
     @staticmethod
     def backward(ctx, *out_relevances):
         *inputs, mod_outputs = ctx.saved_tensors
-        in_relevances = torch.autograd.grad(mod_outputs, inputs, out_relevances[0])
+        in_relevances = torch.autograd.grad(mod_outputs, inputs, out_relevances[0], retain_graph=True)
         return None, None, None, *in_relevances
 
 

@@ -27,6 +27,8 @@ from tdhook.attribution.lrp_helpers.rules import (
     RemovableRuleHandle,
     BaseRuleMapper,
     LayerNormRule,
+    PseudoIdentityRule,
+    AHQKVRule,
 )
 from tdhook.attribution.lrp_helpers.layers import Sum
 from tdhook.attribution import LRP
@@ -572,3 +574,57 @@ class TestRules:
             hooked_grads = torch.autograd.grad(out, x, init_grad)
 
         torch.testing.assert_close(grads[0], hooked_grads[0])
+
+    def test_pseudo_identity_rule_grads(self):
+        """Test that PseudoIdentityRule gradients match expected behavior from RelP."""
+        from tdhook.attribution.lrp_helpers.rules import stabilize
+
+        old_module = get_linear_module(seed=0)
+        rule = PseudoIdentityRule(stabilizer=1e-6)
+
+        x = torch.randn(10, requires_grad=True)
+        out_relevance = torch.randn(10, requires_grad=True)
+
+        rule.register(old_module)
+        z = old_module(x)
+        z.backward(out_relevance)
+        rule_grad = x.grad.clone()
+        rule.unregister(old_module)
+
+        x.grad.zero_()
+
+        z = old_module(x)
+        zp = stabilize(x, 1e-6)
+        y = zp * (z / zp).detach()
+
+        y.backward(out_relevance)
+        manual_grad = x.grad
+
+        torch.testing.assert_close(rule_grad, manual_grad, atol=1e-6, rtol=1e-6)
+
+    def test_ahqkv_rule(self):
+        """Test AHQKVRule forward and backward passes."""
+
+        class QKVModule(nn.Module):
+            def __init__(self, d_model=12):
+                super().__init__()
+                self.linear = nn.Linear(10, d_model * 3)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        input_tensor = torch.randn(10, requires_grad=True)
+        rule = AHQKVRule()
+        module = QKVModule(d_model=4)
+        rule.register(module)
+        output = module(input_tensor)
+
+        out_relevance = torch.randn_like(output)
+
+        value_grad = torch.autograd.grad(output[..., -4:], input_tensor, out_relevance[..., -4:], retain_graph=True)
+        output.backward(out_relevance)
+        in_relevance = input_tensor.grad
+
+        assert torch.allclose(in_relevance, value_grad[0])
+
+        rule.unregister(module)
