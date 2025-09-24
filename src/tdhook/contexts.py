@@ -87,13 +87,22 @@ class HookingContext:
 
 
 class HookingContextWithCache(HookingContext):
-    def __init__(self, *args, cache: Optional[TensorDict] = None, **kwargs):
+    def __init__(self, *args, cache: Optional[TensorDict] = None, clear_cache: bool = False, **kwargs):
         super().__init__(*args, **kwargs)
         self._cache = TensorDict() if cache is None else cache
+        self._clear_cache = clear_cache
 
     @property
     def cache(self) -> TensorDict:
         return self._cache
+
+    def clear(self):
+        self._cache.clear()
+
+    def __enter__(self):
+        if self._clear_cache:
+            self.clear()
+        return super().__enter__()
 
 
 class HookingContextFactory:

@@ -90,6 +90,14 @@ class TestHookFactory:
         with pytest.raises(EarlyStoppingException):
             hook(default_test_model, None, 1)
 
+    @pytest.mark.parametrize("callback", [None, lambda value, **_: None])
+    def test_setting_hook_none_does_not_change_value(self, default_test_model, callback):
+        """Test making a setting hook."""
+
+        hook = HookFactory.make_setting_hook(None, callback=callback)
+        output = hook(default_test_model, None, 1)
+        assert output is None
+
 
 class TestMultiHookHandle:
     """Tests specific to MultiHookHandle behaviors."""
