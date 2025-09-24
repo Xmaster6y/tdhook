@@ -48,6 +48,21 @@ class TestPruning:
         new_output = model(inp)
         assert torch.allclose(new_output, original_output)
 
+    def test_custom_skip(self, default_test_model):
+        original_linear1_weight = default_test_model.linear1.weight.clone()
+        original_linear2_weight = default_test_model.linear2.weight.clone()
+        original_linear3_weight = default_test_model.linear3.weight.clone()
+
+        def skip_linear1(name, module):
+            return Pruning.default_skip(name, module) or name == "linear1"
+
+        pruning = Pruning(importance_callback=_importance_cb_skip_bias, amount_to_prune=0.5, skip_modules=skip_linear1)
+        ctx = pruning.prepare(default_test_model)
+        with ctx:
+            assert torch.allclose(default_test_model.linear1.weight, original_linear1_weight)
+            assert not torch.allclose(default_test_model.linear2.weight, original_linear2_weight)
+            assert not torch.allclose(default_test_model.linear3.weight, original_linear3_weight)
+
     def test_pruning_modules(self, default_test_model):
         original_linear1_weight = default_test_model.linear1.weight.clone()
         original_linear2_weight = default_test_model.linear2.weight.clone()
