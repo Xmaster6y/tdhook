@@ -16,9 +16,7 @@ def _importance_cb_skip_weight(parameter, parameter_name, **_):
 
 
 def _importance_cb_skip_bias(parameter, parameter_name, **_):
-    if parameter_name == "bias":
-        return None
-    return parameter
+    return None if parameter_name == "bias" else parameter
 
 
 class TestPruning:
