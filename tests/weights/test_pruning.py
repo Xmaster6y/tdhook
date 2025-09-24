@@ -12,9 +12,7 @@ def _importance_cb(parameter, **_):
 
 
 def _importance_cb_skip_weight(parameter, parameter_name, **_):
-    if parameter_name == "weight":
-        return None
-    return parameter
+    return None if parameter_name == "weight" else parameter
 
 
 def _importance_cb_skip_bias(parameter, parameter_name, **_):
