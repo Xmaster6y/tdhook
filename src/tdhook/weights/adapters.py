@@ -39,13 +39,18 @@ class Adapters(HookingContextFactory):
         cache = module.hooking_context.cache
 
         def callback_factory(adapter, cache_proxy=None):
+            import inspect
+
             def callback(**kwargs):
                 nonlocal adapter, cache_proxy
                 if cache_proxy is not None:
                     adapter_input = cache_proxy.resolve()
                 else:
                     adapter_input = kwargs.pop(DIRECTION_TO_RETURN[kwargs["direction"]])
-                return adapter(adapter_input, **kwargs)
+                # Filter kwargs to only those accepted by the adapter
+                adapter_params = inspect.signature(adapter).parameters
+                filtered_kwargs = {k: v for k, v in kwargs.items() if k in adapter_params}
+                return adapter(adapter_input, **filtered_kwargs)
 
             return callback
 
