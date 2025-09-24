@@ -11,7 +11,5 @@ __all__ = [
     "TaskVectors",
 ]
 
-# TODO: Implment SAE
 # TODO: Implment crosscoders
-# TODO: Implement Clement's model diffing
 # TODO: Implement circuits tracer from Anthropic

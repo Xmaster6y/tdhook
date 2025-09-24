@@ -327,7 +327,7 @@ class HookFactory:
             _value = value.resolve() if isinstance(value, CacheProxy) else value
             if callback is not None:
                 _value = callback(**dict(zip(params, args)), value=_value, direction=direction)
-            if type(_value) is not original_type:
+            if _value is not None and type(_value) is not original_type:
                 raise RuntimeError(
                     f"Callback returned a value of type {type(_value).__name__} but the original value was of type {original_type.__name__}"
                 )
