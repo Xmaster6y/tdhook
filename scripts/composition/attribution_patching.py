@@ -486,7 +486,7 @@ def main():
             zmax=1,
             zmin=-1,
             x=[f"{tokenizer.decode(tok)}_{i}" for i, tok in enumerate(clean_tokens[0])],
-            save_to=os.path.join(args.output_dir, f"{attribution_method}_patching_plot.png"),
+            save_to=os.path.join(args.output_dir, f"{attribution_method}_patching_plot.pdf"),
         )
 
         all_results[attribution_method] = attribution_results
@@ -512,7 +512,7 @@ def main():
         zmax=1,
         zmin=-1,
         x=[f"{tokenizer.decode(tok)}_{i}" for i, tok in enumerate(clean_tokens[0])],
-        save_to=os.path.join(args.output_dir, "activation_patching_plot.png"),
+        save_to=os.path.join(args.output_dir, "activation_patching_plot.pdf"),
     )
 
     logger.info("Computing correlations between activation patching and attribution methods...")
@@ -527,7 +527,7 @@ def main():
         logger.info(f"{method_name.upper()} correlations:")
         for i, corr in enumerate(correlations):
             logger.info(f"  {module_names[i]}: {corr:.3f}")
-    all_correlations_path = os.path.join(args.output_dir, "all_correlations_plot.png")
+    all_correlations_path = os.path.join(args.output_dir, "all_correlations_plot.pdf")
     plot_all_correlations(all_correlations, module_names, all_correlations_path)
 
 

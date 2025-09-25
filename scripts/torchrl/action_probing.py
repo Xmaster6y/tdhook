@@ -183,12 +183,14 @@ def run_probing(loss_module, train_batch, test_batch):
     """Run probing."""
     probe_manager = SklearnProbeManager(LinearRegression, {}, lambda x, y: {"r2": r2_score(x, y)})
 
-    with Probing(
-        ".*",
-        probe_manager.probe_factory,
-        additional_keys=["labels", "step_type"],
-        submodules_paths=["actor_network[0].module[0]", "critic_network"],
-    ).prepare(loss_module) as hooked_module:
+    with (
+        Probing(
+            "td_module.(critic_network.module.\d+|actor_network.module.0.module.0.\d+)",  # "", 'td_module.actor_network.module.0.module.0.0
+            probe_manager.probe_factory,
+            additional_keys=["labels", "step_type"],
+            relative=False,
+        ).prepare(loss_module) as hooked_module
+    ):
         train_batch["labels"] = train_batch["action"]
         train_batch["step_type"] = "fit"
         hooked_module(train_batch)
@@ -250,10 +252,10 @@ def parse_layer_number(key: str) -> tuple[str, int]:
     if key == "baseline":
         return "baseline", -1
     elif "actor_network" in key:
-        if match := re.search(r"actor_network\[0\]\.module\[0\]\.(\d+)_fwd", key):
+        if match := re.search(r"actor_network.module.0.module.0.(\d+)_fwd", key):
             return "actor", int(match[1])
     elif "critic_network" in key:
-        if match := re.search(r"critic_network\.(\d+)_fwd", key):
+        if match := re.search(r"critic_network.module.(\d+)_fwd", key):
             return "critic", int(match[1])
     return None, None
 
@@ -361,12 +363,12 @@ def main(args):
     log_r2_scores(metrics["predict_metrics"])
 
     plot_r2_scores(
-        metrics["fit_metrics"], metrics["baseline"]["r2"], save_path=os.path.join(args.save_dir, "r2_scores_fit.png")
+        metrics["fit_metrics"], metrics["baseline"]["r2"], save_path=os.path.join(args.save_dir, "r2_scores_fit.pdf")
     )
     plot_r2_scores(
         metrics["predict_metrics"],
         metrics["baseline"]["r2"],
-        save_path=os.path.join(args.save_dir, "r2_scores_predict.png"),
+        save_path=os.path.join(args.save_dir, "r2_scores_predict.pdf"),
     )
 
 

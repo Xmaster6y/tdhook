@@ -20,7 +20,7 @@ from tensordict import TensorDict
 
 from tdhook.latent.activation_caching import ActivationCaching
 
-from concept_utils import load_and_preprocess_image, create_balanced_dataset, collect_activations, train_probe
+from .concept_utils import load_and_preprocess_image, create_balanced_dataset, collect_activations, train_probe
 
 
 def get_probe_probability(model, probe, image, layer_number, device="cpu"):
@@ -75,7 +75,7 @@ def create_animal_figures(animal_images, probe_probabilities, concept, output_di
             prob_1,
             concept,
             "Animals Group 1",
-            os.path.join(output_dir, f"probe_{method}_animals_group_1.png"),
+            os.path.join(output_dir, f"probe_{method}_animals_group_1.pdf"),
         )
         plt.close(fig1)
 
@@ -86,7 +86,7 @@ def create_animal_figures(animal_images, probe_probabilities, concept, output_di
             prob_2,
             concept,
             "Animals Group 2",
-            os.path.join(output_dir, f"probe_{method}_animals_group_2.png"),
+            os.path.join(output_dir, f"probe_{method}_animals_group_2.pdf"),
         )
         plt.close(fig2)
 
@@ -103,7 +103,7 @@ def create_dataset_figures(dataset_images, dataset_probabilities, concept, outpu
             pos_prob,
             concept,
             "Positive Samples",
-            os.path.join(output_dir, f"probe_{method}_positive_samples.png"),
+            os.path.join(output_dir, f"probe_{method}_positive_samples.pdf"),
         )
         plt.close(fig_pos)
 
@@ -114,7 +114,7 @@ def create_dataset_figures(dataset_images, dataset_probabilities, concept, outpu
             neg_prob,
             concept,
             "Negative Samples",
-            os.path.join(output_dir, f"probe_{method}_negative_samples.png"),
+            os.path.join(output_dir, f"probe_{method}_negative_samples.pdf"),
         )
         plt.close(fig_neg)
 

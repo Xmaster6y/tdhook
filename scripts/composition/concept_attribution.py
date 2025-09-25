@@ -720,7 +720,7 @@ def main():
                 )
                 save_path = os.path.join(
                     args.output_dir,
-                    f"concept_attr_{sensitivity_method}_{select_method}_{image_name}.png",
+                    f"concept_attr_{sensitivity_method}_{select_method}_{image_name}.pdf",
                 )
                 visualize_concept_attribution(
                     test_image, args.concept, input_sensitivity, input_cond_sensitivity, sensitivity_method, save_path
@@ -740,7 +740,7 @@ def main():
                     )
                 )
 
-    plot_save_path = os.path.join(args.output_dir, f"evaluation_{args.concept}_{args.layer_number}.png")
+    plot_save_path = os.path.join(args.output_dir, f"evaluation_{args.concept}_{args.layer_number}.pdf")
     plot_evaluation_results(evaluation_results, plot_save_path)
 
 
