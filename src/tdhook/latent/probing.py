@@ -2,10 +2,12 @@
 Probing
 """
 
-from typing import Callable, Optional, List, Protocol, Any, Dict
+from typing import Callable, Optional, List, Protocol, Any, Dict, Type
 
 import numpy as np
 from tensordict import TensorDict
+import torch.nn as nn
+from tensordict.nn import TensorDictModuleBase
 
 from tdhook.contexts import HookingContextFactory
 from tdhook.hooks import (
@@ -14,8 +16,6 @@ from tdhook.hooks import (
     HookDirection,
     MultiHookHandle,
     DIRECTION_TO_RETURN,
-    resolve_submodule_path,
-    register_hook_to_module,
 )
 from tdhook.modules import HookedModule
 
@@ -25,6 +25,9 @@ class Probe(Protocol):
 
 
 class Probing(HookingContextFactory):
+    default_classes_to_hook = (nn.Module,)
+    default_classes_to_skip = (nn.ModuleList, nn.Sequential, TensorDictModuleBase)
+
     def __init__(
         self,
         key_pattern: str,
@@ -32,16 +35,18 @@ class Probing(HookingContextFactory):
         relative: bool = True,
         directions: Optional[List[HookDirection]] = None,
         additional_keys: Optional[List[str]] = None,
-        submodules_paths: Optional[List[str]] = None,
+        classes_to_hook: Optional[List[Type[nn.Module]]] = None,
+        classes_to_skip: Optional[List[Type[nn.Module]]] = None,
     ):
         super().__init__()
         self._key_pattern = key_pattern
-        self._hook_manager = MultiHookManager(key_pattern)
+        classes_to_hook = self.default_classes_to_hook if classes_to_hook is None else classes_to_hook
+        classes_to_skip = self.default_classes_to_skip if classes_to_skip is None else classes_to_skip
+        self._hook_manager = MultiHookManager(key_pattern, classes_to_hook, classes_to_skip)
         self._relative = relative
         self._probe_factory = probe_factory
         self._directions = directions or ["fwd"]
         self._additional_keys = additional_keys
-        self._submodules_paths = submodules_paths
 
     @property
     def key_pattern(self) -> str:
@@ -82,29 +87,15 @@ class Probing(HookingContextFactory):
 
             return HookFactory.make_reading_hook(callback=callback, direction=direction)
 
-        if self._submodules_paths is not None:
-            submodules_n_prefixes = []
-            for submodule_path in self._submodules_paths:
-                submodule = resolve_submodule_path(module, submodule_path)
-                prefix = f"{submodule_path}."
-                submodules_n_prefixes.append((submodule, prefix, submodule_path))
-        else:
-            submodules_n_prefixes = [(module, "", "")]
-
-        for submodule, prefix, submodule_path in submodules_n_prefixes:
-            for direction in self._directions:
-                if self._submodules_paths is not None:
-                    hook = hook_factory(f"{prefix}{submodule_path}", direction)
-                    handles.append(register_hook_to_module(submodule, hook, direction))
-                else:
-                    handles.append(
-                        self._hook_manager.register_hook(
-                            submodule,
-                            (lambda name: hook_factory(f"{prefix}{name}", direction)),
-                            direction=direction,
-                            relative_path=module.relative_path if self._relative else None,
-                        )
-                    )
+        for direction in self._directions:
+            handles.append(
+                self._hook_manager.register_hook(
+                    module,
+                    (lambda name: hook_factory(name, direction)),
+                    direction=direction,
+                    relative_path=module.relative_path if self._relative else None,
+                )
+            )
 
         return MultiHookHandle(handles)
 

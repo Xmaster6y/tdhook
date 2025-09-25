@@ -77,26 +77,26 @@ class TestProbing:
             hooked_module(inputs)
             assert storage_key in probe_manager.predict_metrics
 
-    def test_probing_with_submodules_paths(self, default_test_model):
-        """Test creating a Probing with submodules_paths."""
+    def test_probing_pattern(self, default_test_model):
+        """Test creating a Probing with pattern."""
         probes = {}
 
         def probe_factory(key, direction):
             probes[key] = ExampleProbe()
             return probes[key]
 
-        context = Probing("linear", probe_factory, submodules_paths=["linear1", "linear2"])
+        context = Probing("linear1|linear2", probe_factory)
 
         with context.prepare(default_test_model) as hooked_module:
             inputs = TensorDict({"input": torch.randn(2, 10)}, batch_size=2)
             hooked_module(inputs)
 
-            assert "linear1.linear1" in probes
-            assert "linear2.linear2" in probes
-            assert "linear3.linear3" not in probes
+            assert "linear1" in probes
+            assert "linear2" in probes
+            assert "linear3" not in probes
 
-            assert probes["linear1.linear1"].called
-            assert probes["linear2.linear2"].called
+            assert probes["linear1"].called
+            assert probes["linear2"].called
 
 
 class TestSklearnProbeManager:
