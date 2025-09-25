@@ -6,7 +6,14 @@ Original source: https://github.com/chr5tphr/zennit/blob/main/src/zennit/types.p
 """
 
 import torch
-import torchvision
+import importlib
+
+_has_torchvision = importlib.util.find_spec("torchvision") is not None
+
+if _has_torchvision:
+    import torchvision
+else:
+    torchvision = None
 
 
 class SubclassMeta(type):
@@ -89,7 +96,7 @@ class BatchNorm(metaclass=SubclassMeta):
         torch.nn.modules.batchnorm.BatchNorm1d,
         torch.nn.modules.batchnorm.BatchNorm2d,
         torch.nn.modules.batchnorm.BatchNorm3d,
-        torchvision.ops.FrozenBatchNorm2d,
+        *((torchvision.ops.FrozenBatchNorm2d,) if _has_torchvision else ()),
     )
 
 
