@@ -207,7 +207,7 @@ def create_memory_size_plot(results, base_metrics, output_path):
     plt.tight_layout()
 
     # Save the plot
-    plot_path = output_path / "memory_sizes.png"
+    plot_path = output_path / "memory_sizes.pdf"
     plt.savefig(plot_path, dpi=300, bbox_inches="tight")
     logger.info(f"Memory size plot saved to {plot_path}")
     plt.close()
@@ -250,7 +250,7 @@ def create_inode_count_plot(results, base_metrics, output_path):
     plt.tight_layout()
 
     # Save the plot
-    plot_path = output_path / "inode_counts.png"
+    plot_path = output_path / "inode_counts.pdf"
     plt.savefig(plot_path, dpi=300, bbox_inches="tight")
     logger.info(f"Inode count plot saved to {plot_path}")
     plt.close()

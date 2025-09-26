@@ -2,9 +2,7 @@
 Plot benchmark results in `results/bench/results.json`.
 
 Usage:
-    uv run --group scripts -m scripts.bench.plot_stats \
-        --input-file ./results/bench/results.json \
-        --output-dir ./results/bench/plots
+    uv run --group scripts -m scripts.bench.plot_stats
 
 The script assumes the JSON hierarchy:
     task -> library -> parameter_name -> parameter_value -> seed -> {spawn_cpu, spawn_gpu, run_cpu, run_gpu}
@@ -152,7 +150,7 @@ def _plot_metric(
         plt.xlabel(parameter.replace("_", " ").title())
         plt.tight_layout()
 
-        fname = output_dir / f"{task}_{parameter}_{metric}.png"
+        fname = output_dir / f"{task}_{parameter}_{metric}.pdf"
         plt.savefig(fname, dpi=300)
         try:
             rel = fname.relative_to(Path.cwd())

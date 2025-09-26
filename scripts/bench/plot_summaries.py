@@ -7,9 +7,7 @@ task/parameter/value/seed) as lib_value / TDHook_value, then aggregates
 mean±std across all samples per library.
 
 Usage:
-    uv run --group scripts -m scripts.bench.plot_summaries \
-        --input-file ./results/bench/results.json \
-        --output-dir ./results/bench/summaries
+    uv run --group scripts -m scripts.bench.plot_summaries
 
 Output: One plot per metric showing relative performance across all libraries.
 """
@@ -368,7 +366,7 @@ def _plot_relative_summary(agg_df: pd.DataFrame, output_dir: Path):
         plt.tight_layout()
 
         # Save plot
-        fname = output_dir / f"summary_{metric}.png"
+        fname = output_dir / f"summary_{metric}.pdf"
         plt.savefig(fname, dpi=300, bbox_inches="tight")
         logger.info(f"Saved {fname}")
         plt.close()
@@ -480,7 +478,7 @@ def _plot_combined_summary(agg_df: pd.DataFrame, output_dir: Path):
     plt.xticks(rotation=45, ha="right")
     plt.tight_layout()
 
-    fname = output_dir / "summary_combined_heatmap.png"
+    fname = output_dir / "summary_combined_heatmap.pdf"
     plt.savefig(fname, dpi=300, bbox_inches="tight")
     logger.info(f"Saved {fname}")
     plt.close()
