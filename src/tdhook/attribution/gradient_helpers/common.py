@@ -276,7 +276,7 @@ class GradientAttributionWithBaseline(GradientAttribution):
         pass
 
     @torch.no_grad()
-    def _multiply_by_inputs_fn(  # TODO: is it faster with TensorDict?
+    def _multiply_by_inputs_fn(
         self, inputs: Tuple[torch.Tensor, ...], baselines: Tuple[torch.Tensor, ...], attrs: Tuple[torch.Tensor, ...]
     ) -> Tuple[torch.Tensor, ...]:
         return tuple(attr * (inp - baseline) for attr, inp, baseline in zip(attrs, inputs, baselines))
