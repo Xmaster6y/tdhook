@@ -9,7 +9,7 @@ authors = [
 ]
 requires-python = ">=3.10"
 dependencies = [
-    "tensordict>=0.9.1",
+    "tensordict>=0.10",
     "torch>=2.7.1",
 ]
 classifiers = [
