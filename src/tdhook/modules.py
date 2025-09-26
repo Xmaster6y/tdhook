@@ -38,45 +38,6 @@ def get_best_device():
         return torch.device("cpu")
 
 
-def td_grad(
-    outputs: TensorDict | Tuple[TensorDict, ...],
-    inputs: TensorDict | Tuple[TensorDict, ...],
-    grad_outputs: TensorDict | Tuple[TensorDict, ...],
-    **kwargs: Any,
-) -> TensorDict:
-    if isinstance(outputs, tuple) and len(outputs) > 1:
-        raise ValueError("torch.autograd.grad for TensorDict only supports a single output")
-    elif isinstance(outputs, tuple):
-        outputs = outputs[0]
-    if not isinstance(outputs, TensorDict):
-        raise ValueError("torch.autograd.grad for TensorDict only supports TensorDict as output")
-    else:
-        tup_outputs = tuple(outputs[k] for k in outputs.keys(True, True))
-
-    if isinstance(inputs, tuple) and len(inputs) > 1:
-        raise ValueError("torch.autograd.grad for TensorDict only supports a single input")
-    elif isinstance(inputs, tuple):
-        inputs = inputs[0]
-    if not isinstance(inputs, TensorDict):
-        raise ValueError("torch.autograd.grad for TensorDict only supports TensorDict as input")
-    else:
-        tup_inputs = tuple(inputs[k] for k in inputs.keys(True, True))
-
-    if grad_outputs is not None and isinstance(grad_outputs, tuple) and len(grad_outputs) > 1:
-        raise ValueError("torch.autograd.grad for TensorDict only supports a single grad_output")
-    elif isinstance(grad_outputs, tuple):
-        grad_outputs = grad_outputs[0]
-    if not isinstance(grad_outputs, TensorDict):
-        raise ValueError("torch.autograd.grad for TensorDict only supports TensorDict as grad_output")
-    else:
-        tup_grad_outputs = tuple(grad_outputs[k] for k in grad_outputs.keys(True, True))
-
-    tup_grads = torch.autograd.grad(tup_outputs, tup_inputs, tup_grad_outputs, **kwargs)
-    return TensorDict(
-        dict(zip(inputs.keys(True, True), tup_grads)), batch_size=inputs.batch_size, device=inputs.device
-    )
-
-
 def flatten_select_reshape_call(
     module: TensorDictModuleBase, td: TensorDict, flatten: bool = True, select: bool = True, reshape: bool = True
 ) -> TensorDict:
