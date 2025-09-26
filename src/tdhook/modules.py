@@ -438,7 +438,7 @@ class HookedModule(TensorDictModuleWrapper):
         self,
         td_module: TensorDictModule,
         hooking_context: Optional["HookingContext"] = None,
-        relative_path: str = "td_module.module",
+        relative_path: str = "td_module",
     ):
         super().__init__(td_module)
         self._hooking_context = hooking_context

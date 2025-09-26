@@ -47,7 +47,7 @@ class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
         self._additional_init_keys = additional_init_keys or []
         self._attr_key = attribution_key
         self._clean_intermediate_keys = clean_intermediate_keys
-        self._hooked_module_kwargs["relative_path"] = "td_module.module[2]._td_module.module"
+        self._hooked_module_kwargs["relative_path"] = "td_module.module[2]._td_module"
 
     def _prepare_module(
         self, module: TensorDictModuleBase, in_keys: List[UnraveledKey], out_keys: List[UnraveledKey]

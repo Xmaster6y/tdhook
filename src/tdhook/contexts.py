@@ -35,8 +35,10 @@ class HookingContext:
 
         if isinstance(module, TensorDictModuleBase):
             self._module = module
+            self._extra_relative_path = ""
         else:
             self._module = TensorDictModule(module, in_keys or ["input"], out_keys or ["output"])
+            self._extra_relative_path = ".module"
 
         self._in_keys = self._module.in_keys
         self._out_keys = self._module.out_keys
@@ -54,6 +56,7 @@ class HookingContext:
 
         prep_module = self._prepare(working_module, self._in_keys, self._out_keys)
         self._hooked_module = self._spawn(prep_module, self)
+        self._hooked_module._relative_path += self._extra_relative_path
         self._handle = self._hook(self._hooked_module)
         return self._hooked_module
 
