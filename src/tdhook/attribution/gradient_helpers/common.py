@@ -47,10 +47,14 @@ class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
         self._additional_init_keys = additional_init_keys or []
         self._attr_key = attribution_key
         self._clean_intermediate_keys = clean_intermediate_keys
-        self._hooked_module_kwargs["relative_path"] = "td_module.module[2]._td_module.module"
+        self._hooked_module_kwargs["relative_path"] = "td_module.module[2]._td_module"
 
     def _prepare_module(
-        self, module: TensorDictModuleBase, in_keys: List[UnraveledKey], out_keys: List[UnraveledKey]
+        self,
+        module: TensorDictModuleBase,
+        in_keys: List[UnraveledKey],
+        out_keys: List[UnraveledKey],
+        extra_relative_path: str,
     ) -> TensorDictModuleBase:
         register_in_keys = [("_register_in", in_key) for in_key in in_keys]
         mod_in_keys = [("_mod_in", in_key) for in_key in in_keys]
@@ -221,13 +225,19 @@ class GradientAttributionWithBaseline(GradientAttribution):
         self._multiply_by_inputs = multiply_by_inputs
 
     def _prepare_module(
-        self, module: TensorDictModuleBase, in_keys: List[UnraveledKey], out_keys: List[UnraveledKey]
+        self,
+        module: TensorDictModuleBase,
+        in_keys: List[UnraveledKey],
+        out_keys: List[UnraveledKey],
+        extra_relative_path: str,
     ) -> TensorDictModuleBase:
         n_in_keys = len(in_keys)
         register_in_keys = [("_register_in", in_key) for in_key in in_keys]
         attr_keys = [(self._attr_key, in_key) for in_key in in_keys]
         baseline_keys = [(self._baseline_key, in_key) for in_key in in_keys]
-        (_, register_inputs, module_call, attributor, *_) = super()._prepare_module(module, in_keys, out_keys)
+        (_, register_inputs, module_call, attributor, *_) = super()._prepare_module(
+            module, in_keys, out_keys, extra_relative_path
+        )
 
         modules = [
             FunctionModule(

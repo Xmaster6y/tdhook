@@ -75,6 +75,11 @@ def _check_hook_signature(hook: Callable, direction: HookDirection):
         raise ValueError(f"Hook ({direction}) must have the signature {expected_params}")
 
 
+def merge_paths(*paths: str) -> str:
+    """Merge multiple paths into a single path."""
+    return ".".join(path for path in paths if path)
+
+
 def resolve_submodule_path(root: nn.Module, key: str):
     """
     Resolve a submodule path that may contain indexing expressions.

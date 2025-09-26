@@ -30,7 +30,11 @@ class LRP(GradientAttribution):
         self._skip_modules = skip_modules
 
     def _prepare_module(
-        self, module: TensorDictModuleBase, in_keys: List[UnraveledKey], out_keys: List[UnraveledKey]
+        self,
+        module: TensorDictModuleBase,
+        in_keys: List[UnraveledKey],
+        out_keys: List[UnraveledKey],
+        extra_relative_path: str,
     ) -> TensorDictModuleBase:
         rule_map = {}
         for name, child in module.named_modules():
@@ -43,12 +47,16 @@ class LRP(GradientAttribution):
             elif self._warn_on_missing_rule:
                 warn(f"No rule found for module `{name}` ({type(child).__name__})")
         module._rule_map = rule_map
-        return super()._prepare_module(module, in_keys, out_keys)
+        return super()._prepare_module(module, in_keys, out_keys, extra_relative_path)
 
     def _restore_module(
-        self, module: TensorDictModuleBase, in_keys: List[UnraveledKey], out_keys: List[UnraveledKey]
+        self,
+        module: TensorDictModuleBase,
+        in_keys: List[UnraveledKey],
+        out_keys: List[UnraveledKey],
+        extra_relative_path: str,
     ) -> TensorDictModuleBase:
-        module = super()._restore_module(module, in_keys, out_keys)
+        module = super()._restore_module(module, in_keys, out_keys, extra_relative_path)
         for name, child in module.named_modules():
             rule = self._rule_mapper(name, child)
             if rule is not None:

@@ -10,7 +10,7 @@ from tensordict.nn import TensorDictModuleBase, TensorDictModule
 from tensordict import TensorDict
 
 from tdhook.modules import HookedModule
-from tdhook.hooks import MultiHookHandle
+from tdhook.hooks import MultiHookHandle, merge_paths
 from tdhook._types import UnraveledKey
 
 
@@ -35,8 +35,10 @@ class HookingContext:
 
         if isinstance(module, TensorDictModuleBase):
             self._module = module
+            self._extra_relative_path = ""
         else:
             self._module = TensorDictModule(module, in_keys or ["input"], out_keys or ["output"])
+            self._extra_relative_path = "module"
 
         self._in_keys = self._module.in_keys
         self._out_keys = self._module.out_keys
@@ -52,14 +54,14 @@ class HookingContext:
                 working_module = stack.enter_context(factory.prepare(working_module, self._in_keys, self._out_keys))
             self._stack = stack.pop_all()
 
-        prep_module = self._prepare(working_module, self._in_keys, self._out_keys)
-        self._hooked_module = self._spawn(prep_module, self)
+        prep_module = self._prepare(working_module, self._in_keys, self._out_keys, self._extra_relative_path)
+        self._hooked_module = self._spawn(prep_module, self, self._extra_relative_path)
         self._handle = self._hook(self._hooked_module)
         return self._hooked_module
 
     def __exit__(self, exc_type, exc_value, traceback):
         self._handle.remove()
-        self._restore(self._module, self._in_keys, self._out_keys)
+        self._restore(self._module, self._in_keys, self._out_keys, self._extra_relative_path)
         self._in_context = False
         self._hooked_module = None
         self._handle = None
@@ -81,9 +83,13 @@ class HookingContext:
             raise RuntimeError("Cannot disable context outside of context")
         with self.disable_hooks():
             try:
-                yield self._restore(self._hooked_module.module, self._in_keys, self._out_keys)
+                yield self._restore(
+                    self._hooked_module.module, self._in_keys, self._out_keys, self._extra_relative_path
+                )
             finally:
-                self._hooked_module.module = self._prepare(self._module, self._in_keys, self._out_keys)
+                self._hooked_module.module = self._prepare(
+                    self._module, self._in_keys, self._out_keys, self._extra_relative_path
+                )
 
 
 class HookingContextWithCache(HookingContext):
@@ -147,18 +153,29 @@ class HookingContextFactory:
         module: TensorDictModuleBase,
         in_keys: List[UnraveledKey],
         out_keys: List[UnraveledKey],
+        extra_relative_path: str,
     ) -> TensorDictModuleBase:
         return module
 
     def _restore_module(
-        self, module: TensorDictModuleBase, in_keys: List[UnraveledKey], out_keys: List[UnraveledKey]
+        self,
+        module: TensorDictModuleBase,
+        in_keys: List[UnraveledKey],
+        out_keys: List[UnraveledKey],
+        extra_relative_path: str,
     ) -> TensorDictModuleBase:
         return module
 
     def _spawn_hooked_module(
-        self, prep_module: TensorDictModuleBase, hooking_context: "HookingContext"
+        self, prep_module: TensorDictModuleBase, hooking_context: "HookingContext", extra_relative_path: str
     ) -> HookedModule:
-        return self._hooked_module_class(prep_module, hooking_context=hooking_context, **self._hooked_module_kwargs)
+        base_relative_path = self._hooked_module_kwargs.get("relative_path", "td_module")
+        relative_path = merge_paths(base_relative_path, extra_relative_path)
+        kwargs = {
+            **self._hooked_module_kwargs,
+            "relative_path": relative_path,
+        }
+        return self._hooked_module_class(prep_module, hooking_context=hooking_context, **kwargs)
 
     def _hook_module(self, module: HookedModule) -> MultiHookHandle:
         return MultiHookHandle()
@@ -187,16 +204,21 @@ class CompositeHookingContextFactory(HookingContextFactory):
         module: TensorDictModuleBase,
         in_keys: List[UnraveledKey],
         out_keys: List[UnraveledKey],
+        extra_relative_path: str,
     ) -> TensorDictModuleBase:
         for context in self._contexts:
-            module = context._prepare_module(module, in_keys, out_keys)
+            module = context._prepare_module(module, in_keys, out_keys, extra_relative_path)
         return module
 
     def _restore_module(
-        self, module: TensorDictModuleBase, in_keys: List[UnraveledKey], out_keys: List[UnraveledKey]
+        self,
+        module: TensorDictModuleBase,
+        in_keys: List[UnraveledKey],
+        out_keys: List[UnraveledKey],
+        extra_relative_path: str,
     ) -> TensorDictModuleBase:
         for context in reversed(self._contexts):
-            module = context._restore_module(module, in_keys, out_keys)
+            module = context._restore_module(module, in_keys, out_keys, extra_relative_path)
         return module
 
     def _hook_module(self, module: HookedModule) -> MultiHookHandle:

@@ -12,6 +12,7 @@ from tdhook.contexts import HookingContextFactory, HookingContext
 from tdhook.modules import resolve_submodule_path
 
 from tdhook._types import UnraveledKey
+from tdhook.hooks import merge_paths
 
 
 class PruningContext(HookingContext):
@@ -38,7 +39,6 @@ class Pruning(HookingContextFactory):
         amount_to_prune: Optional[float | int] = None,
         modules_to_prune: Optional[Dict[str, Tuple[int, Optional[float]]]] = None,
         skip_modules: Optional[Callable[[str, nn.Module], bool]] = None,
-        relative: bool = True,
         relative_path: Optional[str] = None,
     ):
         if amount_to_prune is None and modules_to_prune is None:
@@ -49,16 +49,16 @@ class Pruning(HookingContextFactory):
         self._amount_to_prune = amount_to_prune
         self._modules_to_prune = modules_to_prune
         self._skip_modules = skip_modules
-        self._relative = relative
-        self._relative_path = relative_path or "module"
+        self._relative_path = relative_path or ""
 
     def _prepare_module(
-        self, module: TensorDictModuleBase, in_keys: List[UnraveledKey], out_keys: List[UnraveledKey]
+        self,
+        module: TensorDictModuleBase,
+        in_keys: List[UnraveledKey],
+        out_keys: List[UnraveledKey],
+        extra_relative_path: str,
     ) -> TensorDictModuleBase:
-        if self._relative:
-            root_module = resolve_submodule_path(module, self._relative_path)
-        else:
-            root_module = module
+        root_module = resolve_submodule_path(module, merge_paths(extra_relative_path, self._relative_path))
 
         if self._modules_to_prune is None:
             parameters_to_prune = []
@@ -66,7 +66,7 @@ class Pruning(HookingContextFactory):
             for name, submodule in root_module.named_modules():
                 if self._skip_modules and self._skip_modules(name, submodule):
                     continue
-                for param_name, param in submodule.named_parameters():
+                for param_name, param in submodule.named_parameters(recurse=False):
                     importance_score = self._importance_callback(
                         module_key=name, parameter_name=param_name, parameter=param
                     )
@@ -87,7 +87,7 @@ class Pruning(HookingContextFactory):
             for module_key, (dim, amount) in self._modules_to_prune.items():
                 amount = amount or self._amount_to_prune
                 submodule = resolve_submodule_path(root_module, module_key)
-                for param_name, param in submodule.named_parameters():
+                for param_name, param in submodule.named_parameters(recurse=False):
                     importance_scores = self._importance_callback(
                         module_key=module_key, parameter_name=param_name, parameter=param
                     )
