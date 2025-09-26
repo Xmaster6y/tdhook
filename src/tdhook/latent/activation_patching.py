@@ -32,7 +32,11 @@ class ActivationPatching(HookingContextFactory):
         self._hooked_module_kwargs["relative_path"] = "td_module.module[0]._td_module"
 
     def _prepare_module(
-        self, module: TensorDictModuleBase, in_keys: List[UnraveledKey], out_keys: List[UnraveledKey]
+        self,
+        module: TensorDictModuleBase,
+        in_keys: List[UnraveledKey],
+        out_keys: List[UnraveledKey],
+        extra_relative_path: str,
     ) -> TensorDictModuleBase:
         stored_keys = [f"{m}_output" for m in self._modules_to_patch]
 

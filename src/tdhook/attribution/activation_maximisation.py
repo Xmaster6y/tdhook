@@ -54,7 +54,11 @@ class ActivationMaximisation(HookingContextFactory):
         self._hooked_module_kwargs["relative_path"] = "td_module.module[1]._td_module"
 
     def _prepare_module(
-        self, module: TensorDictModuleBase, in_keys: List[UnraveledKey], out_keys: List[UnraveledKey]
+        self,
+        module: TensorDictModuleBase,
+        in_keys: List[UnraveledKey],
+        out_keys: List[UnraveledKey],
+        extra_relative_path: str,
     ) -> TensorDictModuleBase:
         working_in_keys = [("_working", in_key) for in_key in in_keys]
         attr_keys = [(self._attribution_key, in_key) for in_key in in_keys]

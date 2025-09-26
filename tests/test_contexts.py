@@ -41,13 +41,21 @@ class PrepFlagFactory(HookingContextFactory):
         self.flag_name = flag_name
 
     def _prepare_module(
-        self, module: TensorDictModule, in_keys: List[UnraveledKey], out_keys: List[UnraveledKey]
+        self,
+        module: TensorDictModule,
+        in_keys: List[UnraveledKey],
+        out_keys: List[UnraveledKey],
+        extra_relative_path: str,
     ) -> TensorDictModule:
         setattr(module, self.flag_name, 1)
         return module
 
     def _restore_module(
-        self, module: TensorDictModule, in_keys: List[UnraveledKey], out_keys: List[UnraveledKey]
+        self,
+        module: TensorDictModule,
+        in_keys: List[UnraveledKey],
+        out_keys: List[UnraveledKey],
+        extra_relative_path: str,
     ) -> TensorDictModule:
         delattr(module, self.flag_name)
         return module
