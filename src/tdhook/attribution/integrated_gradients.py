@@ -50,8 +50,7 @@ class IntegratedGradients(GradientAttributionWithBaseline):
         inputs: TensorDict,
     ) -> TensorDict:
         steps = torch.tensor(self._step_sizes).float().to(grads.device)
-
-        return torch.sum(grads * steps, dim=-1)  # TODO: inplace (grads *= steps) not working
+        return grads.mul_(steps).sum(dim=-1)
 
     @staticmethod
     def init_attr_targets_with_labels(
