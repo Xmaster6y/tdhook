@@ -12,7 +12,7 @@ from tensordict import TensorDict
 from tdhook.contexts import HookingContextFactory
 from tdhook.modules import FunctionModule, flatten_select_reshape_call, IntermediateKeysCleaner, ModuleCallWithCache
 from tdhook._types import UnraveledKey
-from tdhook.modules import HookedModule, td_grad
+from tdhook.modules import HookedModule
 from tdhook.hooks import MultiHookHandle, MutableWeakRef, TensorDictRef
 
 
@@ -186,7 +186,7 @@ class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
             if target.grad_fn is None:
                 raise ValueError(f"Target {target_key} has no grad_fn")
 
-        _grads = td_grad(targets, TensorDict(inputs=inputs, cache_in=cache_in), init_grads)
+        _grads = torch.autograd.grad(targets, TensorDict(inputs=inputs, cache_in=cache_in), init_grads)
         if self._use_inputs:
             grads = _grads["inputs"]
             grads.batch_size = inputs.batch_size
