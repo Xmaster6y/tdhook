@@ -10,7 +10,7 @@ from tensordict.nn import TensorDictModuleBase, TensorDictModule
 from tensordict import TensorDict
 
 from tdhook.modules import HookedModule
-from tdhook.hooks import MultiHookHandle
+from tdhook.hooks import MultiHookHandle, merge_paths
 from tdhook._types import UnraveledKey
 
 
@@ -55,8 +55,7 @@ class HookingContext:
             self._stack = stack.pop_all()
 
         prep_module = self._prepare(working_module, self._in_keys, self._out_keys, self._extra_relative_path)
-        self._hooked_module = self._spawn(prep_module, self)
-        self._hooked_module._relative_path += "." + self._extra_relative_path if self._extra_relative_path else ""
+        self._hooked_module = self._spawn(prep_module, self, self._extra_relative_path)
         self._handle = self._hook(self._hooked_module)
         return self._hooked_module
 
@@ -168,9 +167,15 @@ class HookingContextFactory:
         return module
 
     def _spawn_hooked_module(
-        self, prep_module: TensorDictModuleBase, hooking_context: "HookingContext"
+        self, prep_module: TensorDictModuleBase, hooking_context: "HookingContext", extra_relative_path: str
     ) -> HookedModule:
-        return self._hooked_module_class(prep_module, hooking_context=hooking_context, **self._hooked_module_kwargs)
+        base_relative_path = self._hooked_module_kwargs.get("relative_path", "td_module")
+        relative_path = merge_paths(base_relative_path, extra_relative_path)
+        kwargs = {
+            **self._hooked_module_kwargs,
+            "relative_path": relative_path,
+        }
+        return self._hooked_module_class(prep_module, hooking_context=hooking_context, **kwargs)
 
     def _hook_module(self, module: HookedModule) -> MultiHookHandle:
         return MultiHookHandle()

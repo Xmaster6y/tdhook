@@ -62,8 +62,8 @@ class PrepFlagFactory(HookingContextFactory):
 
 
 class BadSpawnFactory(HookingContextFactory):
-    def _spawn_hooked_module(self, prep_module, in_keys, out_keys, hooking_context):
-        return super()._spawn_hooked_module(prep_module, in_keys, out_keys, hooking_context)
+    def _spawn_hooked_module(self, prep_module, hooking_context, extra_relative_path):
+        return super()._spawn_hooked_module(prep_module, hooking_context, extra_relative_path)
 
 
 class TestBaseContext:

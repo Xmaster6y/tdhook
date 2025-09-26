@@ -12,6 +12,7 @@ from tdhook.contexts import HookingContextFactory, HookingContext
 from tdhook.modules import resolve_submodule_path
 
 from tdhook._types import UnraveledKey
+from tdhook.hooks import merge_paths
 
 
 class PruningContext(HookingContext):
@@ -57,9 +58,7 @@ class Pruning(HookingContextFactory):
         out_keys: List[UnraveledKey],
         extra_relative_path: str,
     ) -> TensorDictModuleBase:
-        root_module = resolve_submodule_path(
-            module, extra_relative_path + ("." + self._relative_path if self._relative_path else "")
-        )
+        root_module = resolve_submodule_path(module, merge_paths(extra_relative_path, self._relative_path))
 
         if self._modules_to_prune is None:
             parameters_to_prune = []
