@@ -4,6 +4,7 @@ Adapters
 
 from typing import Callable, Optional, List, Dict, Tuple
 from torch import nn
+from tensordict import TensorDict
 
 from tdhook.contexts import HookingContextFactory, HookingContextWithCache
 from tdhook.modules import HookedModule
@@ -26,14 +27,18 @@ class Adapters(HookingContextFactory):
         cache_callback: Optional[Callable] = None,
         relative: bool = True,
         directions: Optional[List[HookDirection]] = None,
+        cache: Optional[TensorDict] = None,
+        clear_cache: bool = True,
     ):
         super().__init__()
+        self._hooked_module_kwargs["adapters"] = {k: v[0] for k, v in adapters.items()}
+        self._hooking_context_kwargs["clear_cache"] = clear_cache
+        self._hooking_context_kwargs["cache"] = cache
+
         self._adapters = adapters
         self._cache_callback = cache_callback
         self._relative = relative
         self._directions = directions or ["fwd"]
-
-        self._hooked_module_kwargs["adapters"] = {k: v[0] for k, v in adapters.items()}
 
     def _hook_module(self, module: HookedModule) -> MultiHookHandle:
         cache = module.hooking_context.cache

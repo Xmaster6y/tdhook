@@ -22,9 +22,11 @@ class ActivationCaching(HookingContextFactory):
         callback: Optional[Callable] = None,
         directions: Optional[List[HookDirection]] = None,
         use_nested_keys: bool = False,
+        clear_cache: bool = True,
     ):
         super().__init__()
         self._hooking_context_kwargs["cache"] = cache
+        self._hooking_context_kwargs["clear_cache"] = clear_cache
 
         self._key_pattern = key_pattern
         self._relative = relative
