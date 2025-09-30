@@ -82,7 +82,7 @@ build-backend = "setuptools.build_meta"
 default-groups = ["dev", "docs", "scripts", "notebooks"]
 
 [tool.uv.sources]
-lczerolens = { git = "https://github.com/Xmaster6y/lczerolens", branch = "chores" }
+lczerolens = { git = "https://github.com/Xmaster6y/lczerolens" }
 
 [tool.ruff]
 line-length = 119
