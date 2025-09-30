@@ -1562,7 +1562,7 @@ wheels = [
 [[package]]
 name = "lczerolens"
 version = "0.3.3.dev0"
-source = { git = "https://github.com/Xmaster6y/lczerolens?branch=chores#0f8ea1fccd68118d131c79ab67dec7980e9237a8" }
+source = { git = "https://github.com/Xmaster6y/lczerolens#6da8adc111231215a94d1898214ac78d9b6a7064" }
 dependencies = [
     { name = "onnx2torch" },
     { name = "python-chess" },
@@ -4116,7 +4116,7 @@ scripts = [
     { name = "captum", specifier = ">=0.8.0" },
     { name = "datasets", specifier = ">=4.0.0" },
     { name = "gymnasium", extras = ["mujoco"], specifier = ">=1.2.0" },
-    { name = "lczerolens", git = "https://github.com/Xmaster6y/lczerolens?branch=chores" },
+    { name = "lczerolens", git = "https://github.com/Xmaster6y/lczerolens" },
     { name = "loguru", specifier = ">=0.7.3" },
     { name = "matplotlib", specifier = ">=3.8.0" },
     { name = "nnsight", specifier = ">=0.4.11" },

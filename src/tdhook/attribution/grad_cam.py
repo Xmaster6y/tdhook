@@ -10,7 +10,6 @@ import torch
 
 from tdhook._types import UnraveledKey
 from tdhook.attribution.gradient_helpers import GradientAttribution
-from tdhook.contexts import HookingContextWithCache
 
 
 @dataclass
@@ -20,8 +19,6 @@ class DimsConfig:
 
 
 class GradCAM(GradientAttribution):
-    _hooking_context_class = HookingContextWithCache
-
     def __init__(
         self,
         modules_to_attribute: Dict[str, DimsConfig],

@@ -93,7 +93,7 @@ class HookingContext:
 
 
 class HookingContextWithCache(HookingContext):
-    def __init__(self, *args, cache: Optional[TensorDict] = None, clear_cache: bool = False, **kwargs):
+    def __init__(self, *args, cache: Optional[TensorDict] = None, clear_cache: bool = True, **kwargs):
         super().__init__(*args, **kwargs)
         self._cache = TensorDict() if cache is None else cache
         self._clear_cache = clear_cache
