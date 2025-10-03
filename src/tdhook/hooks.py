@@ -95,10 +95,14 @@ def resolve_submodule_path(root: nn.Module, key: str):
     - ":block0/module:" -> getattr(root, "block0/module")
     - ":block0/module:layers.attention[0]" -> getattr(root, "block0/module").layers.attention[0]
     - "m1:block0/module:layers:module:linear[0]" -> getattr(getattr(root.m1, "block0/module").layers, "module").linear[0]
+    - "m1.0.layers" -> getattr(root.m1, "0").layers
     """
 
     if not key:
         return root
+
+    # Support for attributes starting with a number
+    key = re.sub(r"\.(\d[a-zA-Z0-9_]*)\.?", r":\1:", key)
 
     start_key, *rest = key.split(":", maxsplit=1)
 
