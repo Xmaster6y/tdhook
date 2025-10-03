@@ -307,9 +307,12 @@ class HookedModuleRun:
         callback: Optional[Callable] = None,
         direction: HookDirection = "fwd",
         prepend: bool = False,
+        relative: bool = True,
     ) -> None:
         self._ensure_in_context("set")
-        handle = self._module.set(key, value, callback=callback, direction=direction, prepend=prepend)
+        handle = self._module.set(
+            key, value, callback=callback, direction=direction, prepend=prepend, relative=relative
+        )
         self._handles.append(handle)
 
     def get(
@@ -320,10 +323,11 @@ class HookedModuleRun:
         callback: Optional[Callable] = None,
         direction: HookDirection = "fwd",
         prepend: bool = False,
+        relative: bool = True,
     ) -> CacheProxy:
         self._ensure_in_context("get")
         handle, proxy = self._module.get(
-            self._cache, key, cache_key, callback=callback, direction=direction, prepend=prepend
+            self._cache, key, cache_key, callback=callback, direction=direction, prepend=prepend, relative=relative
         )
         self._handles.append(handle)
         return proxy
@@ -336,11 +340,18 @@ class HookedModuleRun:
         callback: Optional[Callable] = None,
         direction: HookDirection = "fwd",
         prepend: bool = False,
+        relative: bool = True,
     ) -> CacheProxy:
         self._ensure_in_context("save")
         cache_key = cache_key or f"{self._name + self._sep + key}_{DIRECTION_TO_TYPE[direction]}"
         handle, proxy = self._module.get(
-            self._save_cache, key, cache_key=cache_key, callback=callback, direction=direction, prepend=prepend
+            self._save_cache,
+            key,
+            cache_key=cache_key,
+            callback=callback,
+            direction=direction,
+            prepend=prepend,
+            relative=relative,
         )
         self._handles.append(handle)
         return proxy

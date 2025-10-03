@@ -509,6 +509,27 @@ class TestResolveSubmodulePath:
         assert resolve_submodule_path(root, ":block2/module::subblock0/module:[0]") == "custom_value3"
         assert resolve_submodule_path(root, "child:block3/module:['custom_value4']") == "custom_value5"
 
+    def test_number_attribute_access(self):
+        """Test number attribute access."""
+
+        class DummyChild(torch.nn.Module):
+            def __init__(self):
+                self.layers = ["a", "b", "c"]
+
+        class DummyRoot:
+            def __init__(self):
+                self.m1 = torch.nn.ModuleList(
+                    [
+                        torch.nn.ReLU(),
+                        torch.nn.ReLU(),
+                        DummyChild(),
+                    ]
+                )
+
+        root = DummyRoot()
+        assert resolve_submodule_path(root, "m1.0") is root.m1[0]
+        assert resolve_submodule_path(root, "m1.2.layers[1]") is root.m1[2].layers[1]
+
     def test_mixed_attribute_and_indexing(self):
         """Test mixed attribute access and indexing."""
 
