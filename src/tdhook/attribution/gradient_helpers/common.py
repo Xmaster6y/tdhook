@@ -182,7 +182,7 @@ class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
         if set(targets.keys(True, True)) != set(init_grads.keys(True, True)):
             raise ValueError("Targets and init_grads must have the same keys")
 
-        for target_key, target in targets.items():
+        for target_key, target in targets.items(True, True):
             if target.grad_fn is None:
                 raise ValueError(f"Target {target_key} has no grad_fn")
 
