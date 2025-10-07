@@ -21,6 +21,7 @@ class DimsConfig:
 class GradCAM(GradientAttribution):
     def __init__(
         self,
+        modules_to_attribute: Optional[Dict[str, DimsConfig]],
         use_inputs: bool = True,
         use_outputs: bool = True,
         input_modules: Optional[List[str]] = None,
@@ -34,12 +35,11 @@ class GradCAM(GradientAttribution):
         clean_intermediate_keys: bool = True,
         cache_callback: Optional[Callable] = None,
         absolute: bool = False,
-        modules_to_attribute: Dict[str, DimsConfig] = {},
     ):
         super().__init__(
             use_inputs=False,
             use_outputs=True,
-            input_modules=modules_to_attribute.keys(),
+            input_modules=modules_to_attribute.keys() if modules_to_attribute is not None else None,
             target_modules=None,
             init_attr_targets=init_attr_targets,
             init_attr_inputs=None,
