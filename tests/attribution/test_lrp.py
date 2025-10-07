@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 import pytest
 from tensordict import TensorDict
+from tensordict.nn import TensorDictModule
 import warnings
 
 from zennit.rules import Epsilon, AlphaBeta, ZPlus, Flat, WSquare, Pass, Norm
@@ -628,3 +629,14 @@ class TestRules:
         assert torch.allclose(in_relevance, value_grad[0])
 
         rule.unregister(module)
+
+    def test_restore_module_unprepared(self, default_test_model):
+        """Test _restore_module on a module that was not prepared (no _rule_map attribute)."""
+
+        td_module = TensorDictModule(default_test_model, in_keys=["input"], out_keys=["output"])
+        lrp = LRP(rule_mapper=EpsilonPlus(epsilon=1e-6))
+
+        restored_module = lrp._restore_module(td_module, ["input"], ["output"], "")
+
+        assert restored_module is td_module
+        assert not hasattr(restored_module, "_rule_map")
