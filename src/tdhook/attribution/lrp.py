@@ -12,6 +12,7 @@ from tensordict import TensorDict
 from tdhook.attribution.gradient_helpers import GradientAttribution
 from tdhook._types import UnraveledKey
 from tdhook.attribution.lrp_helpers.rules import Rule
+from tdhook.hooks import resolve_submodule_path
 
 
 class LRP(GradientAttribution):
@@ -57,10 +58,11 @@ class LRP(GradientAttribution):
         extra_relative_path: str,
     ) -> TensorDictModuleBase:
         module = super()._restore_module(module, in_keys, out_keys, extra_relative_path)
-        for name, child in module.named_modules():
-            rule = self._rule_mapper(name, child)
-            if rule is not None:
-                rule.unregister(child)
+        if not hasattr(module, "_rule_map"):
+            return module
+        for name, rule in module._rule_map.items():
+            child = resolve_submodule_path(module, name)
+            rule.unregister(child)
         del module._rule_map
         return module
 
