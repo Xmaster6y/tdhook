@@ -159,7 +159,9 @@ class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
             inputs = self._init_attr_inputs(inputs, additional_init_tensors)
             if not isinstance(inputs, TensorDict):
                 raise ValueError("init_attr_inputs function must return a TensorDict")
-        cache_in = cache["_cache_in"] if self._input_modules else TensorDict()
+        cache_in = (
+            cache["_cache_in"] if self._input_modules else TensorDict()
+        )  # TODO: we should init cache_in, but we cannot reshape it
 
         targets = td["_mod_out"] if self._use_outputs else TensorDict()
         targets.update(cache["_cache_out"].reshape(cache["_shape"]) if self._target_modules else {})
