@@ -21,15 +21,20 @@ class DimsConfig:
 class GradCAM(GradientAttribution):
     def __init__(
         self,
-        modules_to_attribute: Dict[str, DimsConfig],
+        use_inputs: bool = True,
+        use_outputs: bool = True,
+        input_modules: Optional[List[str]] = None,
+        target_modules: Optional[List[str]] = None,
         init_attr_targets: Optional[Callable[[TensorDict, TensorDict], TensorDict]] = None,
+        init_attr_inputs: Optional[Callable[[TensorDict, TensorDict], TensorDict]] = None,
         init_attr_grads: Optional[Callable[[TensorDict, TensorDict], TensorDict]] = None,
         additional_init_keys: Optional[List[UnraveledKey]] = None,
+        output_grad_callbacks: Optional[Dict[str, Callable]] = None,
         attribution_key: UnraveledKey = "attr",
         clean_intermediate_keys: bool = True,
+        cache_callback: Optional[Callable] = None,
         absolute: bool = False,
-        output_grad_callbacks: Optional[Dict[str, Callable]] = None,
-        **kwargs,
+        modules_to_attribute: Dict[str, DimsConfig] = {},
     ):
         super().__init__(
             use_inputs=False,
