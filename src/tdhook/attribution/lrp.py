@@ -2,7 +2,7 @@
 LRP
 """
 
-from typing import Callable, Optional, List
+from typing import Callable, Optional, List, Dict
 
 from torch import nn
 from warnings import warn
@@ -18,15 +18,37 @@ from tdhook.hooks import resolve_submodule_path
 class LRP(GradientAttribution):
     def __init__(
         self,
-        rule_mapper: Callable[[str, nn.Module], Rule | None],
+        use_inputs: bool = True,
+        use_outputs: bool = True,
+        input_modules: Optional[List[str]] = None,
+        target_modules: Optional[List[str]] = None,
+        init_attr_targets: Optional[Callable[[TensorDict, TensorDict], TensorDict]] = None,
+        init_attr_inputs: Optional[Callable[[TensorDict, TensorDict], TensorDict]] = None,
+        init_attr_grads: Optional[Callable[[TensorDict, TensorDict], TensorDict]] = None,
+        additional_init_keys: Optional[List[UnraveledKey]] = None,
+        output_grad_callbacks: Optional[Dict[str, Callable]] = None,
+        attribution_key: UnraveledKey = "attr",
+        clean_intermediate_keys: bool = True,
+        cache_callback: Optional[Callable] = None,
+        rule_mapper: Callable[[str, nn.Module], Rule | None] | None = None,
         warn_on_missing_rule: bool = True,
         skip_modules: Optional[Callable[[str, nn.Module], bool]] = None,
-        **kwargs,
     ):
         super().__init__(
-            **kwargs,
+            use_inputs=use_inputs,
+            use_outputs=use_outputs,
+            input_modules=input_modules,
+            target_modules=target_modules,
+            init_attr_targets=init_attr_targets,
+            init_attr_inputs=init_attr_inputs,
+            init_attr_grads=init_attr_grads,
+            additional_init_keys=additional_init_keys,
+            output_grad_callbacks=output_grad_callbacks,
+            attribution_key=attribution_key,
+            clean_intermediate_keys=clean_intermediate_keys,
+            cache_callback=cache_callback,
         )
-        self._rule_mapper = rule_mapper
+        self._rule_mapper = rule_mapper or (lambda name, module: None)
         self._warn_on_missing_rule = warn_on_missing_rule
         self._skip_modules = skip_modules
 
