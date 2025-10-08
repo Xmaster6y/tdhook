@@ -25,6 +25,7 @@ class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
         target_modules: Optional[List[str]] = None,
         init_attr_targets: Optional[Callable[[TensorDict, TensorDict], TensorDict]] = None,
         init_attr_inputs: Optional[Callable[[TensorDict, TensorDict], TensorDict]] = None,
+        init_attr_cache_in: Optional[Callable[[TensorDict, TensorDict], TensorDict]] = None,
         init_attr_grads: Optional[Callable[[TensorDict, TensorDict], TensorDict]] = None,
         additional_init_keys: Optional[List[UnraveledKey]] = None,
         output_grad_callbacks: Optional[Dict[str, Callable]] = None,
@@ -40,6 +41,7 @@ class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
         self._target_modules = target_modules or []
         self._init_attr_targets = init_attr_targets
         self._init_attr_inputs = init_attr_inputs
+        self._init_attr_cache_in = init_attr_cache_in
         self._init_attr_grads = init_attr_grads
         self._output_grad_callbacks = output_grad_callbacks or {}
         self._cache_callback = cache_callback
@@ -159,9 +161,11 @@ class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
             inputs = self._init_attr_inputs(inputs, additional_init_tensors)
             if not isinstance(inputs, TensorDict):
                 raise ValueError("init_attr_inputs function must return a TensorDict")
-        cache_in = (
-            cache["_cache_in"] if self._input_modules else TensorDict()
-        )  # TODO: we should init cache_in, but we cannot reshape it
+        cache_in = cache["_cache_in"] if self._input_modules else TensorDict()
+        if self._init_attr_cache_in is not None:
+            cache_in = self._init_attr_cache_in(cache_in, additional_init_tensors)  # TODO: maybe do something better
+            if not isinstance(cache_in, TensorDict):
+                raise ValueError("init_attr_cache_in function must return a TensorDict")
 
         targets = td["_mod_out"] if self._use_outputs else TensorDict()
         targets.update(cache["_cache_out"].reshape(cache["_shape"]) if self._target_modules else {})
