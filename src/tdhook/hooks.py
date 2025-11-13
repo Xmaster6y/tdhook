@@ -90,6 +90,7 @@ def resolve_submodule_path(root: nn.Module, key: str):
     - "layers['attr']" -> root.layers['attr']
     - "layers.attention" -> root.layers.attention
     - "layers[1:3]" -> root.layers[1:3]
+    - "fn(0)" -> root.fn(0)
 
     Supports custom attributes:
     - "<block0/module>" -> getattr(root, "block0/module")
