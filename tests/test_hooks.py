@@ -584,13 +584,13 @@ class TestResolveSubmodulePath:
         with pytest.raises(ValueError):
             resolve_submodule_path(root, "valid_attr[999]")
 
-        # Test malformed custom attribute (missing closing colon)
+        # Test malformed custom attribute (missing closing angle bracket)
         with pytest.raises(ValueError):
-            resolve_submodule_path(root, ":block0/module")
+            resolve_submodule_path(root, "<block0/module")
 
-        # Test malformed custom attribute (missing opening colon)
+        # Test malformed custom attribute (missing opening angle bracket)
         with pytest.raises(ValueError):
-            resolve_submodule_path(root, "block0/module:")
+            resolve_submodule_path(root, "block0/module>")
 
 
 class TestSubmodulePathToName:
