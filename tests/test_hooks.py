@@ -16,6 +16,7 @@ from tdhook.hooks import (
     MutableWeakRef,
     CacheProxy,
     resolve_submodule_path,
+    submodule_path_to_name,
 )
 
 
@@ -586,3 +587,48 @@ class TestResolveSubmodulePath:
         # Test malformed custom attribute (missing opening colon)
         with pytest.raises(ValueError):
             resolve_submodule_path(root, "block0/module:")
+
+
+class TestSubmodulePathToName:
+    """Test submodule_path_to_name functionality."""
+
+    def test_simple_attribute_access(self):
+        """Test simple attribute access."""
+        assert submodule_path_to_name("") == ""
+        assert submodule_path_to_name("attr1") == "attr1"
+        assert submodule_path_to_name(".attr2") == "attr2"
+
+    def test_nested_attribute_access(self):
+        """Test nested attribute access."""
+        assert submodule_path_to_name("child.nested_attr") == "child.nested_attr"
+
+    def test_list_indexing(self):
+        """Test list indexing patterns."""
+        assert submodule_path_to_name("items[0]") == "items.0"
+        assert submodule_path_to_name("items[1]") == "items.1"
+
+    def test_dict_indexing(self):
+        """Test dictionary indexing patterns."""
+        assert submodule_path_to_name("data['first']") == "data.first"
+        assert submodule_path_to_name('data["second"]') == "data.second"
+
+    def test_custom_attributes_with_angles(self):
+        """Test custom attributes using angles syntax."""
+        assert submodule_path_to_name("<block0/module>") == "block0/module"
+        assert submodule_path_to_name("<block1/module>[0]") == "block1/module.0"
+        assert submodule_path_to_name("<block2/module>.<subblock0/module>[0]") == "block2/module.subblock0/module.0"
+        assert submodule_path_to_name("<block2/module><subblock0/module>[0]") == "block2/module.subblock0/module.0"
+        assert submodule_path_to_name("child.<block3/module>['custom_value4']") == "child.block3/module.custom_value4"
+
+    def test_mixed_attribute_and_indexing(self):
+        """Test mixed attribute access and indexing."""
+        assert submodule_path_to_name("layers[0].items[1]") == "layers.0.items.1"
+        assert submodule_path_to_name("layers.1name") == "layers.1name"
+
+    def test_paths_returned_as_is(self):
+        """Test paths that should be returned as-is."""
+        assert submodule_path_to_name("[-1]") == "[-1]"
+        assert submodule_path_to_name("[1:3]") == "[1:3]"
+        assert submodule_path_to_name(":something") == ":something"
+        assert submodule_path_to_name("(arg)") == "(arg)"
+        assert submodule_path_to_name(")something") == ")something"
