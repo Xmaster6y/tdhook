@@ -472,6 +472,9 @@ class TestResolveSubmodulePath:
         assert resolve_submodule_path(root, "items[-1]") == "third"
         assert resolve_submodule_path(root, "items[-2]") == "second"
 
+        # Test slice indexing
+        assert resolve_submodule_path(root, "items[1:3]") == ["second", "third"]
+
     def test_dict_indexing(self):
         """Test dictionary indexing patterns."""
 
@@ -485,8 +488,8 @@ class TestResolveSubmodulePath:
         assert resolve_submodule_path(root, "data['first']") == "value1"
         assert resolve_submodule_path(root, "data['second']") == "value2"
 
-    def test_custom_attributes_with_colons(self):
-        """Test custom attributes using colon syntax."""
+    def test_custom_attributes_with_angles(self):
+        """Test custom attributes using angles syntax."""
 
         class DummyChild:
             def __init__(self):
@@ -504,10 +507,11 @@ class TestResolveSubmodulePath:
         setattr(root.child, "block3/module", {"custom_value4": "custom_value5"})
 
         # Test custom attribute access
-        assert resolve_submodule_path(root, ":block0/module:") == "custom_value1"
-        assert resolve_submodule_path(root, ":block1/module:[0]") == "custom_value2"
-        assert resolve_submodule_path(root, ":block2/module::subblock0/module:[0]") == "custom_value3"
-        assert resolve_submodule_path(root, "child:block3/module:['custom_value4']") == "custom_value5"
+        assert resolve_submodule_path(root, "<block0/module>") == "custom_value1"
+        assert resolve_submodule_path(root, "<block1/module>[0]") == "custom_value2"
+        assert resolve_submodule_path(root, "<block2/module>.<subblock0/module>[0]") == "custom_value3"
+        assert resolve_submodule_path(root, "<block2/module><subblock0/module>[0]") == "custom_value3"
+        assert resolve_submodule_path(root, "child.<block3/module>['custom_value4']") == "custom_value5"
 
     def test_number_attribute_access(self):
         """Test number attribute access."""

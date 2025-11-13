@@ -92,32 +92,32 @@ def resolve_submodule_path(root: nn.Module, key: str):
     - "layers[1:3]" -> root.layers[1:3]
 
     Supports custom attributes:
-    - ":block0/module:" -> getattr(root, "block0/module")
-    - ":block0/module:layers.attention[0]" -> getattr(root, "block0/module").layers.attention[0]
-    - "m1:block0/module:layers:module:linear[0]" -> getattr(getattr(root.m1, "block0/module").layers, "module").linear[0]
-    - "m1.0.layers" -> getattr(root.m1, "0").layers
+    - "<block0/module>" -> getattr(root, "block0/module")
+    - "<block0/module>.layers.attention[0]" -> getattr(root, "block0/module").layers.attention[0]
+    - "m1.<block0/module>.layers.<module>.linear[0]" -> getattr(getattr(root.m1, "block0/module").layers, "module").linear[0]
+    - "m1.<0>.layers" -> getattr(root.m1, "0").layers
     """
 
     if not key:
         return root
 
-    # Support for attributes starting with a number
-    key = re.sub(r"\.(\d[a-zA-Z0-9_]*)\.?", r":\1:", key)
+    key = re.sub(r"\.(\d[a-zA-Z0-9_]*)", r"<\1>", key)  # Attributes starting with a number
+    key = key.strip(".")
 
-    start_key, *rest = key.split(":", maxsplit=1)
+    start_key, *rest = key.split("<", maxsplit=1)
 
     if rest:
         start_root = resolve_submodule_path(root, start_key)
-        attr, *rest = rest[0].split(":", maxsplit=1)
+        attr, *rest = rest[0].split(">", maxsplit=1)
         if not rest:
-            raise ValueError(f"Invalid submodule path '{key}', missing closing ':'")
+            raise ValueError(f"Invalid submodule path '{key}', missing closing '>'")
         return resolve_submodule_path(getattr(start_root, attr), rest[0])
 
     # Create a safe environment with only the current module
     safe_dict = {"root": root}
 
     try:
-        if key.startswith("["):
+        if key.startswith(("[", ".")):
             return eval(f"root{key}", {"__builtins__": {}}, safe_dict)
         else:
             return eval(f"root.{key}", {"__builtins__": {}}, safe_dict)
