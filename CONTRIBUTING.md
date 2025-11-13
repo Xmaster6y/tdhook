@@ -14,7 +14,9 @@ Install the dependencies and the pre-commit hooks:
 just install
 ```
 
-To run the checks (`pre-commit` checks):
+## Ensuring CI Passes
+
+To ensure CI passes, run the checks and tests. To run the checks (`pre-commit` checks):
 
 ```bash
 just checks
@@ -28,4 +30,8 @@ just tests
 
 ## Branches
 
-Make a branch before making a pull request to `develop`.
+Make a branch in your fork before making a pull request to `main`.
+
+## Submitting Ideas
+
+Ideas can be submitted through the [GitHub Discussions](https://github.com/Xmaster6y/tdhook/discussions) or via [Roadmap Issues](https://github.com/Xmaster6y/tdhook/issues/new?&template=roadmap.yml).
