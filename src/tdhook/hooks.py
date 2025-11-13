@@ -80,7 +80,7 @@ def merge_paths(*paths: str) -> str:
     return ".".join(path for path in paths if path)
 
 
-def resolve_submodule_path(root: nn.Module, key: str):
+def resolve_submodule_path(root: nn.Module, path: str):
     """
     Resolve a submodule path that may contain indexing expressions.
 
@@ -90,39 +90,51 @@ def resolve_submodule_path(root: nn.Module, key: str):
     - "layers['attr']" -> root.layers['attr']
     - "layers.attention" -> root.layers.attention
     - "layers[1:3]" -> root.layers[1:3]
+    - "fn(0)" -> root.fn(0)
 
     Supports custom attributes:
-    - ":block0/module:" -> getattr(root, "block0/module")
-    - ":block0/module:layers.attention[0]" -> getattr(root, "block0/module").layers.attention[0]
-    - "m1:block0/module:layers:module:linear[0]" -> getattr(getattr(root.m1, "block0/module").layers, "module").linear[0]
-    - "m1.0.layers" -> getattr(root.m1, "0").layers
+    - "<block0/module>" -> getattr(root, "block0/module")
+    - "<block0/module>.layers.attention[0]" -> getattr(root, "block0/module").layers.attention[0]
+    - "m1.<block0/module>.layers.<module>.linear[0]" -> getattr(getattr(root.m1, "block0/module").layers, "module").linear[0]
+    - "m1.<0>.layers" -> getattr(root.m1, "0").layers
     """
 
-    if not key:
+    if not path:
         return root
 
-    # Support for attributes starting with a number
-    key = re.sub(r"\.(\d[a-zA-Z0-9_]*)\.?", r":\1:", key)
+    path = re.sub(r"\.(\d[a-zA-Z0-9_]*)", r"<\1>", path)  # Attributes starting with a number
+    path = re.sub(r"(\.+)", ".", path)
+    path = path.strip(".")
 
-    start_key, *rest = key.split(":", maxsplit=1)
+    start_key, *rest = path.split("<", maxsplit=1)
 
     if rest:
         start_root = resolve_submodule_path(root, start_key)
-        attr, *rest = rest[0].split(":", maxsplit=1)
+        attr, *rest = rest[0].split(">", maxsplit=1)
         if not rest:
-            raise ValueError(f"Invalid submodule path '{key}', missing closing ':'")
+            raise ValueError(f"Invalid submodule path '{path}', missing closing '>'")
         return resolve_submodule_path(getattr(start_root, attr), rest[0])
 
     # Create a safe environment with only the current module
     safe_dict = {"root": root}
 
     try:
-        if key.startswith("["):
-            return eval(f"root{key}", {"__builtins__": {}}, safe_dict)
+        if path.startswith(("[", ".")):
+            return eval(f"root{path}", {"__builtins__": {}}, safe_dict)
         else:
-            return eval(f"root.{key}", {"__builtins__": {}}, safe_dict)
+            return eval(f"root.{path}", {"__builtins__": {}}, safe_dict)
     except (AttributeError, IndexError, KeyError, SyntaxError) as e:
-        raise ValueError(f"Invalid submodule path '{key}': {e}") from e
+        raise ValueError(f"Invalid submodule path '{path}': {e}") from e
+
+
+def submodule_path_to_name(path: str) -> str:
+    """Convert a submodule path to a name."""
+    if re.search(r"(\[\-)|\:|\(|\)", path):
+        return path
+    path = re.sub(r"[\"\']", "", path)
+    path = re.sub(r"[<>\[\]]", ".", path)
+    path = re.sub(r"\.+", ".", path)
+    return path.strip(".")
 
 
 def register_hook_to_module(

@@ -16,6 +16,7 @@ from tdhook.hooks import (
     MutableWeakRef,
     CacheProxy,
     resolve_submodule_path,
+    submodule_path_to_name,
 )
 
 
@@ -472,6 +473,13 @@ class TestResolveSubmodulePath:
         assert resolve_submodule_path(root, "items[-1]") == "third"
         assert resolve_submodule_path(root, "items[-2]") == "second"
 
+        # Test slice indexing
+        assert resolve_submodule_path(root, "items[1:3]") == ["second", "third"]
+        assert resolve_submodule_path(root, "items[-1:]") == ["third"]
+        assert resolve_submodule_path(root, "items[3:4]") == []
+        assert resolve_submodule_path(root, "items[1:1]") == []
+        assert resolve_submodule_path(root, "items[0:3:2]") == ["first", "third"]
+
     def test_dict_indexing(self):
         """Test dictionary indexing patterns."""
 
@@ -485,8 +493,8 @@ class TestResolveSubmodulePath:
         assert resolve_submodule_path(root, "data['first']") == "value1"
         assert resolve_submodule_path(root, "data['second']") == "value2"
 
-    def test_custom_attributes_with_colons(self):
-        """Test custom attributes using colon syntax."""
+    def test_custom_attributes_with_angles(self):
+        """Test custom attributes using angles syntax."""
 
         class DummyChild:
             def __init__(self):
@@ -504,10 +512,11 @@ class TestResolveSubmodulePath:
         setattr(root.child, "block3/module", {"custom_value4": "custom_value5"})
 
         # Test custom attribute access
-        assert resolve_submodule_path(root, ":block0/module:") == "custom_value1"
-        assert resolve_submodule_path(root, ":block1/module:[0]") == "custom_value2"
-        assert resolve_submodule_path(root, ":block2/module::subblock0/module:[0]") == "custom_value3"
-        assert resolve_submodule_path(root, "child:block3/module:['custom_value4']") == "custom_value5"
+        assert resolve_submodule_path(root, "<block0/module>") == "custom_value1"
+        assert resolve_submodule_path(root, "<block1/module>[0]") == "custom_value2"
+        assert resolve_submodule_path(root, "<block2/module>.<subblock0/module>[0]") == "custom_value3"
+        assert resolve_submodule_path(root, "<block2/module><subblock0/module>[0]") == "custom_value3"
+        assert resolve_submodule_path(root, "child.<block3/module>['custom_value4']") == "custom_value5"
 
     def test_number_attribute_access(self):
         """Test number attribute access."""
@@ -548,6 +557,16 @@ class TestResolveSubmodulePath:
         assert resolve_submodule_path(root, "layers[0].items[1]") == "b"
         assert resolve_submodule_path(root, "name") == "root"
 
+    def test_function_call(self):
+        """Test function call."""
+
+        class DummyRoot:
+            def __init__(self):
+                self.fn = lambda x: x + 1
+
+        root = DummyRoot()
+        assert resolve_submodule_path(root, "fn(0)") == 1
+
     def test_invalid_paths_raise_value_error(self):
         """Test that invalid paths raise ValueError."""
 
@@ -565,10 +584,55 @@ class TestResolveSubmodulePath:
         with pytest.raises(ValueError):
             resolve_submodule_path(root, "valid_attr[999]")
 
-        # Test malformed custom attribute (missing closing colon)
+        # Test malformed custom attribute (missing closing angle bracket)
         with pytest.raises(ValueError):
-            resolve_submodule_path(root, ":block0/module")
+            resolve_submodule_path(root, "<block0/module")
 
-        # Test malformed custom attribute (missing opening colon)
+        # Test malformed custom attribute (missing opening angle bracket)
         with pytest.raises(ValueError):
-            resolve_submodule_path(root, "block0/module:")
+            resolve_submodule_path(root, "block0/module>")
+
+
+class TestSubmodulePathToName:
+    """Test submodule_path_to_name functionality."""
+
+    def test_simple_attribute_access(self):
+        """Test simple attribute access."""
+        assert submodule_path_to_name("") == ""
+        assert submodule_path_to_name("attr1") == "attr1"
+        assert submodule_path_to_name(".attr2") == "attr2"
+
+    def test_nested_attribute_access(self):
+        """Test nested attribute access."""
+        assert submodule_path_to_name("child.nested_attr") == "child.nested_attr"
+
+    def test_list_indexing(self):
+        """Test list indexing patterns."""
+        assert submodule_path_to_name("items[0]") == "items.0"
+        assert submodule_path_to_name("items[1]") == "items.1"
+
+    def test_dict_indexing(self):
+        """Test dictionary indexing patterns."""
+        assert submodule_path_to_name("data['first']") == "data.first"
+        assert submodule_path_to_name('data["second"]') == "data.second"
+
+    def test_custom_attributes_with_angles(self):
+        """Test custom attributes using angles syntax."""
+        assert submodule_path_to_name("<block0/module>") == "block0/module"
+        assert submodule_path_to_name("<block1/module>[0]") == "block1/module.0"
+        assert submodule_path_to_name("<block2/module>.<subblock0/module>[0]") == "block2/module.subblock0/module.0"
+        assert submodule_path_to_name("<block2/module><subblock0/module>[0]") == "block2/module.subblock0/module.0"
+        assert submodule_path_to_name("child.<block3/module>['custom_value4']") == "child.block3/module.custom_value4"
+
+    def test_mixed_attribute_and_indexing(self):
+        """Test mixed attribute access and indexing."""
+        assert submodule_path_to_name("layers[0].items[1]") == "layers.0.items.1"
+        assert submodule_path_to_name("layers.1name") == "layers.1name"
+
+    def test_paths_returned_as_is(self):
+        """Test paths that should be returned as-is."""
+        assert submodule_path_to_name("[-1]") == "[-1]"
+        assert submodule_path_to_name("[1:3]") == "[1:3]"
+        assert submodule_path_to_name(":something") == ":something"
+        assert submodule_path_to_name("(arg)") == "(arg)"
+        assert submodule_path_to_name(")something") == ")something"
