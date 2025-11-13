@@ -475,6 +475,10 @@ class TestResolveSubmodulePath:
 
         # Test slice indexing
         assert resolve_submodule_path(root, "items[1:3]") == ["second", "third"]
+        assert resolve_submodule_path(root, "items[-1:]") == ["third"]
+        assert resolve_submodule_path(root, "items[3:4]") == []
+        assert resolve_submodule_path(root, "items[1:1]") == []
+        assert resolve_submodule_path(root, "items[0:3:2]") == ["first", "third"]
 
     def test_dict_indexing(self):
         """Test dictionary indexing patterns."""
