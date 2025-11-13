@@ -1,7 +1,7 @@
 name: Roadmap
 description: Detail the roadmap to implement a new feature or solve a bug.
-title: "[Roadmap]: "
-labels: ["roadmap"]
+title: "[Roadmap] "
+labels: ["enhancement"]
 projects: []
 assignees:
   - Xmaster6y
