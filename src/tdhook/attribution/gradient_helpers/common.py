@@ -192,12 +192,14 @@ class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
             if target.grad_fn is None:
                 raise ValueError(f"Target {target_key} has no grad_fn")
 
-        _grads = torch.autograd.grad(targets, TensorDict(inputs=inputs, cache_in=cache_in), init_grads)
+        device = inputs.device or cache_in.device
+        inputs = inputs.to(device)
+        _grads = torch.autograd.grad(targets, TensorDict(inputs=inputs, cache_in=cache_in, device=device), init_grads)
         if self._use_inputs:
             grads = _grads["inputs"]
             grads.batch_size = inputs.batch_size
         else:
-            grads = TensorDict(batch_size=cache["_shape"])
+            grads = TensorDict(batch_size=cache["_shape"], device=device)
         if self._input_modules:
             cache_in_grads = _grads["cache_in"]
             cache_in_grads.batch_size = cache_in.batch_size
