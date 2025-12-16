@@ -33,7 +33,7 @@ Methods
             </div>
             <div>
                <h5 class="card-title">Integrated Gradients</h5>
-               <p class="card-text">Compute attribution using integrated gradients, an attribution method that computes the integral of gradients along the path from a baseline to the input.</p>
+               <p class="card-text">Compute attribution using integrated gradients.</p>
             </div>
          </div>
 
@@ -50,7 +50,7 @@ Methods
             </div>
             <div>
                <h5 class="card-title">Steering Vectors</h5>
-               <p class="card-text">Modify model behavior by adding learned vectors to intermediate activations.</p>
+               <p class="card-text">Modify model behavior by adding vectors to intermediate activations.</p>
             </div>
          </div>
 

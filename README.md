@@ -39,7 +39,12 @@ with Saliency(
     td = hooked_model(td) # Access attribution with td.get(("attr", "input"))
 ```
 
-For more examples, see the [documentation](https://tdhook.readthedocs.io).
+To dig deeper, see the [documentation](https://tdhook.readthedocs.io).
+
+### Features
+
+- [Integrated Gradients](https://tdhook.readthedocs.io/en/latest/notebooks/methods/integrated-gradients.html): [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Xmaster6y/tdhook/blob/main/docs/source/notebooks/methods/integrated-gradients.ipynb)
+- [Steering Vectors](https://tdhook.readthedocs.io/en/latest/notebooks/methods/steering-vectors.html): [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Xmaster6y/tdhook/blob/main/docs/source/notebooks/methods/steering-vectors.ipynb)
 
 ## Python Config
 
