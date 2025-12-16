@@ -292,7 +292,7 @@ class TestGuidedBackpropagation:
         assert torch.all(gradients >= 0)
 
     def test_guided_backpropagation_positive_gradients_latent_inputs(self, default_test_model):
-        input_data = torch.randn(3, 10)
+        input_data = torch.randn(3, 10, requires_grad=True)
 
         tdhook_context_factory = GuidedBackpropagation(input_modules=["linear1"], use_inputs=False)
         with tdhook_context_factory.prepare(default_test_model) as hooked_module:
@@ -336,7 +336,7 @@ class TestLatentAttribution:
         torch.testing.assert_close(output.get(("attr", "linear1")), grad)
 
     def test_latent_grad_callback(self, default_test_model):
-        input_data = torch.randn(3, 10)
+        input_data = torch.randn(3, 10, requires_grad=True)
 
         def grad_callback(grad_output, **kwargs):
             return (grad_output[0].abs(),)

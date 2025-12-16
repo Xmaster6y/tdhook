@@ -175,12 +175,9 @@ class TestHookedModuleGetSet:
         input_data = torch.randn(2, 10, requires_grad=True)
 
         with nnsight_model.trace(input_data):
-            lin2_in = nnsight_model.linear2.input.save()
-            out = nnsight_model.output.save()
-            loss = out.sum()
-            with loss.backward():
-                _ = out.grad.save()
-                nnsight_grad = lin2_in.grad.save()
+            loss = nnsight_model.output.sum()
+            loss.backward()
+            nnsight_grad = nnsight_model.linear2.input.grad.save()
 
         save_cache = TensorDict()
 
@@ -254,10 +251,9 @@ class TestHookedModuleGetSet:
         input_data = torch.randn(2, 10, requires_grad=True)
 
         with nnsight_model.trace(input_data):
-            lin2_out = nnsight_model.linear2.output.save()
             loss = nnsight_model.output.sum()
-            with loss.backward():
-                nnsight_grad_in = lin2_out.grad.save()
+            loss.backward()
+            nnsight_grad_in = nnsight_model.linear2.output.grad.save()
 
         save_cache = TensorDict()
 
