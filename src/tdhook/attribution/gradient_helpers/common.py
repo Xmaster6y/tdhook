@@ -193,7 +193,16 @@ class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
                 raise ValueError(f"Target {target_key} has no grad_fn")
 
         device = inputs.device or cache_in.device
-        inputs = inputs.to(device)
+        if device is None:
+            # Fallback: try to get device from targets or init_grads, else default to 'cpu'
+            if hasattr(targets, "device") and targets.device is not None:
+                device = targets.device
+            elif hasattr(init_grads, "device") and init_grads.device is not None:
+                device = init_grads.device
+            else:
+                device = torch.device("cpu")
+        if inputs.device != device:
+            inputs = inputs.to(device)
         _grads = torch.autograd.grad(targets, TensorDict(inputs=inputs, cache_in=cache_in, device=device), init_grads)
         if self._use_inputs:
             grads = _grads["inputs"]

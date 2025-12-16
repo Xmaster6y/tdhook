@@ -13,7 +13,7 @@ from tdhook.hooks import resolve_submodule_path
 
 class LRP(GradientAttribution):
     """
-    Different LRP rules such as LRP-0, LRP-ε z-plus :cite:`Bach2015OnPE`, flat :cite:`Lapuschkin2019UnmaskingCH`, gamma :cite:`Montavon2019LayerWiseRP,Andol2021LearningDI`, w-square :cite:`Montavon2015ExplainingNC` and its conditional variant :cite:`Achtibat2022FromAM`.
+    Different LRP rules such as LRP-0, LRP-epsilon z-plus :cite:`Bach2015OnPE`, flat :cite:`Lapuschkin2019UnmaskingCH`, gamma :cite:`Montavon2019LayerWiseRP,Andol2021LearningDI`, w-square :cite:`Montavon2015ExplainingNC` and its conditional variant :cite:`Achtibat2022FromAM`.
     """
 
     def __init__(

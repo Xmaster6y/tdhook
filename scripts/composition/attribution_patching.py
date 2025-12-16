@@ -330,6 +330,7 @@ def plot_correlations(mean_correlations, module_names, save_path, std_correlatio
 
 
 def run_experiment(model_name, device, output_dir):
+    """Run attribution patching experiment for a single model."""
     logger.info("Loading model and tokenizer...")
     device = torch.device(device)
     model = AutoModelForCausalLM.from_pretrained(model_name)
@@ -514,7 +515,7 @@ def run_experiment(model_name, device, output_dir):
             zmax=1,
             zmin=-1,
             x=[f"{tokenizer.decode(tok)}_{i}" for i, tok in enumerate(clean_tokens[0])],
-            save_to=os.path.join(output_dir, f"{attribution_method}_patching_plot.pdf"),
+            save_to=os.path.join(output_dir, f"{attribution_method}_patching_plot_{model_name}.pdf"),
         )
 
         all_results[attribution_method] = attribution_results
@@ -542,7 +543,7 @@ def run_experiment(model_name, device, output_dir):
         zmax=1,
         zmin=-1,
         x=[f"{tokenizer.decode(tok)}_{i}" for i, tok in enumerate(clean_tokens[0])],
-        save_to=os.path.join(output_dir, "activation_patching_plot.pdf"),
+        save_to=os.path.join(output_dir, f"activation_patching_plot_{model_name}.pdf"),
     )
 
     logger.info("Computing correlations between activation patching and attribution methods...")
@@ -569,11 +570,20 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
 
     cross_model_correlations = []
+    module_names = None
     for model_name in ["gpt2-large", "gpt2-medium", "gpt2"]:
-        all_correlations, module_names = run_experiment(model_name, args.device, args.output_dir)
+        all_correlations, current_module_names = run_experiment(model_name, args.device, args.output_dir)
         all_correlations_path = os.path.join(args.output_dir, f"all_correlations_plot_{model_name}.pdf")
-        plot_correlations(all_correlations, module_names, all_correlations_path)
+        plot_correlations(all_correlations, current_module_names, all_correlations_path)
         cross_model_correlations.append(all_correlations)
+        
+        # Validate module_names consistency across models
+        if module_names is None:
+            module_names = current_module_names
+        elif module_names != current_module_names:
+            logger.warning(
+                f"Module names differ between models. Expected {module_names}, got {current_module_names} for {model_name}"
+            )
 
     cross_model_mean_correlations = {}
     cross_model_std_correlations = {}
@@ -583,9 +593,10 @@ def main():
             cross_model_mean_correlations[method_name] = stacked.mean(axis=0)
             cross_model_std_correlations[method_name] = stacked.std(axis=0)
     cross_model_correlations_path = os.path.join(args.output_dir, "cross_model_correlations_plot.pdf")
-    plot_correlations(
-        cross_model_mean_correlations, module_names, cross_model_correlations_path, cross_model_std_correlations
-    )
+    if module_names is not None:
+        plot_correlations(
+            cross_model_mean_correlations, module_names, cross_model_correlations_path, cross_model_std_correlations
+        )
 
 
 if __name__ == "__main__":

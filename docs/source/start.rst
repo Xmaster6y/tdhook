@@ -19,10 +19,12 @@ To get started with ``tdhook``, install it with ``pip``.
 Basic Example
 -------------
 
-Most methods should work with minimal configuration. Here's a basic example of running integrated gradients on a VGG16 model:
+Most methods should work with minimal configuration. Here's a basic example of running Integrated Gradients on a VGG16 model:
 
 .. code-block:: python
 
+    import torch
+    from tensordict import TensorDict
     from tdhook.attribution import Saliency, IntegratedGradients
 
     # Define attribution target (e.g., zebra class = 340)
