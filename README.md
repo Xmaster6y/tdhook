@@ -18,12 +18,10 @@ Interpretability with `tensordict` and `torch` hooks.
 
 ## Getting Started
 
-Most methods should work with minimal configuration. Here's a basic example of running Integrated Gradients on a VGG16 model:
+Most methods should work with minimal configuration. Here's a basic example of running Integrated Gradients on a VGG16 model (full example available [here](./docs/source/notebooks/methods/integrated-gradients.ipynb)):
 
 ```python
-import torch
-from tensordict import TensorDict
-from tdhook.attribution import Saliency, IntegratedGradients
+from tdhook.attribution import IntegratedGradients
 
 # Define attribution target (e.g., zebra class = 340)
 def init_attr_targets(targets, _):
@@ -31,9 +29,7 @@ def init_attr_targets(targets, _):
     return TensorDict(out=zebra_logit, batch_size=targets.batch_size)
 
 # Compute attribution
-with Saliency(
-    IntegratedGradients(init_attr_targets=init_attr_targets)
-).prepare(model) as hooked_model:
+with IntegratedGradients(init_attr_targets=init_attr_targets).prepare(model) as hooked_model:
     td = TensorDict({
         "input": image_tensor,
         ("baseline", "input"): torch.zeros_like(image_tensor) # required for integrated gradients

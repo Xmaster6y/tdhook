@@ -576,7 +576,7 @@ def main():
         all_correlations_path = os.path.join(args.output_dir, f"all_correlations_plot_{model_name}.pdf")
         plot_correlations(all_correlations, current_module_names, all_correlations_path)
         cross_model_correlations.append(all_correlations)
-        
+
         # Validate module_names consistency across models
         if module_names is None:
             module_names = current_module_names
