@@ -1,5 +1,5 @@
 """
-Attribution
+Package for attribution methods.
 """
 
 from .lrp import LRP

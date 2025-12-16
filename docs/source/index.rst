@@ -9,7 +9,7 @@
     :hidden:
 
     start
-    features
+    methods
     tutorials
     api/index
     About <about>

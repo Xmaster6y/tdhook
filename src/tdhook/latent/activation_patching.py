@@ -1,7 +1,3 @@
-"""
-Activation Patching
-"""
-
 from typing import Callable, Optional, List
 
 from tensordict.nn import TensorDictModuleBase, TensorDictSequential
@@ -13,6 +9,10 @@ from tdhook._types import UnraveledKey
 
 
 class ActivationPatching(HookingContextFactory):
+    """
+    Causal mediation analysis :cite:`Vig2020InvestigatingGB` and latent editing :cite:`belrose2023leace,Dreyer2023FromHT`.
+    """
+
     def __init__(
         self,
         modules_to_patch: List[str],

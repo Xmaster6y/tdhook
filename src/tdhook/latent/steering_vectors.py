@@ -1,7 +1,3 @@
-"""
-Steering Vectors
-"""
-
 from typing import Callable, Optional, List
 
 from tensordict import TensorDict
@@ -15,6 +11,10 @@ from tdhook.hooks import MutableWeakRef
 
 
 class SteeringVectors(HookingContextFactory):
+    """
+    Steering vectors :cite:`rimsky2023steering`.
+    """
+
     def __init__(
         self,
         modules_to_steer: List[str],
@@ -52,7 +52,7 @@ class ActivationAddition(HookingContextFactory):
         negative_key: UnraveledKey = "negative",
         steer_key: UnraveledKey = "steer",
         clean_intermediate_keys: bool = True,
-        patch_fn: Optional[Callable] = None,
+        cache_callback: Optional[Callable] = None,
     ):
         super().__init__()
 
@@ -61,7 +61,7 @@ class ActivationAddition(HookingContextFactory):
         self._negative_key = negative_key
         self._steer_key = steer_key
         self._clean_intermediate_keys = clean_intermediate_keys
-        self._patch_fn = patch_fn
+        self._cache_callback = cache_callback
 
         self._hooked_module_kwargs["relative_path"] = "td_module.module[0]._td_module"
 
@@ -117,6 +117,7 @@ class ActivationAddition(HookingContextFactory):
                 cache=cache_ref,
                 cache_key=module_key,
                 module_key=module_key,
+                callback=self._cache_callback,
             )
             handles.append(handle)
 

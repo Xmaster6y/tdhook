@@ -1,7 +1,3 @@
-"""
-Task vectors for weight interpretability
-"""
-
 import torch
 from torch import nn
 from typing import Optional, Iterable, Callable, Generator
@@ -79,6 +75,10 @@ class TaskVectorsModule(HookedModule):
 
 
 class TaskVectors(HookingContextFactory):
+    """
+    Task vectors :cite:`Ilharco2022EditingMW`.
+    """
+
     _hooking_context_class = TaskVectorsContext
     _hooked_module_class = TaskVectorsModule
 

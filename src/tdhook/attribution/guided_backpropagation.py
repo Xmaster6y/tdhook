@@ -1,7 +1,3 @@
-"""
-Guided Backpropagation
-"""
-
 from typing import Callable, Tuple, Type, Optional, List, Dict
 import torch
 from torch import nn
@@ -14,6 +10,10 @@ from tdhook.attribution.gradient_helpers import GradientAttribution
 
 
 class GuidedBackpropagation(GradientAttribution):
+    """
+    Guided backpropagation :cite:`Springenberg2014StrivingFS`.
+    """
+
     def __init__(
         self,
         use_inputs: bool = True,

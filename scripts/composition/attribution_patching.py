@@ -85,10 +85,15 @@ def split_kwargs(kwargs):
     return custom, plotly
 
 
+def move_inputs_to_device(inputs, device):
+    return {k: v.to(device) if torch.is_tensor(v) else v for k, v in inputs.items()}
+
+
 def embed_inputs(model, inputs):
     inputs_ids = inputs["input_ids"]
     inputs_embeds = model.transformer.wte(inputs_ids)
-    return {"inputs_embeds": inputs_embeds, "attention_mask": inputs["attention_mask"]}
+    attention_mask = inputs["attention_mask"].to(inputs_embeds.device)
+    return {"inputs_embeds": inputs_embeds, "attention_mask": attention_mask}
 
 
 def imshow(array, **kwargs):
@@ -162,11 +167,11 @@ def imshow(array, **kwargs):
 
 
 def run_activation_patching(
-    model, clean_inputs, corrupted_inputs, layer_map, metric_fn, progress_label="Activation patching"
+    model, clean_inputs, corrupted_inputs, layer_map, metric_fn, device, progress_label="Activation patching"
 ):
     results = []
-    inputs = TensorDict(**clean_inputs, batch_size=clean_inputs["input_ids"].shape[0])
-    inputs["patched"] = TensorDict(**corrupted_inputs, batch_size=clean_inputs["input_ids"].shape[0])
+    inputs = TensorDict(**clean_inputs, batch_size=clean_inputs["input_ids"].shape[0], device=device)
+    inputs["patched"] = TensorDict(**corrupted_inputs, batch_size=clean_inputs["input_ids"].shape[0], device=device)
     seq_len = clean_inputs["input_ids"].shape[1]
 
     n_layers = len(layer_map)
@@ -174,11 +179,7 @@ def run_activation_patching(
     progress_bar = tqdm(total=total_iterations, desc=progress_label, unit="patch")
 
     for layer_num in range(n_layers):
-        layer = (
-            layer_map[str(layer_num)]
-            .replace(f".{layer_num}.", f":{layer_num}:")
-            .replace(f".{layer_num}", f":{layer_num}:")
-        )
+        layer = layer_map[str(layer_num)]
         pos = 0
 
         def pos_patch_fn(module_key, output, output_to_patch, **kwargs):
@@ -246,16 +247,16 @@ def compute_correlations(activation_patching_results, attribution_results, metho
     correlations = []
 
     for module_idx in range(n_module_types):
-        ap_data = activation_patching_results[module_idx].flatten()
-        attr_data = attribution_results[module_idx].flatten()
-        corr, _ = pearsonr(ap_data.numpy(), attr_data.detach().numpy())
+        ap_data = activation_patching_results[module_idx].flatten().numpy()
+        attr_data = attribution_results[module_idx].flatten().cpu().detach().numpy()
+        corr, _ = pearsonr(ap_data, attr_data)
         correlations.append(corr)
 
     return np.array(correlations), module_names
 
 
-def plot_all_correlations(all_correlations, module_names, save_path):
-    """Create grouped bar chart for all correlation results."""
+def plot_correlations(mean_correlations, module_names, save_path, std_correlations=None):
+    """Create grouped bar chart for correlation results, with optional error bars."""
     plt.switch_backend("Agg")
     plt.rcParams.update({"font.size": 16})
     method_colors = {
@@ -273,25 +274,47 @@ def plot_all_correlations(all_correlations, module_names, save_path):
         "integrated_gradients": "Integrated Gradients",
     }
 
-    n_methods = len(all_correlations)
+    n_methods = len(mean_correlations)
     n_modules = len(module_names)
     fig, ax = plt.subplots(figsize=(14, 8))
     bar_width = 0.12
     group_width = bar_width * (n_methods + 1)
     x_pos = np.arange(n_modules) * group_width
-    for i, (method_name, correlations) in enumerate(all_correlations.items()):
+    for i, (method_name, mean_correlation) in enumerate(mean_correlations.items()):
         offset = (i - n_methods / 2 + 0.5) * bar_width
+        bar_kwargs = {}
+        method_std = None
+        if std_correlations is not None and method_name in std_correlations:
+            method_std = np.asarray(std_correlations[method_name])
+            bar_kwargs["yerr"] = method_std
+            bar_kwargs["capsize"] = 4
         ax.bar(
             x_pos + offset,
-            correlations,
+            mean_correlation,
             bar_width,
             label=method_labels[method_name],
             color=method_colors.get(method_name, f"C{i}"),
             alpha=0.8,
+            **bar_kwargs,
         )
 
-        for j, corr in enumerate(correlations):
-            ax.text(x_pos[j] + offset, corr + 0.02, f"{corr:.3f}", ha="center", va="bottom", fontsize=10, rotation=0)
+        for j, corr in enumerate(mean_correlation):
+            std_val = method_std[j] if method_std is not None else 0.0
+            label_offset = 0.02
+            if corr >= 0:
+                text_y = corr + std_val + label_offset
+                vert_align = "bottom"
+            else:
+                text_y = corr - std_val - label_offset
+                vert_align = "top"
+            ax.text(
+                x_pos[j] + offset,
+                text_y,
+                f"{corr:.3f}",
+                ha="center",
+                va=vert_align,
+                fontsize=10,
+            )
 
     ax.set_xlabel("Module Type")
     ax.set_ylabel("Pearson Correlation Coefficient")
@@ -306,19 +329,13 @@ def plot_all_correlations(all_correlations, module_names, save_path):
     plt.close()
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Attribution Patching with tdhook")
-    parser.add_argument("--model_name", default="gpt2", help="Model name to use")
-    parser.add_argument("--output_dir", default="results/attribution_patching", help="Output directory")
-    parser.add_argument("--device", default="cpu", help="Device to use")
-    args = parser.parse_args()
-
-    os.makedirs(args.output_dir, exist_ok=True)
-
+def run_experiment(model_name, device, output_dir):
+    """Run attribution patching experiment for a single model."""
     logger.info("Loading model and tokenizer...")
-    model = AutoModelForCausalLM.from_pretrained(args.model_name)
-    tokenizer = AutoTokenizer.from_pretrained(args.model_name)
-    model.to(args.device)
+    device = torch.device(device)
+    model = AutoModelForCausalLM.from_pretrained(model_name)
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model.to(device)
     model.eval()
 
     prompts = [
@@ -343,12 +360,18 @@ def main():
     ]
 
     clean_inputs = tokenizer(prompts, return_tensors="pt")
+    clean_inputs = move_inputs_to_device(clean_inputs, device)
     clean_tokens = clean_inputs["input_ids"]
     corrupted_tokens = clean_tokens[[(i + 1 if i % 2 == 0 else i - 1) for i in range(len(clean_tokens))]]
-    corrupted_inputs = {"input_ids": corrupted_tokens, "attention_mask": clean_inputs["attention_mask"]}
+    corrupted_inputs = {
+        "input_ids": corrupted_tokens,
+        "attention_mask": clean_inputs["attention_mask"],
+    }
+    corrupted_inputs = move_inputs_to_device(corrupted_inputs, device)
 
     answer_token_indices = torch.tensor(
         [[tokenizer.encode(answers[i][j])[0] for j in range(2)] for i in range(len(answers))],
+        device=device,
     )
 
     logger.info("Setting up activation caching...")
@@ -358,12 +381,12 @@ def main():
     caching_context = context.prepare(model, in_keys={k: k for k in clean_inputs}, out_keys=["output"])
 
     with caching_context as hooked_model:
-        shuttle = TensorDict(**clean_inputs, batch_size=clean_inputs["input_ids"].shape[0])
+        shuttle = TensorDict(**clean_inputs, batch_size=clean_inputs["input_ids"].shape[0], device=device)
         shuttle = hooked_model(shuttle)
         clean_cache = caching_context.cache.clone()
         clean_logits = shuttle["output", "logits"]
 
-        shuttle = TensorDict(**corrupted_inputs, batch_size=clean_inputs["input_ids"].shape[0])
+        shuttle = TensorDict(**corrupted_inputs, batch_size=clean_inputs["input_ids"].shape[0], device=device)
         shuttle = hooked_model(shuttle)
         corrupted_cache = caching_context.cache.clone()
         corrupted_logits = shuttle["output", "logits"]
@@ -431,9 +454,9 @@ def main():
             "clean_intermediate_keys": False,
             "use_inputs": False,
             "input_modules": [
-                *(mlp_map[k].replace(f".{k}.", f":{k}:") for k in mlp_map),
-                *(attn_map[k].replace(f".{k}.", f":{k}:") for k in attn_map),
-                *(resid_map[k].replace(f".{k}", f":{k}:") for k in resid_map),
+                *(mlp_map[k] for k in mlp_map),
+                *(attn_map[k] for k in attn_map),
+                *(resid_map[k] for k in resid_map),
             ],
             "cache_callback": callback,
             **method_kwargs,
@@ -447,10 +470,16 @@ def main():
         _corrupted_inputs = (
             embed_inputs(model, corrupted_inputs) if attribution_method == "integrated_gradients" else corrupted_inputs
         )
+        _clean_inputs = move_inputs_to_device(_clean_inputs, device)
+        _corrupted_inputs = move_inputs_to_device(_corrupted_inputs, device)
         with attribution_factory.prepare(
             model, in_keys={k: k for k in _clean_inputs}, out_keys=["output"]
         ) as hooked_model:
-            shuttle = TensorDict(**_corrupted_inputs, batch_size=_clean_inputs["attention_mask"].shape[0])
+            shuttle = TensorDict(
+                **_corrupted_inputs,
+                batch_size=_clean_inputs["attention_mask"].shape[0],
+                device=device,
+            )
             if attribution_method == "integrated_gradients":
                 shuttle[("baseline", "inputs_embeds")] = _clean_inputs["inputs_embeds"]
             shuttle = hooked_model(shuttle)
@@ -486,19 +515,21 @@ def main():
             zmax=1,
             zmin=-1,
             x=[f"{tokenizer.decode(tok)}_{i}" for i, tok in enumerate(clean_tokens[0])],
-            save_to=os.path.join(args.output_dir, f"{attribution_method}_patching_plot.pdf"),
+            save_to=os.path.join(output_dir, f"{attribution_method}_patching_plot_{model_name}.pdf"),
         )
 
         all_results[attribution_method] = attribution_results
 
     logger.info("Running activation patching...")
     resid_results = run_activation_patching(
-        model, clean_inputs, corrupted_inputs, resid_map, ioi_metric, "Residual Stream"
+        model, clean_inputs, corrupted_inputs, resid_map, ioi_metric, device, "Residual Stream"
     )
     attn_results = run_activation_patching(
-        model, clean_inputs, corrupted_inputs, attn_map, ioi_metric, "Attention Output"
+        model, clean_inputs, corrupted_inputs, attn_map, ioi_metric, device, "Attention Output"
     )
-    mlp_results = run_activation_patching(model, clean_inputs, corrupted_inputs, mlp_map, ioi_metric, "MLP Output")
+    mlp_results = run_activation_patching(
+        model, clean_inputs, corrupted_inputs, mlp_map, ioi_metric, device, "MLP Output"
+    )
 
     activation_patching_results = torch.stack([resid_results, attn_results, mlp_results], dim=0)
 
@@ -512,7 +543,7 @@ def main():
         zmax=1,
         zmin=-1,
         x=[f"{tokenizer.decode(tok)}_{i}" for i, tok in enumerate(clean_tokens[0])],
-        save_to=os.path.join(args.output_dir, "activation_patching_plot.pdf"),
+        save_to=os.path.join(output_dir, f"activation_patching_plot_{model_name}.pdf"),
     )
 
     logger.info("Computing correlations between activation patching and attribution methods...")
@@ -527,8 +558,45 @@ def main():
         logger.info(f"{method_name.upper()} correlations:")
         for i, corr in enumerate(correlations):
             logger.info(f"  {module_names[i]}: {corr:.3f}")
-    all_correlations_path = os.path.join(args.output_dir, "all_correlations_plot.pdf")
-    plot_all_correlations(all_correlations, module_names, all_correlations_path)
+    return all_correlations, module_names
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Attribution Patching with tdhook")
+    parser.add_argument("--output_dir", default="results/attribution_patching", help="Output directory")
+    parser.add_argument("--device", default="cpu", help="Device to use")
+    args = parser.parse_args()
+
+    os.makedirs(args.output_dir, exist_ok=True)
+
+    cross_model_correlations = []
+    module_names = None
+    for model_name in ["gpt2-large", "gpt2-medium", "gpt2"]:
+        all_correlations, current_module_names = run_experiment(model_name, args.device, args.output_dir)
+        all_correlations_path = os.path.join(args.output_dir, f"all_correlations_plot_{model_name}.pdf")
+        plot_correlations(all_correlations, current_module_names, all_correlations_path)
+        cross_model_correlations.append(all_correlations)
+
+        # Validate module_names consistency across models
+        if module_names is None:
+            module_names = current_module_names
+        elif module_names != current_module_names:
+            logger.warning(
+                f"Module names differ between models. Expected {module_names}, got {current_module_names} for {model_name}"
+            )
+
+    cross_model_mean_correlations = {}
+    cross_model_std_correlations = {}
+    if cross_model_correlations:
+        for method_name in cross_model_correlations[0]:
+            stacked = np.stack([corrs[method_name] for corrs in cross_model_correlations], axis=0)
+            cross_model_mean_correlations[method_name] = stacked.mean(axis=0)
+            cross_model_std_correlations[method_name] = stacked.std(axis=0)
+    cross_model_correlations_path = os.path.join(args.output_dir, "cross_model_correlations_plot.pdf")
+    if module_names is not None:
+        plot_correlations(
+            cross_model_mean_correlations, module_names, cross_model_correlations_path, cross_model_std_correlations
+        )
 
 
 if __name__ == "__main__":

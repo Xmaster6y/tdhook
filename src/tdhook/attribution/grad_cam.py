@@ -1,7 +1,3 @@
-"""
-Grad-CAM attribution
-"""
-
 from typing import Callable, Optional, List, Tuple, Dict
 from dataclasses import dataclass
 
@@ -19,6 +15,10 @@ class DimsConfig:
 
 
 class GradCAM(GradientAttribution):
+    """
+    Grad-CAM :cite:`Selvaraju2016GradCAMVE`.
+    """
+
     def __init__(
         self,
         modules_to_attribute: Optional[Dict[str, DimsConfig]],

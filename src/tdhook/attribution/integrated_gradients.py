@@ -1,7 +1,3 @@
-"""
-Integrated gradients
-"""
-
 import torch
 from typing import List, Optional, Callable, Dict
 from tensordict import TensorDict, merge_tensordicts
@@ -12,6 +8,10 @@ from tdhook._types import UnraveledKey
 
 
 class IntegratedGradients(GradientAttributionWithBaseline):
+    """
+    Integrated gradients :cite:`Sundararajan2017AxiomaticAF` and its conditional variant :cite:`Dhamdhere2018HowII`.
+    """
+
     def __init__(
         self,
         use_inputs: bool = True,

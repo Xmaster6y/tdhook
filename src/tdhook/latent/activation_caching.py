@@ -1,7 +1,3 @@
-"""
-Activation caching
-"""
-
 from typing import Callable, Optional, List
 
 from tensordict import TensorDict
@@ -12,6 +8,10 @@ from tdhook.hooks import MultiHookManager, HookFactory, HookDirection, MultiHook
 
 
 class ActivationCaching(HookingContextFactory):
+    """
+    Maximally activating samples :cite:`Chen2020ConceptWF` and attention visualisation :cite:`Abnar2020QuantifyingAF`.
+    """
+
     _hooking_context_class = HookingContextWithCache
 
     def __init__(
