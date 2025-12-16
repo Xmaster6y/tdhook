@@ -1,7 +1,3 @@
-"""
-Activation Maximisation
-"""
-
 from typing import List, Optional, Callable
 from tensordict import TensorDict
 from tensordict.nn import TensorDictModuleBase, TensorDictModule, TensorDictSequential
@@ -13,6 +9,10 @@ from tdhook._types import UnraveledKey
 
 
 class ActivationMaximisation(HookingContextFactory):
+    """
+    Activation maximisation :cite:`Mahendran2015VisualizingDC`.
+    """
+
     def __init__(
         self,
         modules_to_maximise: List[str],

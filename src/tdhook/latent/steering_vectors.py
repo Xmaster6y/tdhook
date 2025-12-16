@@ -1,7 +1,3 @@
-"""
-Steering Vectors
-"""
-
 from typing import Callable, Optional, List
 
 from tensordict import TensorDict
@@ -15,6 +11,10 @@ from tdhook.hooks import MutableWeakRef
 
 
 class SteeringVectors(HookingContextFactory):
+    """
+    Steering vectors :cite:`rimsky2023steering`.
+    """
+
     def __init__(
         self,
         modules_to_steer: List[str],

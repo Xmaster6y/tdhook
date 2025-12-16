@@ -1,7 +1,3 @@
-"""
-Pruning
-"""
-
 from typing import Callable, Optional, List, Dict, Tuple
 from torch import nn
 from tensordict.nn import TensorDictModule, TensorDictModuleBase
@@ -31,6 +27,10 @@ class PruningContext(HookingContext):
 
 
 class Pruning(HookingContextFactory):
+    """
+    Relevance-based pruning :cite:`Yeom2019PruningBE` and circuit pruning :cite:`Pochinkov2024DissectingLM`.
+    """
+
     _hooking_context_class = PruningContext
 
     def __init__(

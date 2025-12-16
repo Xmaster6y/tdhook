@@ -9,7 +9,7 @@ from tdhook._types import UnraveledKey
 
 class IntegratedGradients(GradientAttributionWithBaseline):
     """
-    Integrated Gradients :cite:`Sundararajan2017AxiomaticAF`
+    Integrated gradients :cite:`Sundararajan2017AxiomaticAF` and its conditional variant :cite:`Dhamdhere2018HowII`.
     """
 
     def __init__(

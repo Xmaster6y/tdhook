@@ -1,7 +1,3 @@
-"""
-Probing
-"""
-
 from typing import Callable, Optional, List, Protocol, Any, Dict, Type
 
 import numpy as np
@@ -25,6 +21,10 @@ class Probe(Protocol):
 
 
 class Probing(HookingContextFactory):
+    """
+    Linear probing :cite:`alain2018understanding` and concept activation vectors :cite:`kim2018interpretability`.
+    """
+
     default_classes_to_hook = (nn.Module,)
     default_classes_to_skip = (nn.ModuleList, nn.Sequential, TensorDictModuleBase)
 

@@ -1,7 +1,3 @@
-"""
-Adapters
-"""
-
 from typing import Callable, Optional, List, Dict, Tuple
 from torch import nn
 from tensordict import TensorDict
@@ -18,6 +14,10 @@ class HookedModuleWithAdapters(HookedModule):
 
 
 class Adapters(HookingContextFactory):
+    """
+    ROME :cite:`Meng2022LocatingAE`, sparse autoencoders :cite:`Cunningham2023SparseAF` and transcoders :cite:`Dunefsky2024TranscodersFI`.
+    """
+
     _hooked_module_class = HookedModuleWithAdapters
     _hooking_context_class = HookingContextWithCache
 

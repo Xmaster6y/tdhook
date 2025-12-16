@@ -1,7 +1,3 @@
-"""
-Saliency attribution
-"""
-
 from typing import List, Optional, Callable, Dict
 from tensordict import TensorDict
 import torch
@@ -11,6 +7,10 @@ from tdhook.attribution.gradient_helpers import GradientAttribution
 
 
 class Saliency(GradientAttribution):
+    """
+    Gradient attribution :cite:`Simonyan2013DeepIC` and its gradient-times-input variation :cite:`Shrikumar2016NotJA`.
+    """
+
     def __init__(
         self,
         use_inputs: bool = True,
