@@ -1,6 +1,10 @@
 [
-    {
-      "version": "dev",
-      "url": "https://tdhook.readthedocs.io/en/latest/"
-    }
-  ]
+  {
+    "version": "0.1.2",
+    "url": "https://tdhook.readthedocs.io/en/0.1.2/"
+  },
+  {
+    "version": "dev",
+    "url": "https://tdhook.readthedocs.io/en/latest/"
+  }
+]

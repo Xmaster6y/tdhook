@@ -1,4 +1,9 @@
-__version__ = "0.1.1-dev"  # TODO: use metadata instead
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    __version__ = version(__name__)
+except PackageNotFoundError:  # pragma: no cover
+    __version__ = "unknown"  # pragma: no cover
 
 __all__ = [
     # Core
