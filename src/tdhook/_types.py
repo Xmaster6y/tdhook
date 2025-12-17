@@ -1,5 +1,5 @@
 class UnraveledMeta(type):
-    """Meta class for UnraveledKey."""
+    """Metaclass for UnraveledKey."""
 
     def __instancecheck__(self, instance):
         return isinstance(instance, str) or (
