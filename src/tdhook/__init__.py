@@ -7,7 +7,6 @@ except PackageNotFoundError:
 
 __all__ = [
     # Core
-    "artifacts",
     "contexts",
     "hooks",
     "metrics",

@@ -1,5 +1,5 @@
 """
-Auto interpretability
+Module for Auto interpretability methods.
 """
 
 __all__ = []

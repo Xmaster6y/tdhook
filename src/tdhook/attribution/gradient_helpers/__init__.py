@@ -1,5 +1,5 @@
 """
-Gradient attribution methods.
+Gradient attribution helpers.
 """
 
 from .common import GradientAttribution, GradientAttributionWithBaseline
