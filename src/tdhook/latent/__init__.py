@@ -1,5 +1,5 @@
 """
-Latents
+Module for latent methods.
 """
 
 from .activation_caching import ActivationCaching

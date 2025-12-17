@@ -1,7 +1,3 @@
-"""
-Gradient attribution
-"""
-
 from abc import ABCMeta, abstractmethod
 from typing import Callable, Optional, Tuple, List, Dict
 
@@ -17,6 +13,10 @@ from tdhook.hooks import MultiHookHandle, MutableWeakRef, TensorDictRef
 
 
 class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
+    """
+    Base class for gradient attribution.
+    """
+
     def __init__(
         self,
         use_inputs: bool = True,
@@ -220,6 +220,10 @@ class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
 
 
 class GradientAttributionWithBaseline(GradientAttribution):
+    """
+    Gradient attribution with baseline.
+    """
+
     def __init__(
         self,
         *args,

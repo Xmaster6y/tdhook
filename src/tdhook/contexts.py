@@ -1,7 +1,3 @@
-"""
-Context
-"""
-
 from contextlib import contextmanager
 from contextlib import ExitStack
 from typing import List, Optional, Generator, Dict
@@ -15,6 +11,10 @@ from tdhook._types import UnraveledKey
 
 
 class HookingContext:
+    """
+    Base class for hooking contexts.
+    """
+
     def __init__(
         self,
         factory: "HookingContextFactory",
@@ -93,6 +93,10 @@ class HookingContext:
 
 
 class HookingContextWithCache(HookingContext):
+    """
+    Hooking context with cache.
+    """
+
     def __init__(self, *args, cache: Optional[TensorDict] = None, clear_cache: bool = True, **kwargs):
         super().__init__(*args, **kwargs)
         self._cache = TensorDict() if cache is None else cache
@@ -182,6 +186,10 @@ class HookingContextFactory:
 
 
 class CompositeHookingContextFactory(HookingContextFactory):
+    """
+    Composite hooking context factory.
+    """
+
     def __init__(self, *contexts: HookingContextFactory):
         super().__init__()
         self._contexts = contexts

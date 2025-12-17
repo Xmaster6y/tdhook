@@ -1,7 +1,3 @@
-"""
-Hooks
-"""
-
 import weakref
 from typing import Callable, Any, Optional, List, Literal, Protocol, Generic, TypeVar, Type, Tuple
 import inspect
@@ -160,6 +156,10 @@ class RemovableHandleProtocol(Protocol):
 
 
 class MultiHookHandle:
+    """
+    Handle for multiple hooks.
+    """
+
     def __init__(self, handles: Optional[List[RemovableHandleProtocol]] = None):
         self._handles = handles or []
 
@@ -180,6 +180,10 @@ class MultiHookHandle:
 
 
 class MultiHookManager:
+    """
+    Manager for multiple hooks.
+    """
+
     def __init__(
         self,
         pattern: Optional[str] = None,
@@ -226,6 +230,10 @@ class MultiHookManager:
 
 
 class MutableWeakRef(Generic[T]):
+    """
+    Weak reference to a mutable object.
+    """
+
     def __init__(self, referee: T):
         self._ref = weakref.ref(referee)
 
@@ -237,6 +245,10 @@ class MutableWeakRef(Generic[T]):
 
 
 class TensorDictRef:
+    """
+    Reference to a TensorDict.
+    """
+
     def __init__(self, td: Optional[TensorDict]):
         self._td = td
 
@@ -248,6 +260,10 @@ class TensorDictRef:
 
 
 class CacheProxy:
+    """
+    Proxy for a cache.
+    """
+
     def __init__(self, key: str, cache: TensorDict | MutableWeakRef[TensorDict] | TensorDictRef):
         self._key = key
         self._cache = weakref.ref(cache)
@@ -262,12 +278,20 @@ class CacheProxy:
 
 
 class EarlyStoppingException(Exception):
+    """
+    Exception for early stopping.
+    """
+
     def __init__(self, key: str):
         self._key = key
         super().__init__(f"Early stopping triggered for key {key}")
 
 
 class HookFactory:
+    """
+    Factory for creating hooks.
+    """
+
     @staticmethod
     def _check_callback_signature(callback: Callable, expected_param_names: set[str]):
         """Check callback signature matches expected parameter names."""
