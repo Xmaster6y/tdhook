@@ -1,9 +1,6 @@
-"""
-Various types.
-"""
-
-
 class UnraveledMeta(type):
+    """Meta class for UnraveledKey."""
+
     def __instancecheck__(self, instance):
         return isinstance(instance, str) or (
             isinstance(instance, tuple) and len(instance) and all(isinstance(subkey, str) for subkey in instance)

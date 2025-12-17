@@ -1,8 +1,5 @@
 """
-Weights module for tdhook
-
-Weight analysis and adapters for RL interpretability:
-- Task vectors
+Module for weight analysis methods.
 """
 
 from .adapters import Adapters

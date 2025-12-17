@@ -1,7 +1,3 @@
-"""
-HookedModule
-"""
-
 from torch.utils.hooks import RemovableHandle
 from tensordict.nn import TensorDictModule, TensorDictModuleWrapper, TensorDictModuleBase
 from tensordict import TensorDict, NonTensorData
@@ -49,6 +45,10 @@ def flatten_select_reshape_call(
 
 
 class FunctionModule(TensorDictModuleBase):
+    """
+    Wrapper for a function to be used as a module.
+    """
+
     def __init__(
         self, td_fn: Callable[[TensorDict], TensorDict], in_keys: List[UnraveledKey], out_keys: List[UnraveledKey]
     ):
@@ -69,6 +69,10 @@ class FunctionModule(TensorDictModuleBase):
 
 
 class ModuleCall(TensorDictModuleBase):
+    """
+    Wrapper to manage module calls.
+    """
+
     def __init__(
         self,
         td_module: TensorDictModuleBase,
@@ -109,6 +113,10 @@ class ModuleCall(TensorDictModuleBase):
 
 
 class ModuleCallWithCache(TensorDictModuleBase):
+    """
+    Wrapper to manage module calls with cache.
+    """
+
     def __init__(
         self,
         td_module: TensorDictModuleBase,
@@ -173,6 +181,10 @@ class ModuleCallWithCache(TensorDictModuleBase):
 
 
 class PGDModule(TensorDictModuleBase):
+    """
+    Wrapper to manage PGD module calls.
+    """
+
     def __init__(
         self,
         td_module: TensorDictModuleBase,
@@ -227,6 +239,10 @@ class PGDModule(TensorDictModuleBase):
 
 
 class IntermediateKeysCleaner(TensorDictModuleBase):
+    """
+    Wrapper to clean intermediate keys.
+    """
+
     def __init__(self, intermediate_keys: List[UnraveledKey]):
         super().__init__()
         self.in_keys = intermediate_keys
@@ -246,6 +262,10 @@ class IntermediateKeysCleaner(TensorDictModuleBase):
 
 
 class HookedModuleRun:
+    """
+    Context manager to execute module runs.
+    """
+
     def __init__(
         self,
         module: "HookedModule",
@@ -406,6 +426,10 @@ class HookedModuleRun:
 
 
 class HookedModule(TensorDictModuleWrapper):
+    """
+    Wrapper to enhance a module with hooking capabilities.
+    """
+
     def __init__(
         self,
         td_module: TensorDictModule,
