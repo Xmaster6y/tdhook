@@ -236,3 +236,30 @@ class TestCompositeTensorDictModule:
         """Composite rejects contexts overriding _spawn_hooked_module."""
         with pytest.raises(ValueError):
             CompositeHookingContextFactory(BadSpawnFactory())
+
+
+class TestDirectHookedModuleUsage:
+    """Tests for using prepare(return_context=False) to get hooked module directly."""
+
+    def test_direct_hooked_module_works_and_restores(self, default_test_model):
+        """Hooked module obtained directly works and can be restored."""
+        input = torch.randn(2, 3, 10)
+        original_output = default_test_model(input)
+        factory = Context1()
+        hooked_module = factory.prepare(default_test_model, return_context=False)
+
+        data = TensorDict({"input": input}, batch_size=[2, 3])
+        hooked_module(data)
+        assert torch.allclose(data["output"], original_output + 1)
+
+        hooked_module.restore()
+        assert not hooked_module.hooking_context._in_context
+
+    def test_restore_raises_when_managed_by_context_manager(self, default_test_model):
+        """restore() raises error when context is managed by context manager."""
+        factory = Context1()
+        with factory.prepare(default_test_model) as hooked_module:
+            with pytest.raises(
+                RuntimeError, match="Cannot call restore\\(\\) when context is managed by a context manager"
+            ):
+                hooked_module.restore()
