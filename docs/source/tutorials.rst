@@ -37,8 +37,26 @@ Tutorials
             </div>
          </div>
 
+   .. grid-item-card::
+      :link: notebooks/tutorials/chess-value-saliency.ipynb
+      :class-card: surface
+      :class-body: surface
+
+      .. raw:: html
+
+         <div class="d-flex align-items-center">
+            <div class="d-flex justify-content-center" style="min-width: 50px; margin-right: 20px; height: 100%;">
+               <i class="fa-solid fa-chess fa-2x"></i>
+            </div>
+            <div>
+               <h5 class="card-title">Chess Value Saliency</h5>
+               <p class="card-text">Compute attribution maps for chess model predictions using saliency methods.</p>
+            </div>
+         </div>
+
 .. toctree::
    :hidden:
    :maxdepth: 2
 
    notebooks/tutorials/torchrl-ppo.ipynb
+   notebooks/tutorials/chess-value-saliency.ipynb
