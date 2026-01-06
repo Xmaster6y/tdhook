@@ -488,10 +488,8 @@ class HookedModule(TensorDictModuleWrapper):
         prepend: bool = False,
         relative: bool = True,
     ):
-        if relative:
-            root = resolve_submodule_path(self, self._relative_path)
-        else:
-            root = self
+        root = resolve_submodule_path(self, self._relative_path) if relative else self
+
         submodule = resolve_submodule_path(root, key)
         if isinstance(submodule, nn.ModuleList):
             warnings.warn(f"You are hooking a ModuleList ({key}), which will never be executed.")
@@ -506,14 +504,13 @@ class HookedModule(TensorDictModuleWrapper):
         prepend: bool = False,
         relative: bool = True,
     ) -> RemovableHandle:
-        handle = self.register_submodule_hook(
+        return self.register_submodule_hook(
             key=module_key,
             hook=HookFactory.make_setting_hook(value, callback=callback, direction=direction),
             direction=direction,
             prepend=prepend,
             relative=relative,
         )
-        return handle
 
     def get(
         self,
@@ -561,12 +558,11 @@ class HookedModule(TensorDictModuleWrapper):
         return self.get(*args, **kwargs)
 
     def stop(self, key: str) -> None:
-        handle = self.register_submodule_hook(
+        return self.register_submodule_hook(
             key=key,
             hook=HookFactory.make_stopping_hook(key),
             direction="fwd",
         )
-        return handle
 
     def forward(self, *args, **kwargs):
         if self._hooking_context is not None and not self._hooking_context._in_context:
