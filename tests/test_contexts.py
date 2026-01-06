@@ -17,22 +17,20 @@ from tdhook._types import UnraveledKey
 
 class Context1(HookingContextFactory):
     def _hook_module(self, module: HookedModule) -> MultiHookHandle:
-        handle = module.register_submodule_hook(
+        return module.register_submodule_hook(
             key="",
             hook=lambda module, args, output: output + 1,
             direction="fwd",
         )
-        return handle
 
 
 class Context2(HookingContextFactory):
     def _hook_module(self, module: HookedModule) -> MultiHookHandle:
-        handle = module.register_submodule_hook(
+        return module.register_submodule_hook(
             key="",
             hook=lambda module, args, output: output * 2,
             direction="fwd",
         )
-        return handle
 
 
 class PrepFlagFactory(HookingContextFactory):
