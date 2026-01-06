@@ -586,3 +586,16 @@ class HookedModule(TensorDictModuleWrapper):
             raise RuntimeError("No hooking context provided to this module")
         with self._hooking_context.disable() as raw_module:
             yield raw_module
+
+    def restore(self):
+        """
+        Restore the module to its original state.
+        This is useful when using prepare(return_context=False) instead of the context manager.
+        """
+        if self._hooking_context is None:
+            raise RuntimeError("No hooking context provided to this module")
+        if not self._hooking_context._in_context:
+            raise RuntimeError("Context is not active")
+        if self._hooking_context._managed_by_context_manager:
+            raise RuntimeError("Cannot call restore() when context is managed by a context manager. ")
+        self._hooking_context.__exit__(None, None, None)
