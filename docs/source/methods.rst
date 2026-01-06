@@ -54,9 +54,27 @@ Methods
             </div>
          </div>
 
+   .. grid-item-card::
+      :link: notebooks/methods/linear-probing.ipynb
+      :class-card: surface
+      :class-body: surface
+
+      .. raw:: html
+
+         <div class="d-flex align-items-center">
+            <div class="d-flex justify-content-center" style="min-width: 50px; margin-right: 20px; height: 100%;">
+               <i class="fa-solid fa-search fa-2x"></i>
+            </div>
+            <div>
+               <h5 class="card-title">Linear Probing</h5>
+               <p class="card-text">Train classifiers on model representations to understand what information is encoded.</p>
+            </div>
+         </div>
+
 .. toctree::
    :hidden:
    :maxdepth: 2
 
    notebooks/methods/integrated-gradients.ipynb
    notebooks/methods/steering-vectors.ipynb
+   notebooks/methods/linear-probing.ipynb
