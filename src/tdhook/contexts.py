@@ -114,10 +114,13 @@ class HookingContextWithCache(HookingContext):
     def clear(self):
         self._cache.clear()
 
-    def __enter__(self):
+    def _enter(self, managed_by_context_manager: bool = True):
         if self._clear_cache:
             self.clear()
-        return super().__enter__()
+        return super()._enter(managed_by_context_manager=managed_by_context_manager)
+
+    def __enter__(self):
+        return self._enter(managed_by_context_manager=True)
 
 
 class HookingContextFactory:
