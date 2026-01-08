@@ -590,3 +590,40 @@ class TestModuleRepr:
         td_module = HookedModule.from_module(default_test_model, in_keys=["input"], out_keys=["output"])
         pgd_module = PGDModule(td_module=td_module, alpha=0.1, n_steps=5)
         self._assert_repr_contains(repr(pgd_module), "PGDModule", "td_module", "in_keys", "out_keys")
+
+
+class TestRestore:
+    """Tests for the restore() method of HookedModule."""
+
+    def test_restore_raises_when_no_hooking_context(self, get_model):
+        """restore() raises error when no hooking context is provided."""
+        hooked_module = HookedModule.from_module(get_model(), in_keys=["input"], out_keys=["output"])
+        with pytest.raises(RuntimeError, match="No hooking context provided to this module"):
+            hooked_module.restore()
+
+    def test_restore_raises_when_context_not_active(self, get_model):
+        """restore() raises error when context is not active."""
+        factory = HookingContextFactory()
+        context = factory.prepare(get_model())
+        hooked_module = context._enter(managed_by_context_manager=False)
+        context.__exit__(None, None, None)
+        with pytest.raises(RuntimeError, match="Context is not active"):
+            hooked_module.restore()
+
+    def test_restore_raises_when_managed_by_context_manager(self, get_model):
+        """restore() raises error when context is managed by context manager."""
+        factory = HookingContextFactory()
+        with factory.prepare(get_model()) as hooked_module:
+            with pytest.raises(
+                RuntimeError, match="Cannot call restore\\(\\) when context is managed by a context manager"
+            ):
+                hooked_module.restore()
+
+    def test_restore_succeeds_when_not_managed_by_context_manager(self, get_model):
+        """restore() succeeds when using prepare(return_context=False)."""
+        factory = HookingContextFactory()
+        hooked_module = factory.prepare(get_model(), return_context=False)
+        assert hooked_module.hooking_context._in_context
+        assert not hooked_module.hooking_context._managed_by_context_manager
+        hooked_module.restore()
+        assert not hooked_module.hooking_context._in_context

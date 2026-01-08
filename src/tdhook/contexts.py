@@ -1,6 +1,6 @@
 from contextlib import contextmanager
 from contextlib import ExitStack
-from typing import List, Optional, Generator, Dict
+from typing import List, Optional, Generator, Dict, overload, Literal
 from torch import nn
 from tensordict.nn import TensorDictModuleBase, TensorDictModule
 from tensordict import TensorDict
@@ -42,11 +42,13 @@ class HookingContext:
 
         self._in_keys = self._module.in_keys
         self._out_keys = self._module.out_keys
+        self._managed_by_context_manager = False
 
-    def __enter__(self):
+    def _enter(self, managed_by_context_manager: bool = True):
         if self._in_context:
             raise RuntimeError("Cannot enter context twice")
         self._in_context = True
+        self._managed_by_context_manager = managed_by_context_manager
 
         working_module = self._module
         with ExitStack() as stack:
@@ -58,6 +60,9 @@ class HookingContext:
         self._hooked_module = self._spawn(prep_module, self, self._extra_relative_path)
         self._handle = self._hook(self._hooked_module)
         return self._hooked_module
+
+    def __enter__(self):
+        return self._enter(managed_by_context_manager=True)
 
     def __exit__(self, exc_type, exc_value, traceback):
         self._handle.remove()
@@ -109,10 +114,13 @@ class HookingContextWithCache(HookingContext):
     def clear(self):
         self._cache.clear()
 
-    def __enter__(self):
+    def _enter(self, managed_by_context_manager: bool = True):
         if self._clear_cache:
             self.clear()
-        return super().__enter__()
+        return super()._enter(managed_by_context_manager=managed_by_context_manager)
+
+    def __enter__(self):
+        return self._enter(managed_by_context_manager=True)
 
 
 class HookingContextFactory:
@@ -127,14 +135,46 @@ class HookingContextFactory:
         self._hooking_context_kwargs = {}
         self._hooked_module_kwargs = {}
 
+    @overload
     def prepare(
         self,
         module: nn.Module,
         in_keys: Optional[List[UnraveledKey] | Dict[UnraveledKey, str]] = None,
         out_keys: Optional[List[UnraveledKey]] = None,
-    ) -> "HookingContext":
+        *,
+        return_context: Literal[True] = True,
+    ) -> "HookingContext": ...
+
+    @overload
+    def prepare(
+        self,
+        module: nn.Module,
+        in_keys: Optional[List[UnraveledKey] | Dict[UnraveledKey, str]] = None,
+        out_keys: Optional[List[UnraveledKey]] = None,
+        *,
+        return_context: Literal[False],
+    ) -> HookedModule: ...
+
+    def prepare(
+        self,
+        module: nn.Module,
+        in_keys: Optional[List[UnraveledKey] | Dict[UnraveledKey, str]] = None,
+        out_keys: Optional[List[UnraveledKey]] = None,
+        *,
+        return_context: bool = True,
+    ) -> "HookingContext | HookedModule":
         """
         Prepare the module for execution.
+
+        Args:
+            module: The module to prepare.
+            in_keys: Optional input keys.
+            out_keys: Optional output keys.
+            return_context: If True (default), returns a context manager. If False, returns the hooked module directly.
+
+        Returns:
+            If return_context is True, returns a HookingContext that can be used as a context manager.
+            If return_context is False, returns the HookedModule directly (context is automatically entered).
         """
         if isinstance(module, TensorDictModuleBase):
             if in_keys is not None:
@@ -150,7 +190,12 @@ class HookingContextFactory:
                     if key not in module.out_keys:
                         raise ValueError(f"Key {key} not in module.out_keys")
 
-        return self._hooking_context_class(self, module, in_keys, out_keys, **self._hooking_context_kwargs)
+        context = self._hooking_context_class(self, module, in_keys, out_keys, **self._hooking_context_kwargs)
+
+        if return_context:
+            return context
+        else:
+            return context._enter(managed_by_context_manager=False)
 
     def _prepare_module(
         self,

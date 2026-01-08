@@ -16,9 +16,12 @@ class PruningContext(HookingContext):
         super().__init__(*args, **kwargs)
         self._old_weights = None
 
-    def __enter__(self):
+    def _enter(self, managed_by_context_manager: bool = True):
         self._old_weights = TensorDict.from_module(self._module).clone()
-        return super().__enter__()
+        return super()._enter(managed_by_context_manager=managed_by_context_manager)
+
+    def __enter__(self):
+        return self._enter(managed_by_context_manager=True)
 
     def __exit__(self, exc_type, exc_value, traceback):
         super().__exit__(exc_type, exc_value, traceback)
