@@ -1,11 +1,23 @@
-cff-version: 0.1.0
-title: tdhook
+cff-version: 1.2.0
+message: If you use this software, please cite it as below.
 type: software
+title: "tdhook"
 authors:
-  - name: Yoann Poupart
-repository-code: 'https://github.com/Xmaster6y/tdhook'
-repository-artifact: 'https://github.com/Xmaster6y/tdhook/releases/'
+  - family-names: Poupart
+    given-names: Yoann
+url: "https://github.com/Xmaster6y/tdhook"
+repository-code: "https://github.com/Xmaster6y/tdhook"
+repository-artifact: "https://github.com/Xmaster6y/tdhook/releases/"
 keywords:
   - reinforcement learning (RL)
   - explainable AI (XAI)
 license: MIT
+preferred-citation:
+  type: article
+  title: "TDHook: A Lightweight Framework for Interpretability"
+  authors:
+    - family-names: Poupart
+      given-names: Yoann
+  journal: "arXiv preprint arXiv:2509.25475"
+  year: 2025
+  url: "https://arxiv.org/abs/2509.25475"

@@ -1,6 +1,6 @@
 <img src="https://raw.githubusercontent.com/Xmaster6y/tdhook/refs/heads/main/docs/source/_static/images/tdhook-logo.png" alt="logo" width="200"/>
 
-# tdhook 🤖🪝
+# `tdhook` 🤖🪝
 
 [![Documentation](https://img.shields.io/badge/Documentation-blue.svg)](https://tdhook.readthedocs.io)
 [![tdhook](https://img.shields.io/pypi/v/tdhook?color=purple)](https://pypi.org/project/tdhook/)
@@ -44,10 +44,24 @@ To dig deeper, see the [documentation](https://tdhook.readthedocs.io).
 - [Integrated Gradients](https://tdhook.readthedocs.io/en/latest/notebooks/methods/integrated-gradients.html): [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Xmaster6y/tdhook/blob/main/docs/source/notebooks/methods/integrated-gradients.ipynb)
 - [Steering Vectors](https://tdhook.readthedocs.io/en/latest/notebooks/methods/steering-vectors.html): [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Xmaster6y/tdhook/blob/main/docs/source/notebooks/methods/steering-vectors.ipynb)
 
-## Python Config
+## Config
 
-Using `uv` to manage python dependencies and run scripts.
+This project uses [`uv`](https://docs.astral.sh/uv/) to manage python dependencies and run scripts, as well as [`just`](https://github.com/casey/just) to run commands.
 
-## Scripts
+## Citation
 
-This project uses [Just](https://github.com/casey/just) to manage scripts, refer to their instructions for installation.
+If you're using `tdhook` in your research, please cite it using the following BibTeX entry:
+```
+@misc{poupart2025tdhooklightweightframeworkinterpretability,
+      title={TDHook: A Lightweight Framework for Interpretability},
+      author={Yoann Poupart},
+      year={2025},
+      eprint={2509.25475},
+      archivePrefix={arXiv},
+      primaryClass={cs.AI},
+      url={https://arxiv.org/abs/2509.25475},
+}
+```
+
+## License
+`tdhook` is licensed under the MIT License. See [LICENSE](./LICENSE) for details.
