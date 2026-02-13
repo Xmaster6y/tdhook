@@ -99,6 +99,11 @@ class TestTwoNnDimensionEstimator:
         with pytest.raises(ValueError, match="At least 3 points"):
             run_estimator(torch.randn(2, 5))
 
+    def test_duplicate_points_raises(self, run_estimator):
+        """Test that all-duplicate points raises."""
+        with pytest.raises(ValueError, match="At least 3 valid points"):
+            run_estimator(torch.ones(5, 3))
+
     def test_determinism(self, run_estimator):
         """Test that same input yields same output."""
         torch.manual_seed(123)

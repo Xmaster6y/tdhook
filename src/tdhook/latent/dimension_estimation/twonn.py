@@ -78,22 +78,19 @@ def _twonn(data: torch.Tensor, eps: float) -> tuple[torch.Tensor, torch.Tensor, 
     r2 = sorted_dist[:, 1]
 
     valid = torch.isfinite(r1) & torch.isfinite(r2)
-    if valid.sum() < 3:
-        raise ValueError("Too many duplicate or degenerate points for Two NN dimension estimation")
+    N_valid = valid.sum().item()
+    if N_valid < 3:
+        raise ValueError("At least 3 valid points required for Two NN dimension estimation")
 
     mu = (r2 / r1)[valid]
-    N_valid = mu.shape[0]
-
     sorted_indices = torch.argsort(mu)
     mu_sorted = mu[sorted_indices]
 
-    # Empirical CDF F = rank/N; exclude F=1 to avoid log(0)
+    # Empirical CDF F = rank/N; exclude F=1 to avoid log(0), so len(x) = N_valid - 1
     rank_1based = torch.arange(1, N_valid, device=data.device, dtype=data.dtype)
     one_minus_F = 1 - rank_1based / N_valid
     x = torch.log(mu_sorted[:-1])
     y = -torch.log(one_minus_F)
-    if len(x) < 3:
-        raise ValueError("Insufficient valid points for linear fit")
 
     x_col = x.unsqueeze(1)
     d = torch.linalg.lstsq(x_col, y.unsqueeze(1), rcond=None, driver=None).solution.squeeze()
