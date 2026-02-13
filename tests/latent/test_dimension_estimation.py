@@ -7,7 +7,24 @@ import torch
 from sklearn.metrics import r2_score
 from tensordict import TensorDict
 
-from tdhook.latent.dimension_estimation import TwoNnDimensionEstimator
+from tdhook.latent.dimension_estimation import LocalKnnDimensionEstimator, TwoNnDimensionEstimator
+
+
+@pytest.fixture
+def plane_data():
+    """2D manifold embedded in 10D (last 8 dims zero)."""
+    torch.manual_seed(42)
+    data = torch.randn(100, 10)
+    data[:, 2:] = 0
+    return data
+
+
+@pytest.fixture
+def circle_data():
+    """1D manifold (circle) embedded in 2D."""
+    torch.manual_seed(42)
+    theta = torch.rand(100) * 2 * torch.pi
+    return torch.stack([torch.cos(theta), torch.sin(theta)], dim=1)
 
 
 @pytest.fixture
@@ -57,19 +74,15 @@ class TestTwoNnDimensionEstimator:
         # y ≈ d * x (through origin), so slope of regression is d
         assert d > 0
 
-    def test_known_dimension_2d(self, run_estimator):
+    def test_known_dimension_2d(self, run_estimator, plane_data):
         """Test on 2D manifold embedded in higher space."""
-        data = torch.randn(100, 10)
-        data[:, 2:] = 0
-        result = run_estimator(data)
+        result = run_estimator(plane_data)
         d = result["dimension"].item()
         assert 1.5 < d < 2.5
 
-    def test_known_dimension_circle(self, run_estimator):
+    def test_known_dimension_circle(self, run_estimator, circle_data):
         """Test on 1D manifold (circle) embedded in 2D."""
-        theta = torch.rand(100) * 2 * torch.pi
-        data = torch.stack([torch.cos(theta), torch.sin(theta)], dim=1)
-        result = run_estimator(data, return_xy=True)
+        result = run_estimator(circle_data, return_xy=True)
         d = result["dimension"].item()
         x, y = result["dimension_x"].numpy(), result["dimension_y"].numpy()
         r2 = r2_score(y, d * x)
@@ -119,4 +132,103 @@ class TestTwoNnDimensionEstimator:
         assert "TwoNnDimensionEstimator" in r
         assert "in_keys=['data']" in r
         assert "out_keys=['dimension']" in r
+        assert "eps=" in r
+
+
+@pytest.fixture
+def run_local_knn_estimator():
+    torch.manual_seed(42)
+
+    def _run(data, k=2, in_key="data", batch_size=None, **estimator_kwargs):
+        if batch_size is None:
+            batch_size = [] if data.ndim == 2 else data.shape[:-2]
+        td = TensorDict({in_key: data}, batch_size=batch_size)
+        return LocalKnnDimensionEstimator(k=k, in_key=in_key, **estimator_kwargs)(td)
+
+    return _run
+
+
+class TestLocalKnnDimensionEstimator:
+    """Test the LocalKnnDimensionEstimator class."""
+
+    def test_default_keys(self, run_local_knn_estimator):
+        """Test with default in_key and out_key."""
+        data = torch.randn(50, 10)
+        result = run_local_knn_estimator(data, k=2)
+        assert "dimension" in result
+        assert result["dimension"].shape == (50,)
+        assert result["dimension"].dtype in (torch.float32, torch.float64)
+        valid = torch.isfinite(result["dimension"])
+        assert valid.sum() > 0
+        assert (result["dimension"][valid] > 0).all()
+
+    def test_custom_keys(self, run_local_knn_estimator):
+        """Test with custom in_key and out_key."""
+        data = torch.randn(50, 8)
+        result = run_local_knn_estimator(data, k=2, in_key="linear2", out_key="intrinsic_dim")
+        assert "intrinsic_dim" in result
+        assert "linear2" in result
+        assert result["intrinsic_dim"].shape == (50,)
+
+    def test_output_shape(self, run_local_knn_estimator):
+        """Test output shape (N,) for (N, D) input."""
+        data = torch.randn(100, 5)
+        result = run_local_knn_estimator(data, k=3)
+        assert result["dimension"].shape == (100,)
+
+    def test_known_dimension_2d(self, run_local_knn_estimator, plane_data):
+        """Test on 2D manifold embedded in higher space."""
+        result = run_local_knn_estimator(plane_data, k=5)
+        d = result["dimension"]
+        valid = torch.isfinite(d)
+        mean_d = d[valid].mean().item()
+        assert 1.0 < mean_d < 5.0
+
+    def test_known_dimension_circle(self, run_local_knn_estimator, circle_data):
+        """Test on 1D manifold (circle) embedded in 2D."""
+        result = run_local_knn_estimator(circle_data, k=5)
+        d = result["dimension"]
+        valid = torch.isfinite(d)
+        mean_d = d[valid].mean().item()
+        assert 0.3 < mean_d < 2.5
+
+    @pytest.mark.parametrize(
+        "shape",
+        [(1, 10, 8), (5, 10, 8), (2, 3, 10, 4)],
+        ids=["1x10x8", "5x10x8", "2x3x10x4"],
+    )
+    def test_batch_shape_preservation(self, run_local_knn_estimator, shape):
+        """Test that (..., N, D) preserves batch shape, output is (..., N)."""
+        data = torch.randn(*shape)
+        batch_size = shape[:-2]
+        N = shape[-2]
+        result = run_local_knn_estimator(data, k=2, batch_size=batch_size)
+        assert result["dimension"].shape == (*batch_size, N)
+
+    def test_too_few_points_raises(self, run_local_knn_estimator):
+        """Test that N < 2k+1 raises."""
+        with pytest.raises(ValueError, match="At least 2k\\+1 points"):
+            run_local_knn_estimator(torch.randn(4, 5), k=2)  # 4 < 2*2+1
+
+    def test_k_validation(self):
+        """Test that k < 1 raises."""
+        with pytest.raises(ValueError, match="k must be at least 1"):
+            LocalKnnDimensionEstimator(k=0)
+
+    def test_determinism(self, run_local_knn_estimator):
+        """Test that same input yields same output."""
+        torch.manual_seed(42)
+        data = torch.randn(80, 6)
+        r1 = run_local_knn_estimator(data.clone(), k=2)["dimension"]
+        r2 = run_local_knn_estimator(data.clone(), k=2)["dimension"]
+        assert torch.allclose(r1, r2, equal_nan=True)
+
+    def test_repr(self):
+        """Test __repr__ includes class name, in_keys, out_keys, k, and eps."""
+        est = LocalKnnDimensionEstimator(k=3)
+        r = repr(est)
+        assert "LocalKnnDimensionEstimator" in r
+        assert "in_keys=['data']" in r
+        assert "out_keys=['dimension']" in r
+        assert "k=3" in r
         assert "eps=" in r
