@@ -1,5 +1,3 @@
-"""Local intrinsic dimension estimation via k-nearest neighbors."""
-
 from textwrap import indent
 from typing import Literal, Union
 
@@ -19,7 +17,7 @@ def _resolve_k(k: Union[int, Literal["auto"]], n: int) -> int:
 
 class LocalKnnDimensionEstimator(TensorDictModuleBase):
     """
-    Local intrinsic dimension estimation via k-NN distances.
+    Local intrinsic dimension estimation via k-NN distances :cite:`farahmand2007manifold`.
 
     For each point x, d(x) = ln(2) / ln(R2k/Rk), where Rk and R2k are distances
     to the k-th and 2k-th nearest neighbors respectively.
