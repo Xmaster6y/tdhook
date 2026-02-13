@@ -9,39 +9,43 @@ from tensordict import TensorDict
 from tdhook.latent.dimension_estimation import TwoNnDimensionEstimator
 
 
+@pytest.fixture
+def run_estimator():
+    torch.manual_seed(42)
+
+    def _run(data, in_key="data", batch_size=None, **estimator_kwargs):
+        if batch_size is None:
+            batch_size = [] if data.ndim == 2 else list(data.shape[:-2])
+        td = TensorDict({in_key: data}, batch_size=batch_size)
+        return TwoNnDimensionEstimator(in_key=in_key, **estimator_kwargs)(td)
+
+    return _run
+
+
 class TestTwoNnDimensionEstimator:
     """Test the TwoNnDimensionEstimator class."""
 
-    def test_default_keys(self):
+    def test_default_keys(self, run_estimator):
         """Test with default in_key and out_key."""
-        torch.manual_seed(42)
         data = torch.randn(100, 10)
-        td = TensorDict({"data": data}, batch_size=[])
-        estimator = TwoNnDimensionEstimator()
-        result = estimator(td)
+        result = run_estimator(data)
         assert "dimension" in result
         assert result["dimension"].ndim == 0
         assert result["dimension"].dtype in (torch.float32, torch.float64)
         assert result["dimension"].item() > 0
 
-    def test_custom_keys(self):
+    def test_custom_keys(self, run_estimator):
         """Test with custom in_key and out_key."""
-        torch.manual_seed(42)
         data = torch.randn(50, 8)
-        td = TensorDict({"linear2": data}, batch_size=[])
-        estimator = TwoNnDimensionEstimator(in_key="linear2", out_key="intrinsic_dim")
-        result = estimator(td)
+        result = run_estimator(data, in_key="linear2", out_key="intrinsic_dim")
         assert "intrinsic_dim" in result
         assert "linear2" in result
         assert result["intrinsic_dim"].ndim == 0
 
-    def test_return_xy(self):
+    def test_return_xy(self, run_estimator):
         """Test that return_xy writes _x and _y keys."""
-        torch.manual_seed(42)
         data = torch.randn(50, 5)
-        td = TensorDict({"data": data}, batch_size=[])
-        estimator = TwoNnDimensionEstimator(return_xy=True)
-        result = estimator(td)
+        result = run_estimator(data, return_xy=True)
         assert "dimension" in result
         assert "dimension_x" in result
         assert "dimension_y" in result
@@ -52,57 +56,42 @@ class TestTwoNnDimensionEstimator:
         # y ≈ d * x (through origin), so slope of regression is d
         assert d > 0
 
-    def test_known_dimension_2d(self):
+    def test_known_dimension_2d(self, run_estimator):
         """Test on 2D manifold embedded in higher space."""
-        torch.manual_seed(42)
-        # Points on a 2D plane: only first 2 coords vary
         data = torch.randn(100, 10)
         data[:, 2:] = 0
-        td = TensorDict({"data": data}, batch_size=[])
-        estimator = TwoNnDimensionEstimator()
-        result = estimator(td)
+        result = run_estimator(data)
         d = result["dimension"].item()
-        # Should be close to 2 (with tolerance for finite sample)
         assert 1.0 < d < 3.0
 
-    def test_known_dimension_circle(self):
+    def test_known_dimension_circle(self, run_estimator):
         """Test on 1D manifold (circle) embedded in 2D."""
-        torch.manual_seed(42)
         theta = torch.linspace(0, 2 * torch.pi, 100)
         data = torch.stack([torch.cos(theta), torch.sin(theta)], dim=1)
         data = data + 0.01 * torch.randn_like(data)  # small noise for numerical stability
-        td = TensorDict({"data": data}, batch_size=[])
-        estimator = TwoNnDimensionEstimator()
-        result = estimator(td)
+        result = run_estimator(data)
         d = result["dimension"].item()
         assert 0.5 < d < 6.0
 
     @pytest.mark.parametrize("shape", [(10, 5, 8), (10, 10, 4), (2, 3, 5, 8)], ids=["10x5x8", "10x10x4", "2x3x5x8"])
-    def test_batch_size_preservation(self, shape):
+    def test_batch_size_preservation(self, run_estimator, shape):
         """Test that (..., N, D) preserves batch shape."""
-        torch.manual_seed(42)
         data = torch.randn(*shape)
         batch_shape = shape[:-2]
-        td = TensorDict({"data": data}, batch_size=list(batch_shape))
-        estimator = TwoNnDimensionEstimator()
-        result = estimator(td)
+        result = run_estimator(data, batch_size=list(batch_shape))
         assert "dimension" in result
         assert result["dimension"].shape == batch_shape
         assert (result["dimension"] > 0).all()
 
-    def test_too_few_points_raises(self):
+    def test_too_few_points_raises(self, run_estimator):
         """Test that fewer than 3 points raises."""
-        estimator = TwoNnDimensionEstimator()
-        td = TensorDict({"data": torch.randn(2, 5)}, batch_size=[])
         with pytest.raises(ValueError, match="At least 3 points"):
-            estimator(td)
+            run_estimator(torch.randn(2, 5))
 
-    def test_determinism(self):
+    def test_determinism(self, run_estimator):
         """Test that same input yields same output."""
         torch.manual_seed(123)
         data = torch.randn(80, 6)
-        td = TensorDict({"data": data}, batch_size=[])
-        estimator = TwoNnDimensionEstimator()
-        r1 = estimator(td.clone())["dimension"].item()
-        r2 = estimator(td.clone())["dimension"].item()
+        r1 = run_estimator(data.clone())["dimension"].item()
+        r2 = run_estimator(data.clone())["dimension"].item()
         assert r1 == r2
