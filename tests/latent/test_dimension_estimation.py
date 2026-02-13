@@ -106,3 +106,12 @@ class TestTwoNnDimensionEstimator:
         r1 = run_estimator(data.clone())["dimension"].item()
         r2 = run_estimator(data.clone())["dimension"].item()
         assert r1 == r2
+
+    def test_repr(self):
+        """Test __repr__ includes class name, in_keys, out_keys, and eps."""
+        est = TwoNnDimensionEstimator()
+        r = repr(est)
+        assert "TwoNnDimensionEstimator" in r
+        assert "in_keys=['data']" in r
+        assert "out_keys=['dimension']" in r
+        assert "eps=" in r
