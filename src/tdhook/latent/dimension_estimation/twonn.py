@@ -45,19 +45,15 @@ class TwoNnDimensionEstimator(TensorDictModuleBase):
                 ys.append(y_i)
         td[self.out_key] = torch.stack(dims).reshape(batch_shape)
         if self.return_xy:
-            if flat.shape[0] == 1:
-                td[f"{self.out_key}_x"] = xs[0]
-                td[f"{self.out_key}_y"] = ys[0]
-            else:
-                max_len = data.shape[-2] - 1
-                x_padded = torch.stack(
-                    [torch.nn.functional.pad(x_i, (0, max_len - len(x_i)), value=float("nan")) for x_i in xs]
-                )
-                y_padded = torch.stack(
-                    [torch.nn.functional.pad(y_i, (0, max_len - len(y_i)), value=float("nan")) for y_i in ys]
-                )
-                td[f"{self.out_key}_x"] = x_padded.reshape(*batch_shape, max_len)
-                td[f"{self.out_key}_y"] = y_padded.reshape(*batch_shape, max_len)
+            max_len = data.shape[-2] - 1
+            x_padded = torch.stack(
+                [torch.nn.functional.pad(x_i, (0, max_len - len(x_i)), value=float("nan")) for x_i in xs]
+            )
+            y_padded = torch.stack(
+                [torch.nn.functional.pad(y_i, (0, max_len - len(y_i)), value=float("nan")) for y_i in ys]
+            )
+            td[f"{self.out_key}_x"] = x_padded.reshape(*batch_shape, max_len)
+            td[f"{self.out_key}_y"] = y_padded.reshape(*batch_shape, max_len)
         return td
 
     def __repr__(self):

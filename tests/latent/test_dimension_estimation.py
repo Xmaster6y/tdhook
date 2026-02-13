@@ -77,15 +77,22 @@ class TestTwoNnDimensionEstimator:
         assert r2 > 0.9
 
     @pytest.mark.parametrize("return_xy", [True, False])
-    @pytest.mark.parametrize("shape", [(10, 5, 8), (10, 10, 4), (2, 3, 5, 8)], ids=["10x5x8", "10x10x4", "2x3x5x8"])
+    @pytest.mark.parametrize(
+        "shape",
+        [(1, 5, 8), (10, 5, 8), (10, 10, 4), (2, 3, 5, 8)],
+        ids=["1x5x8", "10x5x8", "10x10x4", "2x3x5x8"],
+    )
     def test_batch_size_preservation(self, run_estimator, shape, return_xy):
-        """Test that (..., N, D) preserves batch shape."""
+        """Test that (..., N, D) preserves batch shape, including size-1 batch axes."""
         data = torch.randn(*shape)
         batch_size = shape[:-2]
         result = run_estimator(data, batch_size=batch_size, return_xy=return_xy)
         assert "dimension" in result
         assert result["dimension"].shape == batch_size
         assert (result["dimension"] > 0).all()
+        if return_xy:
+            assert result["dimension_x"].shape[: len(batch_size)] == batch_size
+            assert result["dimension_y"].shape[: len(batch_size)] == batch_size
 
     def test_too_few_points_raises(self, run_estimator):
         """Test that fewer than 3 points raises."""
