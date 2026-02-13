@@ -4,7 +4,7 @@ import torch
 from tensordict import TensorDict
 from tensordict.nn import TensorDictModuleBase
 
-from ._utils import sorted_neighbor_distances
+from ._utils import sorted_neighbors
 
 
 class TwoNnDimensionEstimator(TensorDictModuleBase):
@@ -71,7 +71,7 @@ def _twonn(data: torch.Tensor, eps: float) -> tuple[torch.Tensor, torch.Tensor, 
 
     Distances <= eps are treated as duplicates (excluded from nearest-neighbor selection).
     """
-    sorted_dist = sorted_neighbor_distances(data, eps)
+    sorted_dist, _ = sorted_neighbors(data, eps)
     r1 = sorted_dist[:, 0]
     r2 = sorted_dist[:, 1]
 
