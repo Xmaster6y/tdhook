@@ -62,16 +62,15 @@ class TestTwoNnDimensionEstimator:
         data[:, 2:] = 0
         result = run_estimator(data)
         d = result["dimension"].item()
-        assert 1.0 < d < 3.0
+        assert 1.5 < d < 2.5
 
     def test_known_dimension_circle(self, run_estimator):
         """Test on 1D manifold (circle) embedded in 2D."""
-        theta = torch.linspace(0, 2 * torch.pi, 100)
+        theta = torch.randn(100) * torch.pi
         data = torch.stack([torch.cos(theta), torch.sin(theta)], dim=1)
-        data = data + 0.01 * torch.randn_like(data)  # small noise for numerical stability
         result = run_estimator(data)
         d = result["dimension"].item()
-        assert 0.5 < d < 6.0
+        assert 0.5 < d < 1.5
 
     @pytest.mark.parametrize("shape", [(10, 5, 8), (10, 10, 4), (2, 3, 5, 8)], ids=["10x5x8", "10x10x4", "2x3x5x8"])
     def test_batch_size_preservation(self, run_estimator, shape):

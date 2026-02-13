@@ -19,11 +19,13 @@ class TwoNnDimensionEstimator(TensorDictModuleBase):
         in_key: str = "data",
         out_key: str = "dimension",
         return_xy: bool = False,
+        eps: float = 1e-5,
     ):
         super().__init__()
         self.in_key = in_key
         self.out_key = out_key
         self.return_xy = return_xy
+        self.eps = eps
         self.in_keys = [in_key]
         self.out_keys = [out_key, f"{out_key}_x", f"{out_key}_y"] if return_xy else [out_key]
 
@@ -32,7 +34,7 @@ class TwoNnDimensionEstimator(TensorDictModuleBase):
         if data.ndim == 2:
             if data.shape[0] < 3:
                 raise ValueError("At least 3 points required for Two NN dimension estimation")
-            d, x, y = _twonn(data)
+            d, x, y = _twonn(data, eps=self.eps)
             td[self.out_key] = d.reshape(())
             if self.return_xy:
                 td[f"{self.out_key}_x"] = x
@@ -47,7 +49,7 @@ class TwoNnDimensionEstimator(TensorDictModuleBase):
         dims = []
         xs, ys = [], []
         for i in range(flat.shape[0]):
-            d_i, x_i, y_i = _twonn(flat[i])
+            d_i, x_i, y_i = _twonn(flat[i], eps=self.eps)
             dims.append(d_i)
             if self.return_xy:
                 xs.append(x_i)
@@ -59,23 +61,26 @@ class TwoNnDimensionEstimator(TensorDictModuleBase):
 
     def __repr__(self):
         fields = indent(
-            f"in_keys={self.in_keys},\nout_keys={self.out_keys}",
+            f"in_keys={self.in_keys},\nout_keys={self.out_keys},\neps={self.eps}",
             4 * " ",
         )
         return f"{type(self).__name__}(\n{fields})"
 
 
-def _twonn(data: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Compute Two NN intrinsic dimension. data: (N, D). Returns (d, x, y)."""
+def _twonn(data: torch.Tensor, eps: float) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Compute Two NN intrinsic dimension. data: (N, D). Returns (d, x, y).
+
+    Distances <= eps are treated as duplicates (excluded from nearest-neighbor selection).
+    """
     dist = torch.cdist(data, data, p=2)
     dist = dist.clone()
-    dist.fill_diagonal_(float("inf"))  # exclude self from nearest neighbors
+    dist.fill_diagonal_(float("inf"))
+    dist = torch.where(dist > eps, dist, float("inf"))
     sorted_dist, _ = torch.sort(dist, dim=1)
     r1 = sorted_dist[:, 0]
     r2 = sorted_dist[:, 1]
 
-    # Filter out points where r1 or r2 is 0 (duplicates)
-    valid = (r1 > 0) & (r2 > 0)
+    valid = torch.isfinite(r1) & torch.isfinite(r2)
     if valid.sum() < 3:
         raise ValueError("Too many duplicate or degenerate points for Two NN dimension estimation")
 
