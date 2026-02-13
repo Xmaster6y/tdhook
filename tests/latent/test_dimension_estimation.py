@@ -4,6 +4,7 @@ Tests for intrinsic dimension estimation.
 
 import pytest
 import torch
+from sklearn.metrics import r2_score
 from tensordict import TensorDict
 
 from tdhook.latent.dimension_estimation import TwoNnDimensionEstimator
@@ -66,11 +67,14 @@ class TestTwoNnDimensionEstimator:
 
     def test_known_dimension_circle(self, run_estimator):
         """Test on 1D manifold (circle) embedded in 2D."""
-        theta = torch.randn(100) * torch.pi
+        theta = torch.rand(100) * 2 * torch.pi
         data = torch.stack([torch.cos(theta), torch.sin(theta)], dim=1)
-        result = run_estimator(data)
+        result = run_estimator(data, return_xy=True)
         d = result["dimension"].item()
+        x, y = result["dimension_x"].numpy(), result["dimension_y"].numpy()
+        r2 = r2_score(y, d * x)
         assert 0.5 < d < 1.5
+        assert r2 > 0.9
 
     @pytest.mark.parametrize("return_xy", [True, False])
     @pytest.mark.parametrize("shape", [(10, 5, 8), (10, 10, 4), (2, 3, 5, 8)], ids=["10x5x8", "10x10x4", "2x3x5x8"])
