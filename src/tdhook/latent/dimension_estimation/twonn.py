@@ -31,19 +31,8 @@ class TwoNnDimensionEstimator(TensorDictModuleBase):
 
     def forward(self, td: TensorDict) -> TensorDict:
         data = td[self.in_key]
-        if data.ndim == 2:
-            if data.shape[0] < 3:
-                raise ValueError("At least 3 points required for Two NN dimension estimation")
-            d, x, y = _twonn(data, eps=self.eps)
-            td[self.out_key] = d.reshape(())
-            if self.return_xy:
-                td[f"{self.out_key}_x"] = x
-                td[f"{self.out_key}_y"] = y
-        else:
-            self._write_batched_result(td, data)
-        return td
-
-    def _write_batched_result(self, td: TensorDict, data: torch.Tensor) -> None:
+        if data.shape[-2] < 3:
+            raise ValueError("At least 3 points required for Two NN dimension estimation")
         batch_shape = data.shape[:-2]
         flat = data.reshape(-1, data.shape[-2], data.shape[-1])
         dims = []
@@ -56,8 +45,20 @@ class TwoNnDimensionEstimator(TensorDictModuleBase):
                 ys.append(y_i)
         td[self.out_key] = torch.stack(dims).reshape(batch_shape)
         if self.return_xy:
-            td[f"{self.out_key}_x"] = torch.nested.nested_tensor(xs)
-            td[f"{self.out_key}_y"] = torch.nested.nested_tensor(ys)
+            if flat.shape[0] == 1:
+                td[f"{self.out_key}_x"] = xs[0]
+                td[f"{self.out_key}_y"] = ys[0]
+            else:
+                max_len = data.shape[-2] - 1
+                x_padded = torch.stack(
+                    [torch.nn.functional.pad(x_i, (0, max_len - len(x_i)), value=float("nan")) for x_i in xs]
+                )
+                y_padded = torch.stack(
+                    [torch.nn.functional.pad(y_i, (0, max_len - len(y_i)), value=float("nan")) for y_i in ys]
+                )
+                td[f"{self.out_key}_x"] = x_padded.reshape(*batch_shape, max_len)
+                td[f"{self.out_key}_y"] = y_padded.reshape(*batch_shape, max_len)
+        return td
 
     def __repr__(self):
         fields = indent(

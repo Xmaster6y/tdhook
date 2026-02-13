@@ -15,7 +15,7 @@ def run_estimator():
 
     def _run(data, in_key="data", batch_size=None, **estimator_kwargs):
         if batch_size is None:
-            batch_size = [] if data.ndim == 2 else list(data.shape[:-2])
+            batch_size = [] if data.ndim == 2 else data.shape[:-2]
         td = TensorDict({in_key: data}, batch_size=batch_size)
         return TwoNnDimensionEstimator(in_key=in_key, **estimator_kwargs)(td)
 
@@ -72,14 +72,15 @@ class TestTwoNnDimensionEstimator:
         d = result["dimension"].item()
         assert 0.5 < d < 1.5
 
+    @pytest.mark.parametrize("return_xy", [True, False])
     @pytest.mark.parametrize("shape", [(10, 5, 8), (10, 10, 4), (2, 3, 5, 8)], ids=["10x5x8", "10x10x4", "2x3x5x8"])
-    def test_batch_size_preservation(self, run_estimator, shape):
+    def test_batch_size_preservation(self, run_estimator, shape, return_xy):
         """Test that (..., N, D) preserves batch shape."""
         data = torch.randn(*shape)
-        batch_shape = shape[:-2]
-        result = run_estimator(data, batch_size=list(batch_shape))
+        batch_size = shape[:-2]
+        result = run_estimator(data, batch_size=batch_size, return_xy=return_xy)
         assert "dimension" in result
-        assert result["dimension"].shape == batch_shape
+        assert result["dimension"].shape == batch_size
         assert (result["dimension"] > 0).all()
 
     def test_too_few_points_raises(self, run_estimator):
