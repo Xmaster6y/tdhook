@@ -14,7 +14,7 @@ from ._utils import sorted_neighbors
 from .local_knn import _resolve_k
 
 
-class LocalPCADimensionEstimator(TensorDictModuleBase):
+class LocalPcaDimensionEstimator(TensorDictModuleBase):
     """
     Local intrinsic dimension estimation via PCA on k-NN neighborhoods :cite:`fukunaga1971algorithm`.
 
