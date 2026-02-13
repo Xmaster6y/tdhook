@@ -106,6 +106,7 @@ class TestTwoNnDimensionEstimator:
 
     def test_determinism(self, run_estimator):
         """Test that same input yields same output."""
+        torch.manual_seed(42)
         data = torch.randn(80, 6)
         r1 = run_estimator(data.clone())["dimension"]
         r2 = run_estimator(data.clone())["dimension"]
