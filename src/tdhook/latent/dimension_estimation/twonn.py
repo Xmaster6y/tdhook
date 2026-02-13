@@ -9,8 +9,9 @@ class TwoNnDimensionEstimator(TensorDictModuleBase):
     """
     Intrinsic dimension estimation via the Two NN algorithm :cite:`facco_estimating_2017`.
 
-    Reads a data tensor from the input TensorDict, flattens it to 2D (samples × features),
-    and writes the estimated intrinsic dimension to the output key.
+    Reads a data tensor from the input TensorDict. Expects (N, D) or (..., N, D).
+    For (..., N, D), flattens all leading dims, computes one dimension per dataset,
+    stacks and reshapes to preserve the original batch shape (excluding last two dims).
     """
 
     def __init__(
@@ -20,30 +21,45 @@ class TwoNnDimensionEstimator(TensorDictModuleBase):
         return_xy: bool = False,
     ):
         super().__init__()
-        self._in_key = in_key
-        self._out_key = out_key
-        self._return_xy = return_xy
+        self.in_key = in_key
+        self.out_key = out_key
+        self.return_xy = return_xy
         self.in_keys = [in_key]
-        if return_xy:
-            self.out_keys = [out_key, f"{out_key}_x", f"{out_key}_y"]
-        else:
-            self.out_keys = [out_key]
+        self.out_keys = [out_key, f"{out_key}_x", f"{out_key}_y"] if return_xy else [out_key]
 
     def forward(self, td: TensorDict) -> TensorDict:
-        data = td[self._in_key]
-        data = data.flatten(0, -2)
-        if data.shape[0] < 3:
-            raise ValueError("At least 3 points required for Two NN dimension estimation")
-        d, x, y = _twonn(data)
-        td[self._out_key] = d.reshape(())
-        if self._return_xy:
-            td[f"{self._out_key}_x"] = x
-            td[f"{self._out_key}_y"] = y
+        data = td[self.in_key]
+        if data.ndim == 2:
+            if data.shape[0] < 3:
+                raise ValueError("At least 3 points required for Two NN dimension estimation")
+            d, x, y = _twonn(data)
+            td[self.out_key] = d.reshape(())
+            if self.return_xy:
+                td[f"{self.out_key}_x"] = x
+                td[f"{self.out_key}_y"] = y
+        else:
+            self._write_batched_result(td, data)
         return td
+
+    def _write_batched_result(self, td: TensorDict, data: torch.Tensor) -> None:
+        batch_shape = data.shape[:-2]
+        flat = data.reshape(-1, data.shape[-2], data.shape[-1])
+        dims = []
+        xs, ys = [], []
+        for i in range(flat.shape[0]):
+            d_i, x_i, y_i = _twonn(flat[i])
+            dims.append(d_i)
+            if self.return_xy:
+                xs.append(x_i)
+                ys.append(y_i)
+        td[self.out_key] = torch.stack(dims).reshape(batch_shape)
+        if self.return_xy:
+            td[f"{self.out_key}_x"] = torch.nested.nested_tensor(xs)
+            td[f"{self.out_key}_y"] = torch.nested.nested_tensor(ys)
 
     def __repr__(self):
         fields = indent(
-            f"in_key={self._in_key!r},\nout_key={self._out_key!r},\nreturn_xy={self._return_xy}",
+            f"in_keys={self.in_keys},\nout_keys={self.out_keys}",
             4 * " ",
         )
         return f"{type(self).__name__}(\n{fields})"

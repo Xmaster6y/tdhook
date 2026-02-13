@@ -63,29 +63,32 @@ class TestTwoNnDimensionEstimator:
         result = estimator(td)
         d = result["dimension"].item()
         # Should be close to 2 (with tolerance for finite sample)
-        assert 1.0 < d < 5.0
+        assert 1.0 < d < 3.0
 
-    def test_known_dimension_3d(self):
-        """Test on 3D manifold embedded in higher space."""
+    def test_known_dimension_circle(self):
+        """Test on 1D manifold (circle) embedded in 2D."""
         torch.manual_seed(42)
-        data = torch.randn(150, 20)
-        data[:, 3:] = 0
+        theta = torch.linspace(0, 2 * torch.pi, 100)
+        data = torch.stack([torch.cos(theta), torch.sin(theta)], dim=1)
+        data = data + 0.01 * torch.randn_like(data)  # small noise for numerical stability
         td = TensorDict({"data": data}, batch_size=[])
         estimator = TwoNnDimensionEstimator()
         result = estimator(td)
         d = result["dimension"].item()
-        assert 1.5 < d < 6.0
+        assert 0.5 < d < 6.0
 
-    def test_flattened_input(self):
-        """Test that batched/sequential input is flattened correctly."""
+    @pytest.mark.parametrize("shape", [(10, 5, 8), (10, 10, 4), (2, 3, 5, 8)], ids=["10x5x8", "10x10x4", "2x3x5x8"])
+    def test_batch_size_preservation(self, shape):
+        """Test that (..., N, D) preserves batch shape."""
         torch.manual_seed(42)
-        # (batch, seq, features) -> flatten to (batch*seq, features)
-        data = torch.randn(10, 5, 8)  # 50 points
-        td = TensorDict({"data": data}, batch_size=[])
+        data = torch.randn(*shape)
+        batch_shape = shape[:-2]
+        td = TensorDict({"data": data}, batch_size=list(batch_shape))
         estimator = TwoNnDimensionEstimator()
         result = estimator(td)
         assert "dimension" in result
-        assert result["dimension"].ndim == 0
+        assert result["dimension"].shape == batch_shape
+        assert (result["dimension"] > 0).all()
 
     def test_too_few_points_raises(self):
         """Test that fewer than 3 points raises."""
