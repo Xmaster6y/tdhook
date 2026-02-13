@@ -1,12 +1,20 @@
 """Local intrinsic dimension estimation via k-nearest neighbors."""
 
 from textwrap import indent
+from typing import Literal, Union
 
 import torch
 from tensordict import TensorDict
 from tensordict.nn import TensorDictModuleBase
 
 from ._utils import sorted_neighbor_distances
+
+
+def _resolve_k(k: Union[int, Literal["auto"]], n: int) -> int:
+    """Resolve k to an integer. If 'auto', use int(n**0.5), clamped to valid range."""
+    if k == "auto":
+        return max(2, min(int(n**0.5), (n - 1) // 2))
+    return k
 
 
 class LocalKnnDimensionEstimator(TensorDictModuleBase):
@@ -22,14 +30,17 @@ class LocalKnnDimensionEstimator(TensorDictModuleBase):
 
     def __init__(
         self,
-        k: int,
+        k: Union[int, Literal["auto"]] = "auto",
         in_key: str = "data",
         out_key: str = "dimension",
         eps: float = 1e-5,
     ):
         super().__init__()
-        if k < 1:
-            raise ValueError("k must be at least 1")
+        if k != "auto":
+            if not isinstance(k, int):
+                raise TypeError("k must be an int or 'auto'")
+            if k <= 1:
+                raise ValueError("k must be greater than 1")
         self.k = k
         self.in_key = in_key
         self.out_key = out_key
@@ -40,13 +51,14 @@ class LocalKnnDimensionEstimator(TensorDictModuleBase):
     def forward(self, td: TensorDict) -> TensorDict:
         data = td[self.in_key]
         N = data.shape[-2]
-        if N < 2 * self.k + 1:
-            raise ValueError(f"At least 2k+1 points required for local KNN (k={self.k}), got {N}")
+        k = _resolve_k(self.k, N)
+        if N < 2 * k + 1:
+            raise ValueError(f"At least 2k+1 points required for local KNN (k={k}), got {N}")
         batch_shape = data.shape[:-2]
         flat = data.reshape(-1, data.shape[-2], data.shape[-1])
         dims = []
         for i in range(flat.shape[0]):
-            d_i = _local_knn(flat[i], k=self.k, eps=self.eps)
+            d_i = _local_knn(flat[i], k=k, eps=self.eps)
             dims.append(d_i)
         td[self.out_key] = torch.stack(dims).reshape(*batch_shape, N)
         return td

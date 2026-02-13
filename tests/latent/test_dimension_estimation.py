@@ -211,9 +211,11 @@ class TestLocalKnnDimensionEstimator:
             run_local_knn_estimator(torch.randn(4, 5), k=2)  # 4 < 2*2+1
 
     def test_k_validation(self):
-        """Test that k < 1 raises."""
-        with pytest.raises(ValueError, match="k must be at least 1"):
-            LocalKnnDimensionEstimator(k=0)
+        """Test that invalid k raises (k <= 1 or wrong type)."""
+        with pytest.raises(ValueError, match="k must be greater than 1"):
+            LocalKnnDimensionEstimator(k=1)
+        with pytest.raises(TypeError, match="k must be an int or 'auto'"):
+            LocalKnnDimensionEstimator(k=2.5)
 
     def test_determinism(self, run_local_knn_estimator):
         """Test that same input yields same output."""
@@ -222,6 +224,12 @@ class TestLocalKnnDimensionEstimator:
         r1 = run_local_knn_estimator(data.clone(), k=2)["dimension"]
         r2 = run_local_knn_estimator(data.clone(), k=2)["dimension"]
         assert torch.allclose(r1, r2, equal_nan=True)
+
+    def test_k_auto(self, run_local_knn_estimator, plane_data):
+        """Test k='auto' uses n**0.5."""
+        result = run_local_knn_estimator(plane_data, k="auto")
+        assert "dimension" in result
+        assert result["dimension"].shape == (100,)
 
     def test_repr(self):
         """Test __repr__ includes class name, in_keys, out_keys, k, and eps."""
