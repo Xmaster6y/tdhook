@@ -71,6 +71,23 @@ Methods
             </div>
          </div>
 
+   .. grid-item-card::
+      :link: notebooks/methods/dimension-estimation.ipynb
+      :class-card: surface
+      :class-body: surface
+
+      .. raw:: html
+
+         <div class="d-flex align-items-center">
+            <div class="d-flex justify-content-center" style="min-width: 50px; margin-right: 20px; height: 100%;">
+               <i class="fa-solid fa-cube fa-2x"></i>
+            </div>
+            <div>
+               <h5 class="card-title">Dimension Estimation</h5>
+               <p class="card-text">Estimate intrinsic dimension of data manifolds using TwoNN, Local PCA, and related methods.</p>
+            </div>
+         </div>
+
 .. toctree::
    :hidden:
    :maxdepth: 2
@@ -78,3 +95,4 @@ Methods
    notebooks/methods/integrated-gradients.ipynb
    notebooks/methods/steering-vectors.ipynb
    notebooks/methods/linear-probing.ipynb
+   notebooks/methods/dimension-estimation.ipynb

@@ -94,13 +94,18 @@ def _local_pca(
     pca_cls: type,
 ) -> torch.Tensor:
     """Compute per-point local dimension via PCA. data: (N, D). Returns (N,) dimension estimates."""
-    _, indices = sorted_neighbors(data, eps)
+    sorted_dist, indices = sorted_neighbors(data, eps)
     N, D = data.shape
     dims = []
     for i in range(N):
-        neighbor_idx = indices[i, :k]
+        valid_mask = torch.isfinite(sorted_dist[i])
+        valid_indices = indices[i][valid_mask]
+        neighbor_idx = valid_indices[:k]
+        if len(neighbor_idx) < k:
+            dims.append(float("nan"))
+            continue
         neighborhood = torch.cat([data[i : i + 1], data[neighbor_idx]], dim=0)
-        X = neighborhood.cpu().double().numpy()
+        X = neighborhood.detach().cpu().double().numpy()
         if X.shape[0] < 2:
             dims.append(float("nan"))
             continue

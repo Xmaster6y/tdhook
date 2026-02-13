@@ -404,11 +404,11 @@ class TestLocalPcaDimensionEstimator:
         assert _dim_from_eigenvalues_maxgap(np.array([])) == 1
 
     def test_constant_data_handled(self, run_local_pca_estimator):
-        """Test constant data (zero variance) does not crash."""
+        """Test constant data (zero variance) does not crash. Returns NaN (no valid neighbors)."""
         data = torch.ones(10, 5)
         result = run_local_pca_estimator(data, k=2)
         assert result["dimension"].shape == (10,)
-        assert torch.isfinite(result["dimension"]).all()
+        assert torch.isnan(result["dimension"]).all()
 
     def test_few_neighborhood_points_returns_nan(self):
         """Test that k=0 (single-point neighborhood) returns nan."""
@@ -557,9 +557,10 @@ class TestCaPcaDimensionEstimator:
         assert result["dimension"].shape == (10,)
         assert torch.isnan(result["dimension"]).all()
 
-    def test_k1_returns_nan(self, run_ca_pca_estimator):
-        """Test k=1 (single-point neighborhood) returns nan."""
+    def test_k1_uses_two_neighbors(self, run_ca_pca_estimator):
+        """Test k=1 uses k+1=2 neighbors and returns valid dimension estimates."""
         data = torch.randn(10, 5)
         result = run_ca_pca_estimator(data, k=1)
         assert result["dimension"].shape == (10,)
-        assert torch.isnan(result["dimension"]).all()
+        assert torch.isfinite(result["dimension"]).all()
+        assert (result["dimension"] >= 1).all()

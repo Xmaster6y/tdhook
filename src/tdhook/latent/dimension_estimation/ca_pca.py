@@ -85,8 +85,13 @@ def _ca_pca(data: torch.Tensor, k: int, eps: float, pca_cls: type) -> torch.Tens
         if r <= 0 or not np.isfinite(float(r)):
             dims.append(float("nan"))
             continue
-        neighbor_idx = indices[i, :k]
-        neighborhood = data[neighbor_idx].cpu().double().numpy()
+        valid_mask = torch.isfinite(sorted_dist[i])
+        valid_indices = indices[i][valid_mask]
+        neighbor_idx = valid_indices[: k + 1]
+        if len(neighbor_idx) < k + 1:
+            dims.append(float("nan"))
+            continue
+        neighborhood = data[neighbor_idx].detach().cpu().double().numpy()
         if neighborhood.shape[0] < 2:
             dims.append(float("nan"))
             continue
