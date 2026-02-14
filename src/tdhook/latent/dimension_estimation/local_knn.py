@@ -5,7 +5,7 @@ import torch
 from tensordict import TensorDict
 from tensordict.nn import TensorDictModuleBase
 
-from ._utils import sorted_neighbor_distances
+from ._utils import sorted_neighbors
 
 
 def _resolve_k(k: Union[int, Literal["auto"]], n: int) -> int:
@@ -71,7 +71,7 @@ class LocalKnnDimensionEstimator(TensorDictModuleBase):
 
 def _local_knn(data: torch.Tensor, k: int, eps: float) -> torch.Tensor:
     """Compute per-point local dimension. data: (N, D). Returns (N,) dimension estimates."""
-    sorted_dist = sorted_neighbor_distances(data, eps)
+    sorted_dist, _ = sorted_neighbors(data, eps)
     rk = sorted_dist[:, k - 1]
     r2k = sorted_dist[:, 2 * k - 1]
 
