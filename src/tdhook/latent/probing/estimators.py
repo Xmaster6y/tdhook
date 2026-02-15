@@ -33,16 +33,22 @@ class MeanDifferenceClassifier:
         if len(y.shape) > 1:
             raise ValueError("Multiclass classification not supported")
         y = np.expand_dims(y, 1)
-        pos = (X * y).sum(axis=0) / y.sum()
-        neg = (X * (1 - y)).sum(axis=0) / (1 - y).sum()
+        pos_count = y.sum()
+        neg_count = (1 - y).sum()
+        if pos_count == 0 or neg_count == 0:
+            raise ValueError("Both classes must be present in y")
+        pos = (X * y).sum(axis=0) / pos_count
+        neg = (X * (1 - y)).sum(axis=0) / neg_count
         pos_norm = np.linalg.norm(pos)
         neg_norm = np.linalg.norm(neg)
 
         self._coef = pos - neg
         self._intercept = -0.5 * (pos_norm**2 - neg_norm**2)
         if self._normalize:
-            self._intercept = self._intercept / np.linalg.norm(self._coef)
-            self._coef = self._coef / np.linalg.norm(self._coef)
+            coef_norm = np.linalg.norm(self._coef)
+            if coef_norm > 0:
+                self._intercept = self._intercept / coef_norm
+                self._coef = self._coef / coef_norm
 
         self._intercept = self._intercept.reshape((1,))
         self._coef = self._coef.reshape((1, -1))
@@ -169,4 +175,7 @@ class LowRankBilinearEstimator(TorchEstimator):
             self.register_parameter("bias", None)
 
     def forward(self, h1: torch.Tensor, h2: torch.Tensor) -> torch.Tensor:
-        return self.linear1(h1) * self.linear2(h2) + self.bias  # Ok if bias is None?
+        output = self.linear1(h1) * self.linear2(h2)
+        if self.bias is not None:
+            output = output + self.bias
+        return output

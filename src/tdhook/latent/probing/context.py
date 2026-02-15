@@ -39,8 +39,8 @@ class Probing(HookingContextFactory):
     ):
         super().__init__()
         self._key_pattern = key_pattern
-        classes_to_hook = self.default_classes_to_hook if classes_to_hook is None else classes_to_hook
-        classes_to_skip = self.default_classes_to_skip if classes_to_skip is None else classes_to_skip
+        classes_to_hook = tuple(classes_to_hook or self.default_classes_to_hook)
+        classes_to_skip = tuple(classes_to_skip or self.default_classes_to_skip)
         self._hook_manager = MultiHookManager(key_pattern, classes_to_hook, classes_to_skip)
         self._relative = relative
         self._probe_factory = probe_factory

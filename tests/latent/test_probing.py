@@ -150,6 +150,25 @@ class TestMeanDifferenceClassifier:
         with pytest.raises(ValueError, match="Multiclass"):
             classifier.fit(X, y)
 
+    def test_fit_with_zero_coef_norm_skips_normalization(self):
+        X = np.array([[1.0, -1.0], [1.0, -1.0], [1.0, -1.0], [1.0, -1.0]])
+        y = np.array([1, 1, 0, 0])
+        classifier = MeanDifferenceClassifier(normalize=True)
+
+        classifier.fit(X, y)
+
+        assert np.array_equal(classifier.coef_, np.array([[0.0, 0.0]]))
+        assert np.array_equal(classifier.intercept_, np.array([0.0]))
+        proba = classifier.predict_proba(X)
+        assert np.allclose(proba, 0.5)
+
+    @pytest.mark.parametrize("y", [np.array([1, 1, 1, 1]), np.array([0, 0, 0, 0])])
+    def test_fit_requires_both_classes(self, y):
+        X = np.random.randn(4, 3)
+        classifier = MeanDifferenceClassifier()
+        with pytest.raises(ValueError, match="Both classes must be present"):
+            classifier.fit(X, y)
+
 
 class TestTorchEstimators:
     def test_linear_forward_input_count_validation(self):
@@ -190,12 +209,8 @@ class TestTorchEstimators:
 
         h1 = torch.randn(7, 4)
         h2 = torch.randn(7, 5)
-        if bias:
-            out = estimator(h1, h2)
-            assert out.shape == (7, 3)
-        else:
-            with pytest.raises(TypeError, match="NoneType"):
-                estimator(h1, h2)
+        out = estimator(h1, h2)
+        assert out.shape == (7, 3)
 
 
 class TestProbeAndProbeManager:
