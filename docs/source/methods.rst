@@ -72,6 +72,23 @@ Methods
          </div>
 
    .. grid-item-card::
+      :link: notebooks/methods/bilinear-probing.ipynb
+      :class-card: surface
+      :class-body: surface
+
+      .. raw:: html
+
+         <div class="d-flex align-items-center">
+            <div class="d-flex justify-content-center" style="min-width: 50px; margin-right: 20px; height: 100%;">
+               <i class="fa-solid fa-vector-square fa-2x"></i>
+            </div>
+            <div>
+               <h5 class="card-title">Bilinear Probing</h5>
+               <p class="card-text">Train bilinear probes on paired layer representations to capture interaction structure.</p>
+            </div>
+         </div>
+
+   .. grid-item-card::
       :link: notebooks/methods/dimension-estimation.ipynb
       :class-card: surface
       :class-body: surface
@@ -95,4 +112,5 @@ Methods
    notebooks/methods/integrated-gradients.ipynb
    notebooks/methods/steering-vectors.ipynb
    notebooks/methods/linear-probing.ipynb
+   notebooks/methods/bilinear-probing.ipynb
    notebooks/methods/dimension-estimation.ipynb
