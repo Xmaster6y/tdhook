@@ -12,7 +12,11 @@ from tensordict import TensorDict
 from tensordict.nn import TensorDictModuleBase
 
 from tdhook.latent.probing import (
+    LinearEstimator,
+    LowRankBilinearEstimator,
     MeanDifferenceClassifier,
+    Probe,
+    ProbeManager,
     Probing,
 )
 from tdhook.latent.probing.estimators import BilinearEstimator
@@ -132,6 +136,146 @@ class TestMeanDifferenceClassifier:
         midpoint_proba = classifier.predict_proba(midpoint.reshape(1, -1))
         assert np.isclose(midpoint_proba[0, 1], 0.5)
 
+    def test_unfitted_properties_raise(self):
+        classifier = MeanDifferenceClassifier()
+        with pytest.raises(ValueError, match="not fitted"):
+            _ = classifier.coef_
+        with pytest.raises(ValueError, match="not fitted"):
+            _ = classifier.intercept_
+
+    def test_multiclass_target_raises(self):
+        classifier = MeanDifferenceClassifier()
+        X = np.random.randn(4, 3)
+        y = np.array([[1, 0], [1, 0], [0, 1], [0, 1]])
+        with pytest.raises(ValueError, match="Multiclass"):
+            classifier.fit(X, y)
+
+
+class TestTorchEstimators:
+    def test_linear_forward_input_count_validation(self):
+        estimator = LinearEstimator(d_latent=4, num_classes=3)
+        with pytest.raises(ValueError, match="expects 1 input tensor"):
+            estimator.forward(torch.randn(2, 4), torch.randn(2, 4))
+
+    def test_fit_verbose_prints_epoch_progress(self, capsys):
+        torch.manual_seed(0)
+        estimator = LinearEstimator(d_latent=3, num_classes=2, epochs=10, batch_size=2, verbose=True)
+        X = torch.randn(6, 3)
+        y = torch.randint(0, 2, (6,))
+        estimator.fit(X, y=y)
+        captured = capsys.readouterr()
+        assert "Epoch 10/10" in captured.out
+
+    def test_loss_shape_mismatch_regression_raises(self):
+        estimator = LinearEstimator(d_latent=3, num_classes=None)
+        output = torch.randn(5, 1)
+        target = torch.randn(5)
+        with pytest.raises(ValueError, match="does not match target shape"):
+            estimator._loss_fn(output, target)
+
+    def test_loss_shape_mismatch_classification_raises(self):
+        estimator = LinearEstimator(d_latent=3, num_classes=3)
+        output = torch.randn(5, 2)
+        target = torch.randint(0, 3, (5,))
+        with pytest.raises(ValueError, match="does not match target shape"):
+            estimator._loss_fn(output, target)
+
+    @pytest.mark.parametrize("bias", [True, False])
+    def test_low_rank_bilinear_estimator_init_and_forward(self, bias):
+        estimator = LowRankBilinearEstimator(d_latent1=4, d_latent2=5, num_classes=3, bias=bias)
+        if bias:
+            assert estimator.bias is not None
+        else:
+            assert estimator.bias is None
+
+        h1 = torch.randn(7, 4)
+        h2 = torch.randn(7, 5)
+        if bias:
+            out = estimator(h1, h2)
+            assert out.shape == (7, 3)
+        else:
+            with pytest.raises(TypeError, match="NoneType"):
+                estimator(h1, h2)
+
+
+class TestProbeAndProbeManager:
+    def test_probe_invalid_step_type_raises(self):
+        probe = Probe(
+            estimator=object(),
+            predict_callback=lambda preds, labels: None,
+        )
+        with pytest.raises(ValueError, match="step_type must be 'fit' or 'predict'"):
+            probe.step(torch.randn(2, 3), labels=torch.zeros(2), step_type="invalid")
+
+    def test_probe_fit_and_predict_callbacks_are_called(self):
+        class MockEstimator:
+            def __init__(self):
+                self.fit_calls = 0
+
+            def fit(self, X, y):
+                self.fit_calls += 1
+
+            def predict(self, X):
+                return torch.ones(X.shape[0], dtype=torch.long)
+
+        fit_results = []
+        predict_results = []
+        probe = Probe(
+            estimator=MockEstimator(),
+            predict_callback=lambda preds, labels: predict_results.append((preds.shape, labels.shape)),
+            fit_callback=lambda preds, labels: fit_results.append((preds.shape, labels.shape)),
+        )
+        data = torch.randn(4, 2, 3)
+        labels = torch.zeros(4, dtype=torch.long)
+
+        probe.step(data, labels=labels, step_type="fit")
+        probe.step(data, labels=labels, step_type="predict")
+
+        assert fit_results == [((4,), (4,))]
+        assert predict_results == [((4,), (4,))]
+
+    def test_probe_manager_overwrite_and_reset_behaviour(self):
+        class DummyEstimator:
+            def fit(self, X, y):
+                return None
+
+            def predict(self, X):
+                return torch.zeros(X.shape[0], dtype=torch.long)
+
+        manager = ProbeManager(
+            estimator_class=DummyEstimator,
+            estimator_kwargs={},
+            compute_metrics=lambda preds, labels: {"acc": float((preds == labels).float().mean().item())},
+            allow_overwrite=False,
+        )
+
+        probe = manager.probe_factory("linear1", "fwd")
+        data = torch.randn(4, 2)
+        labels = torch.zeros(4, dtype=torch.long)
+
+        probe.step(data, labels=labels, step_type="predict")
+        with pytest.raises(ValueError, match="Metrics for linear1_fwd already exist"):
+            probe.step(data, labels=labels, step_type="predict")
+        assert "linear1_fwd" in manager.predict_metrics
+
+        manager.reset_metrics()
+        probe.step(data, labels=labels, step_type="fit")
+        with pytest.raises(ValueError, match="Metrics for linear1_fwd already exist"):
+            probe.step(data, labels=labels, step_type="fit")
+
+        with pytest.raises(ValueError, match="already exists"):
+            manager.probe_factory("linear1", "fwd")
+
+        assert manager.estimators
+        assert manager.fit_metrics
+        assert manager.predict_metrics == {}
+
+        manager.reset_estimators()
+        manager.reset_metrics()
+        assert manager.estimators == {}
+        assert manager.fit_metrics == {}
+        assert manager.predict_metrics == {}
+
 
 class TestBilinearProbeManager:
     """Test BilinearProbe and BilinearProbeManager."""
@@ -192,9 +336,9 @@ class TestBilinearProbeManager:
         labels = torch.randint(0, 5, (4,))
 
         probe.step(data, key="x", labels=labels, step_type="fit")
-        assert len(fit_called) >= 1
+        assert fit_called
         probe.step(data, key="x", labels=labels, step_type="predict")
-        assert len(pred_called) >= 1
+        assert pred_called
 
     def test_bilinear_probe_cross_pair_waits_then_runs(self):
         """When h1!=h2, probe caches first key then runs when second arrives."""
@@ -220,11 +364,117 @@ class TestBilinearProbeManager:
         labels = torch.randint(0, 5, (4,))
 
         probe.step(h1_data, key="linear1", labels=labels, step_type="predict")
-        assert len(run_args) == 0
+        assert not run_args
         probe.step(h2_data, key="linear2", labels=labels, step_type="predict")
         assert len(run_args) == 1
         assert run_args[0][1] == h1_data.shape
         assert run_args[0][2] == h2_data.shape
+
+    def test_bilinear_probe_ignores_unrelated_key_and_waiting_state(self):
+        class MockEstimator:
+            def fit(self, h1, h2, y):
+                return None
+
+            def predict(self, h1, h2):
+                return torch.zeros(h1.shape[0], dtype=torch.long)
+
+        probe = BilinearProbe(
+            h1_key="linear1",
+            h2_key="linear2",
+            estimator=MockEstimator(),
+            predict_callback=lambda p, labels: None,
+            fit_callback=lambda p, labels: None,
+        )
+        labels = torch.zeros(3, dtype=torch.long)
+        probe.step(torch.randn(3, 5), key="other", labels=labels, step_type="predict")
+        assert not probe.is_waiting
+        probe.step(torch.randn(3, 5), key="linear1", labels=labels, step_type="predict")
+        assert probe.is_waiting
+        waiting = probe.after_all()
+        assert waiting == [("linear1", "linear2")]
+        assert not probe.is_waiting
+
+    def test_bilinear_probe_invalid_step_type_raises(self):
+        class MockEstimator:
+            def fit(self, h1, h2, y):
+                return None
+
+            def predict(self, h1, h2):
+                return torch.zeros(h1.shape[0], dtype=torch.long)
+
+        probe = BilinearProbe(
+            h1_key="x",
+            h2_key="x",
+            estimator=MockEstimator(),
+            predict_callback=lambda p, labels: None,
+            fit_callback=lambda p, labels: None,
+        )
+        with pytest.raises(ValueError, match="step_type must be 'fit' or 'predict'"):
+            probe.step(torch.randn(2, 4), key="x", labels=torch.zeros(2), step_type="invalid")
+
+    def test_bilinear_probe_after_all_missing_first_key(self):
+        class MockEstimator:
+            def fit(self, h1, h2, y):
+                return None
+
+            def predict(self, h1, h2):
+                return torch.zeros(h1.shape[0], dtype=torch.long)
+
+        probe = BilinearProbe(
+            h1_key="linear1",
+            h2_key="linear2",
+            estimator=MockEstimator(),
+            predict_callback=lambda p, labels: None,
+            fit_callback=lambda p, labels: None,
+        )
+        labels = torch.zeros(2, dtype=torch.long)
+        probe.before_all()
+        probe.step(torch.randn(2, 5), key="linear2", labels=labels, step_type="predict")
+        waiting = probe.after_all()
+        assert waiting == [("linear1", "linear2")]
+
+    def test_bilinear_probe_manager_caching_duplicate_and_resets(self):
+        class DummyEstimator:
+            def fit(self, h1, h2, y):
+                return None
+
+            def predict(self, h1, h2):
+                return torch.zeros(h1.shape[0], dtype=torch.long)
+
+        manager = BilinearProbeManager(
+            pairs=[("a", "a"), ("a", "b")],
+            estimator_class=DummyEstimator,
+            estimator_kwargs={},
+            compute_metrics=lambda preds, labels: {"n": int(labels.shape[0])},
+            allow_overwrite=False,
+        )
+
+        _ = manager.probe_factory("a", "fwd")
+        # Cache hit path.
+        _ = manager.probe_factory("a", "fwd")
+        assert ("a", "fwd") in manager._key_to_probes
+
+        with pytest.raises(ValueError, match="already exists"):
+            manager._create_pair_probe("a", "a", "fwd")
+
+        dispatcher = manager.probe_factory("a", "bwd")
+        labels = torch.zeros(3, dtype=torch.long)
+        dispatcher.step(torch.randn(3, 5), labels=labels, step_type="predict")
+        with pytest.raises(ValueError, match="Metrics for a_a_bwd already exist"):
+            dispatcher.step(torch.randn(3, 5), labels=labels, step_type="predict")
+
+        manager.reset_metrics()
+        dispatcher.step(torch.randn(3, 5), labels=labels, step_type="fit")
+        with pytest.raises(ValueError, match="Metrics for a_a_bwd already exist"):
+            dispatcher.step(torch.randn(3, 5), labels=labels, step_type="fit")
+
+        manager.reset_estimators()
+        manager.reset_metrics()
+        assert manager.estimators == {}
+        assert manager.fit_metrics == {}
+        assert manager.predict_metrics == {}
+        assert manager._pair_probes == {}
+        assert manager._key_to_probes == {}
 
     def test_bilinear_probe_manager_with_probing_context(self, default_test_model):
         """BilinearProbeManager works with Probing context for fit/predict."""
