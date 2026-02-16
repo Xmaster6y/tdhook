@@ -42,11 +42,16 @@ with IntegratedGradients(init_attr_targets=init_attr_targets).prepare(model) as 
 
 To dig deeper, see the [documentation](https://tdhook.readthedocs.io).
 
+### Skills
+
+An [agent skill](skills/tdhook/SKILL.md) is available for tdhook. It provides AI guidance for attribution, activation analysis, probing, steering, and weight-level interventions—including when to use each method and how to wire TensorDict keys.
+
 ### Features
 
 - [Integrated Gradients](https://tdhook.readthedocs.io/en/latest/notebooks/methods/integrated-gradients.html): [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Xmaster6y/tdhook/blob/main/docs/source/notebooks/methods/integrated-gradients.ipynb)
 - [Steering Vectors](https://tdhook.readthedocs.io/en/latest/notebooks/methods/steering-vectors.html): [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Xmaster6y/tdhook/blob/main/docs/source/notebooks/methods/steering-vectors.ipynb)
 - [Linear Probing](https://tdhook.readthedocs.io/en/latest/notebooks/methods/linear-probing.html): [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Xmaster6y/tdhook/blob/main/docs/source/notebooks/methods/linear-probing.ipynb)
+- [Bilinear Probing](https://tdhook.readthedocs.io/en/latest/notebooks/methods/bilinear-probing.html): [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Xmaster6y/tdhook/blob/main/docs/source/notebooks/methods/bilinear-probing.ipynb)
 - [Dimension Estimation](https://tdhook.readthedocs.io/en/latest/notebooks/methods/dimension-estimation.html): [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Xmaster6y/tdhook/blob/main/docs/source/notebooks/methods/dimension-estimation.ipynb)
 
 ## Config
