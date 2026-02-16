@@ -69,6 +69,7 @@ print("Train:", manager.fit_metrics, "Test:", manager.predict_metrics)
 **Goal**: Extract a steering vector from contrasting prompts and apply it.
 
 ```python
+from tensordict import TensorDict
 from tdhook.latent import ActivationAddition, SteeringVectors
 
 positive_inputs = tokenizer.encode("I am rich.", return_tensors="pt")
@@ -174,6 +175,7 @@ with Probing("module.0$", manager.probe_factory, additional_keys=["labels", "ste
 
 ```python
 from lczerolens import LczeroModel, LczeroBoard
+from tensordict import TensorDict
 from tdhook.attribution import Saliency
 
 model = LczeroModel.from_hf("lczerolens/maia-1100")
@@ -198,6 +200,7 @@ with Saliency(init_attr_targets=best_logit_init_targets).prepare(model) as hooke
 **Goal**: Replace activations at a module with those from another input to test counterfactual effect.
 
 ```python
+from tensordict import TensorDict
 from tdhook.latent.activation_patching import ActivationPatching
 
 def patch_fn(output, output_to_patch, **_):
@@ -238,6 +241,7 @@ with pruning.prepare(model) as hooked:
 **Goal**: Insert a custom module (e.g. scaling) at a layer during forward.
 
 ```python
+from torch import nn
 from tdhook.weights.adapters import Adapters
 
 class DoubleAdapter(nn.Module):
@@ -281,12 +285,9 @@ with task_vectors.prepare(pretrained) as hooked:
 
 ```python
 import importlib.util
-MODE = "colab-dev" if (importlib.util.find_spec("google.colab") and DEV) else "colab" if importlib.util.find_spec("google.colab") else "local"
+MODE = "colab" if importlib.util.find_spec("google.colab") else "local"
 if MODE == "colab":
     %pip install -q tdhook
-elif MODE == "colab-dev":
-    !rm -rf tdhook && !git clone https://github.com/Xmaster6y/tdhook -b main
-    %pip install -q ./tdhook
 ```
 
 ---
