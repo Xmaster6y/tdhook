@@ -1,6 +1,6 @@
 # tdhook API Reference
 
-Key classes and usage patterns.
+Key classes, usage patterns, and method implementations.
 
 ## HookingContextFactory
 
@@ -97,3 +97,82 @@ Submodule keys in `set`/`get`/`save`/`stop` resolve via `resolve_submodule_path`
 - `m1.<0>.layers` – numeric attribute names
 
 Paths default to relative to `td_module`; use `relative=False` for absolute. Probing methods use regex `key_pattern` to match paths (e.g. `"transformer.h.5.mlp$"`).
+
+---
+
+## Method Implementations
+
+High-level modules by category. All extend `HookingContextFactory` and use `prepare(module)`.
+
+### Attribution
+
+Explain which inputs or layers contribute. All write to `("attr", key)`.
+
+| Class | Use |
+|-------|-----|
+| `Saliency` | Gradient w.r.t. input (or latent). Params: `absolute`, `multiply_by_inputs`, `input_modules`, `target_modules` |
+| `IntegratedGradients` | Path integral. Requires `("baseline", "input")`. Params: `n_steps`, `method`, `baseline_key` |
+| `GuidedBackpropagation` | ReLU-guided gradients. Params: `input_modules`, `use_inputs` |
+| `GradCAM` | Channel-weighted spatial. Params: `modules_to_attribute` (path → `DimsConfig`) |
+| `LRP` | Layer-wise Relevance Propagation. Params: `rule_mapper`, `init_attr_grads` |
+| `ActivationMaximisation` | PGD to maximise target. Writes to `("attr", "input")` |
+
+```python
+from tdhook.attribution import Saliency, IntegratedGradients
+
+with Saliency(init_attr_targets=init_fn).prepare(model) as hooked:
+    attr = hooked(TensorDict({"input": x})).get(("attr", "input"))
+
+with IntegratedGradients(init_attr_targets=init_fn).prepare(model) as hooked:
+    attr = hooked(TensorDict({"input": x, ("baseline", "input"): baseline})).get(("attr", "input"))
+```
+
+### Latent
+
+| Class | Use |
+|-------|-----|
+| `ActivationAddition` | Extract `positive - negative` at modules. Requires `("positive", "input")`, `("negative", "input")`. Outputs `("steer", module_key)` |
+| `SteeringVectors` | Apply `steer_fn(module_key, output)` at modules |
+| `ActivationPatching` | Replace activations via `patch_fn(output, output_to_patch, ...)`. Requires `("patched", "input")` |
+| `ActivationCaching` | Cache activations at regex-matched modules. `hooked.hooking_context.cache` |
+| `Probing` | Train probes via `ProbeManager` / `BilinearProbeManager`. `additional_keys=["labels", "step_type"]` |
+| `TwoNnDimensionEstimator`, `LocalKnnDimensionEstimator`, etc. | Intrinsic dimension of `TensorDict({"data": activations})` |
+
+```python
+from tdhook.latent import ActivationAddition, SteeringVectors
+from tdhook.latent.activation_caching import ActivationCaching
+from tdhook.latent.probing import Probing, ProbeManager
+
+# Extract steering vector
+with ActivationAddition(["transformer.h.7.mlp"]).prepare(model) as hooked:
+    steer = hooked(TensorDict({("positive", "input"): pos, ("negative", "input"): neg}, batch_size=1)).get(("steer", "transformer.h.7.mlp"))
+
+# Cache activations
+with ActivationCaching(r"transformer\.h\.\d+\.mlp", relative=False).prepare(model) as hooked:
+    hooked(data)
+    cache = hooked.hooking_context.cache
+
+# Probing (needs ProbeManager, labels, step_type)
+manager = ProbeManager(LogisticRegression, {}, compute_metrics)
+with Probing("transformer.h.(0|5|10).mlp$", manager.probe_factory, additional_keys=["labels", "step_type"]).prepare(model, in_keys=["input_ids"], out_keys=["logits"]) as hooked:
+    hooked(train_td)
+    hooked(test_td)
+```
+
+### Weights
+
+| Class | Use |
+|-------|-----|
+| `Pruning` | Zero params by `importance_callback`. Params: `amount_to_prune`, `skip_modules`, `modules_to_prune` |
+| `Adapters` | Insert modules: `{path: (adapter, source, target)}` |
+| `TaskVectors` | `get_task_vector`, `get_forget_vector`, `get_weights`, `compute_alpha` |
+
+```python
+from tdhook.weights import Pruning, Adapters, TaskVectors
+
+with Pruning(importance_callback=fn, amount_to_prune=0.5).prepare(model) as hooked:
+    hooked(inp)
+
+with Adapters(adapters={"layer.5": (adapter, "layer.5", "layer.5")}).prepare(model) as hooked:
+    hooked(data)
+```
