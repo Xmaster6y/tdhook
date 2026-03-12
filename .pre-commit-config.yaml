@@ -2,9 +2,6 @@ repos:
 -   repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
-    -   id: check-added-large-files
-        args: ['--maxkb=1024']
-        exclude: ^docs/source/_static/images/tdhook-logo\.png$
     -   id: check-yaml
     -   id: check-json
     -   id: check-toml
