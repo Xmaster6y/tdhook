@@ -71,6 +71,23 @@ Tutorials
             </div>
          </div>
 
+   .. grid-item-card::
+      :link: notebooks/tutorials/chess-dimension-estimation.ipynb
+      :class-card: surface
+      :class-body: surface
+
+      .. raw:: html
+
+         <div class="d-flex align-items-center">
+            <div class="d-flex justify-content-center" style="min-width: 50px; margin-right: 20px; height: 100%;">
+               <i class="fa-solid fa-chess-board fa-2x"></i>
+            </div>
+            <div>
+               <h5 class="card-title">Chess Dimension Estimation</h5>
+               <p class="card-text">Estimate channel-wise intrinsic dimension from chess activations and compare layers, heads, and opening splits.</p>
+            </div>
+         </div>
+
 .. toctree::
    :hidden:
    :maxdepth: 2
@@ -78,3 +95,4 @@ Tutorials
    notebooks/tutorials/torchrl-ppo.ipynb
    notebooks/tutorials/chess-value-saliency.ipynb
    notebooks/tutorials/concept-attribution.ipynb
+   notebooks/tutorials/chess-dimension-estimation.ipynb
