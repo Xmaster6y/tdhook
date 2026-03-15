@@ -12,7 +12,7 @@
     methods
     tutorials
     api/index
-    About <about>
+    references
 
 .. grid:: 1 1 2 2
     :class-container: hero
