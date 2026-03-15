@@ -96,7 +96,7 @@ html_theme_options = {
         "version_match": version_match,
     },
 }
-html_sidebars = {"about": [], "start": []}
+html_sidebars = {"start": []}
 
 html_context = {"default_mode": "auto"}
 
