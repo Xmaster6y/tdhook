@@ -88,23 +88,6 @@ Tutorials
             </div>
          </div>
 
-   .. grid-item-card::
-      :link: notebooks/tutorials/chess-cross-model-probing.ipynb
-      :class-card: surface
-      :class-body: surface
-
-      .. raw:: html
-
-         <div class="d-flex align-items-center">
-            <div class="d-flex justify-content-center" style="min-width: 50px; margin-right: 20px; height: 100%;">
-               <i class="fa-solid fa-chess fa-2x"></i>
-            </div>
-            <div>
-               <h5 class="card-title">Chess Cross-Model Probing</h5>
-               <p class="card-text">Linear probing on Maia models: can one model's latents predict another's moves? Compare absolute best vs best legal.</p>
-            </div>
-         </div>
-
 .. toctree::
    :hidden:
    :maxdepth: 2
@@ -113,4 +96,3 @@ Tutorials
    notebooks/tutorials/chess-value-saliency.ipynb
    notebooks/tutorials/concept-attribution.ipynb
    notebooks/tutorials/chess-dimension-estimation.ipynb
-   notebooks/tutorials/chess-cross-model-probing.ipynb
