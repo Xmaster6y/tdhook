@@ -21,6 +21,7 @@ extensions = [
     "nbsphinx",  # Jupyter notebook support
     "sphinxcontrib.bibtex",  # BibTeX citation support
     "autoapi.extension",
+    "sphinx_llm.txt",
 ]
 
 # BibTeX configuration
