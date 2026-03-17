@@ -20,7 +20,8 @@ extensions = [
     "sphinx_design",  # Boostrap design components
     "nbsphinx",  # Jupyter notebook support
     "sphinxcontrib.bibtex",  # BibTeX citation support
-    "autoapi.extension",
+    "autoapi.extension",  # Auto documentation from code
+    "sphinx_llm.txt",  # LLM support
 ]
 
 # BibTeX configuration
