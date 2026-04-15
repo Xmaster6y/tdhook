@@ -6,7 +6,7 @@ import pytest
 import torch
 from tensordict import TensorDict
 
-from tdhook.latent.representation_similarity import CkaEstimator, LinearCkaEstimator
+from tdhook.latent.representation_similarity import CkaEstimator
 
 
 def make_td(x, y, in_key_a="data_a", in_key_b="data_b", batch_size=None):
@@ -169,11 +169,3 @@ class TestCkaEstimator:
     def test_unknown_kernel_raises(self):
         with pytest.raises(NotImplementedError, match="Only 'linear' is implemented"):
             CkaEstimator(kernel="rbf")
-
-    def test_linear_alias_is_kept(self, run_estimator):
-        x, y = make_random_pair()
-        td = make_td(x, y)
-
-        result = LinearCkaEstimator()(td)
-
-        assert "cka" in result

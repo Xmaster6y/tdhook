@@ -93,6 +93,3 @@ def _linear_cka(x: torch.Tensor, y: torch.Tensor, eps: float) -> torch.Tensor:
 
     value = numerator / denominator
     return value.float() if torch.isfinite(value) else nan
-
-
-LinearCkaEstimator = CkaEstimator
