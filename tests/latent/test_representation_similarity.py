@@ -15,6 +15,10 @@ def make_td(x, y, in_key_a="data_a", in_key_b="data_b", batch_size=None):
     return TensorDict({in_key_a: x, in_key_b: y}, batch_size=batch_size)
 
 
+def make_random_pair(n=64, d_x=10, d_y=7):
+    return torch.randn(n, d_x), torch.randn(n, d_y)
+
+
 @pytest.fixture
 def run_estimator():
     torch.manual_seed(42)
@@ -28,8 +32,7 @@ def run_estimator():
 
 class TestCkaEstimator:
     def test_default_keys(self, run_estimator):
-        x = torch.randn(64, 10)
-        y = torch.randn(64, 7)
+        x, y = make_random_pair()
 
         result = run_estimator(x, y)
 
@@ -107,6 +110,17 @@ class TestCkaEstimator:
         with pytest.raises(ValueError, match="matching batch shapes"):
             run_estimator(torch.randn(2, 3, 16, 8), torch.randn(2, 4, 16, 6), batch_size=[2])
 
+    def test_invalid_rank_raises(self, run_estimator):
+        with pytest.raises(ValueError, match=r"shape \(N, D\) or \(\.\.\., N, D\)"):
+            run_estimator(torch.randn(32), torch.randn(32))
+
+    def test_mismatched_devices_raise(self, run_estimator):
+        x = torch.randn(32, 8)
+        y = torch.randn(32, 6, device="meta")
+
+        with pytest.raises(ValueError, match="same device"):
+            run_estimator(x, y)
+
     def test_constant_representation_returns_nan(self, run_estimator):
         x = torch.ones(64, 8)
         y = torch.randn(64, 6)
@@ -114,6 +128,14 @@ class TestCkaEstimator:
         result = run_estimator(x, y)
 
         assert torch.isnan(result["cka"])
+
+    def test_integer_inputs_are_promoted_to_float32(self, run_estimator):
+        x = torch.arange(512, dtype=torch.int64).reshape(128, 4)
+
+        result = run_estimator(x, x.clone())
+
+        assert result["cka"].dtype == torch.float32
+        assert torch.isclose(result["cka"], torch.tensor(1.0, dtype=torch.float32), atol=1e-6)
 
     def test_determinism(self, run_estimator):
         x = torch.randn(96, 10)
@@ -139,8 +161,7 @@ class TestCkaEstimator:
             CkaEstimator(kernel="rbf")
 
     def test_linear_alias_is_kept(self, run_estimator):
-        x = torch.randn(64, 10)
-        y = torch.randn(64, 7)
+        x, y = make_random_pair()
         td = make_td(x, y)
 
         result = LinearCkaEstimator()(td)
