@@ -2,6 +2,6 @@
 Representation similarity methods.
 """
 
-from .cka import LinearCkaEstimator
+from .cka import CkaEstimator, LinearCkaEstimator
 
-__all__ = ["LinearCkaEstimator"]
+__all__ = ["CkaEstimator", "LinearCkaEstimator"]

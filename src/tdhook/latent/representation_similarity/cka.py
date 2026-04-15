@@ -5,9 +5,9 @@ from tensordict import TensorDict
 from tensordict.nn import TensorDictModuleBase
 
 
-class LinearCkaEstimator(TensorDictModuleBase):
+class CkaEstimator(TensorDictModuleBase):
     """
-    Linear centered kernel alignment (CKA) between two representations.
+    Centered kernel alignment (CKA) between two representations.
 
     Reads two data tensors from the input TensorDict. Expects `(N, D)` or
     `(..., N, D)` for both tensors, with shared batch shape and sample count.
@@ -19,12 +19,16 @@ class LinearCkaEstimator(TensorDictModuleBase):
         in_key_a: str = "data_a",
         in_key_b: str = "data_b",
         out_key: str = "cka",
+        kernel: str = "linear",
         eps: float = 1e-12,
     ):
         super().__init__()
+        if kernel != "linear":
+            raise NotImplementedError(f"Unsupported kernel '{kernel}'. Only 'linear' is implemented for now.")
         self.in_key_a = in_key_a
         self.in_key_b = in_key_b
         self.out_key = out_key
+        self.kernel = kernel
         self.eps = eps
         self.in_keys = [in_key_a, in_key_b]
         self.out_keys = [out_key]
@@ -44,7 +48,7 @@ class LinearCkaEstimator(TensorDictModuleBase):
 
     def __repr__(self):
         fields = indent(
-            f"in_keys={self.in_keys},\nout_keys={self.out_keys},\neps={self.eps}",
+            f"in_keys={self.in_keys},\nout_keys={self.out_keys},\nkernel='{self.kernel}',\neps={self.eps}",
             4 * " ",
         )
         return f"{type(self).__name__}(\n{fields})"
@@ -52,7 +56,7 @@ class LinearCkaEstimator(TensorDictModuleBase):
 
 def _validate_inputs(x: torch.Tensor, y: torch.Tensor) -> None:
     if x.ndim < 2 or y.ndim < 2:
-        raise ValueError("Linear CKA expects tensors with shape (N, D) or (..., N, D)")
+        raise ValueError("CKA expects tensors with shape (N, D) or (..., N, D)")
     if x.shape[:-2] != y.shape[:-2]:
         raise ValueError(f"Expected matching batch shapes, got {x.shape[:-2]} and {y.shape[:-2]}")
     if x.shape[-2] != y.shape[-2]:
@@ -86,3 +90,6 @@ def _linear_cka(x: torch.Tensor, y: torch.Tensor, eps: float) -> torch.Tensor:
 
     value = numerator / denominator
     return value.float() if torch.isfinite(value) else nan
+
+
+LinearCkaEstimator = CkaEstimator

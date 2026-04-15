@@ -6,7 +6,13 @@ import pytest
 import torch
 from tensordict import TensorDict
 
-from tdhook.latent.representation_similarity import LinearCkaEstimator
+from tdhook.latent.representation_similarity import CkaEstimator, LinearCkaEstimator
+
+
+def make_td(x, y, in_key_a="data_a", in_key_b="data_b", batch_size=None):
+    if batch_size is None:
+        batch_size = [] if x.ndim == 2 else x.shape[:-2]
+    return TensorDict({in_key_a: x, in_key_b: y}, batch_size=batch_size)
 
 
 @pytest.fixture
@@ -14,15 +20,13 @@ def run_estimator():
     torch.manual_seed(42)
 
     def _run(x, y, in_key_a="data_a", in_key_b="data_b", batch_size=None, **estimator_kwargs):
-        if batch_size is None:
-            batch_size = [] if x.ndim == 2 else x.shape[:-2]
-        td = TensorDict({in_key_a: x, in_key_b: y}, batch_size=batch_size)
-        return LinearCkaEstimator(in_key_a=in_key_a, in_key_b=in_key_b, **estimator_kwargs)(td)
+        td = make_td(x, y, in_key_a=in_key_a, in_key_b=in_key_b, batch_size=batch_size)
+        return CkaEstimator(in_key_a=in_key_a, in_key_b=in_key_b, **estimator_kwargs)(td)
 
     return _run
 
 
-class TestLinearCkaEstimator:
+class TestCkaEstimator:
     def test_default_keys(self, run_estimator):
         x = torch.randn(64, 10)
         y = torch.randn(64, 7)
@@ -121,10 +125,24 @@ class TestLinearCkaEstimator:
         assert torch.allclose(r1, r2, equal_nan=True)
 
     def test_repr(self):
-        est = LinearCkaEstimator()
+        est = CkaEstimator()
         r = repr(est)
 
-        assert "LinearCkaEstimator" in r
+        assert "CkaEstimator" in r
         assert "in_keys=['data_a', 'data_b']" in r
         assert "out_keys=['cka']" in r
+        assert "kernel='linear'" in r
         assert "eps=" in r
+
+    def test_unknown_kernel_raises(self):
+        with pytest.raises(NotImplementedError, match="Only 'linear' is implemented"):
+            CkaEstimator(kernel="rbf")
+
+    def test_linear_alias_is_kept(self, run_estimator):
+        x = torch.randn(64, 10)
+        y = torch.randn(64, 7)
+        td = make_td(x, y)
+
+        result = LinearCkaEstimator()(td)
+
+        assert "cka" in result
