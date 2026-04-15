@@ -15,6 +15,7 @@ from .probing import (
     Probe,
     ProbeManager,
 )
+from .representation_similarity import CkaEstimator
 from .steering_vectors import SteeringVectors, ActivationAddition
 
 __all__ = [
@@ -23,6 +24,7 @@ __all__ = [
     "ActivationPatching",
     "BilinearProbe",
     "BilinearProbeManager",
+    "CkaEstimator",
     "LinearEstimator",
     "LowRankBilinearEstimator",
     "LocalKnnDimensionEstimator",

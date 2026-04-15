@@ -13,6 +13,8 @@ import torch
 
 
 class Riemann(Enum):
+    """Supported Riemann integration variants for gradient approximation."""
+
     left = 1
     right = 2
     middle = 3
@@ -42,7 +44,7 @@ def approximation_parameters(
         return riemann_builders(method=Riemann[method.split("_")[-1]])
     if method == "gausslegendre":
         return gauss_legendre_builders()
-    raise ValueError("Invalid integral approximation method name: {}".format(method))
+    raise ValueError(f"Invalid integral approximation method name: {method}")
 
 
 def riemann_builders(

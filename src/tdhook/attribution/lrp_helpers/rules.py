@@ -95,6 +95,13 @@ class AbstractFunctionMeta(ABCMeta, FunctionMeta):
 
 
 class Rule(Function, metaclass=AbstractFunctionMeta):
+    """Base class for LRP rules implemented as custom autograd functions.
+
+    Subclasses override `forward()` and `backward()` to define how relevance is
+    propagated through a wrapped module. Instances are registered onto modules
+    by temporarily replacing `module.forward` with `Function.apply(...)`.
+    """
+
     def __init__(self):
         self._apply_kwargs = {}
         # TODO: Add zero_params argument for all rules
@@ -116,11 +123,13 @@ class Rule(Function, metaclass=AbstractFunctionMeta):
     @staticmethod
     @abstractmethod
     def forward(ctx, apply_kwargs, module, model_kwargs, *inputs):
+        """Run the wrapped module and save any tensors needed for relevance propagation."""
         pass
 
     @staticmethod
     @abstractmethod
     def backward(ctx, *out_relevance):
+        """Propagate output relevance back to the inputs of the wrapped module."""
         pass
 
 
@@ -454,9 +463,7 @@ class BaseRuleMapper:
 
     def __call__(self, name: str, module: nn.Module) -> Rule | None:
         rule = self._rule_mapper(name, module)
-        if rule is None:
-            return self._call(name, module)
-        return rule
+        return self._call(name, module) if rule is None else rule
 
 
 class EpsilonPlus(BaseRuleMapper):
