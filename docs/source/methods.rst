@@ -105,6 +105,23 @@ Methods
             </div>
          </div>
 
+   .. grid-item-card::
+      :link: notebooks/methods/representation-similarity.ipynb
+      :class-card: surface
+      :class-body: surface
+
+      .. raw:: html
+
+         <div class="d-flex align-items-center">
+            <div class="d-flex justify-content-center" style="min-width: 50px; margin-right: 20px; height: 100%;">
+               <i class="fa-solid fa-code-compare fa-2x"></i>
+            </div>
+            <div>
+               <h5 class="card-title">Representation Similarity</h5>
+               <p class="card-text">Compare latent representations with CKA and leave room for additional similarity metrics.</p>
+            </div>
+         </div>
+
 .. toctree::
    :hidden:
    :maxdepth: 2
@@ -114,3 +131,4 @@ Methods
    notebooks/methods/linear-probing.ipynb
    notebooks/methods/bilinear-probing.ipynb
    notebooks/methods/dimension-estimation.ipynb
+   notebooks/methods/representation-similarity.ipynb
