@@ -102,6 +102,16 @@ class TestCkaEstimator:
 
         assert result["cka"].shape == batch_size
 
+    def test_empty_flattened_batch_returns_empty_output(self, run_estimator):
+        x = torch.randn(2, 0, 10, 8)
+        y = torch.randn(2, 0, 10, 6)
+
+        result = run_estimator(x, y, batch_size=[2, 0])
+
+        assert result["cka"].shape == (2, 0)
+        assert result["cka"].dtype == torch.float32
+        assert result["cka"].numel() == 0
+
     def test_mismatched_sample_counts_raise(self, run_estimator):
         with pytest.raises(ValueError, match="matching sample counts"):
             run_estimator(torch.randn(32, 8), torch.randn(31, 6))

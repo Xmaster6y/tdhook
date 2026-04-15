@@ -42,6 +42,9 @@ class CkaEstimator(TensorDictModuleBase):
         n = x.shape[-2]
         flat_x = x.reshape(-1, n, x.shape[-1])
         flat_y = y.reshape(-1, n, y.shape[-1])
+        if flat_x.shape[0] == 0:
+            td[self.out_key] = torch.empty(batch_shape, dtype=torch.float32, device=x.device)
+            return td
         cka_values = [_linear_cka(flat_x[i], flat_y[i], eps=self.eps) for i in range(flat_x.shape[0])]
         td[self.out_key] = torch.stack(cka_values).reshape(batch_shape)
         return td
