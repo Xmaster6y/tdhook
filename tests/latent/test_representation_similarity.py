@@ -6,7 +6,7 @@ import pytest
 import torch
 from tensordict import TensorDict
 
-from tdhook.latent.representation_similarity import CkaEstimator
+from tdhook.latent.representation_similarity import CkaEstimator, InformationImbalanceEstimator
 
 
 def make_td(x, y, in_key_a="data_a", in_key_b="data_b", batch_size=None):
@@ -169,3 +169,163 @@ class TestCkaEstimator:
     def test_unknown_kernel_raises(self):
         with pytest.raises(NotImplementedError, match="Only 'linear' is implemented"):
             CkaEstimator(kernel="rbf")
+
+
+class TestInformationImbalanceEstimator:
+    @pytest.fixture
+    def run_estimator(self):
+        torch.manual_seed(42)
+
+        def _run(x, y, in_key_a="data_a", in_key_b="data_b", batch_size=None, **estimator_kwargs):
+            td = make_td(x, y, in_key_a=in_key_a, in_key_b=in_key_b, batch_size=batch_size)
+            return InformationImbalanceEstimator(
+                in_key_a=in_key_a,
+                in_key_b=in_key_b,
+                **estimator_kwargs,
+            )(td)
+
+        return _run
+
+    def test_default_keys(self, run_estimator):
+        x, y = make_random_pair()
+        result = run_estimator(x, y)
+
+        assert "information_imbalance_a_to_b" in result
+        assert "information_imbalance_b_to_a" in result
+        assert result["information_imbalance_a_to_b"].ndim == 0
+        assert result["information_imbalance_b_to_a"].ndim == 0
+
+    def test_custom_keys(self, run_estimator):
+        x = torch.randn(64, 10)
+        y = torch.randn(64, 8)
+        result = run_estimator(
+            x,
+            y,
+            in_key_a="linear1",
+            in_key_b="linear2",
+            out_key_a_to_b="imb12",
+            out_key_b_to_a="imb21",
+        )
+
+        assert "linear1" in result
+        assert "linear2" in result
+        assert "imb12" in result
+        assert "imb21" in result
+        assert result["imb12"].ndim == 0
+        assert result["imb21"].ndim == 0
+
+    def test_outputs_are_finite_for_random_data(self, run_estimator):
+        x = torch.randn(128, 16)
+        y = torch.randn(128, 12)
+        result = run_estimator(x, y)
+
+        assert torch.isfinite(result["information_imbalance_a_to_b"])
+        assert torch.isfinite(result["information_imbalance_b_to_a"])
+
+    def test_directional_asymmetry(self, run_estimator):
+        n = 120
+        t = torch.linspace(-1.0, 1.0, n)
+        x = t.unsqueeze(-1)
+        y = (4 * t).round().unsqueeze(-1) / 4.0
+
+        result = run_estimator(x, y)
+        a_to_b = result["information_imbalance_a_to_b"]
+        b_to_a = result["information_imbalance_b_to_a"]
+
+        assert b_to_a > a_to_b
+
+    def test_identical_views_match_expected_minimum(self, run_estimator):
+        n = 64
+        x = torch.randn(n, 8)
+        result = run_estimator(x, x.clone())
+        expected = torch.tensor(2.0 / n, dtype=torch.float32)
+
+        assert torch.isclose(result["information_imbalance_a_to_b"], expected, atol=1e-6)
+        assert torch.isclose(result["information_imbalance_b_to_a"], expected, atol=1e-6)
+
+    @pytest.mark.parametrize(
+        ("x_shape", "y_shape"),
+        [
+            ((1, 10, 8), (1, 10, 6)),
+            ((5, 10, 8), (5, 10, 6)),
+            ((2, 3, 10, 8), (2, 3, 10, 6)),
+        ],
+        ids=["1x10", "5x10", "2x3x10"],
+    )
+    def test_batch_shape_preservation(self, run_estimator, x_shape, y_shape):
+        x = torch.randn(*x_shape)
+        y = torch.randn(*y_shape)
+        batch_size = x_shape[:-2]
+
+        result = run_estimator(x, y, batch_size=batch_size)
+
+        assert result["information_imbalance_a_to_b"].shape == batch_size
+        assert result["information_imbalance_b_to_a"].shape == batch_size
+
+    def test_empty_flattened_batch_returns_empty_output(self, run_estimator):
+        x = torch.randn(2, 0, 10, 8)
+        y = torch.randn(2, 0, 10, 6)
+
+        result = run_estimator(x, y, batch_size=[2, 0])
+
+        assert result["information_imbalance_a_to_b"].shape == (2, 0)
+        assert result["information_imbalance_b_to_a"].shape == (2, 0)
+        assert result["information_imbalance_a_to_b"].dtype == torch.float32
+        assert result["information_imbalance_b_to_a"].dtype == torch.float32
+
+    def test_mismatched_sample_counts_raise(self, run_estimator):
+        with pytest.raises(ValueError, match="matching sample counts"):
+            run_estimator(torch.randn(32, 8), torch.randn(31, 6))
+
+    def test_mismatched_batch_shapes_raise(self, run_estimator):
+        with pytest.raises(ValueError, match="matching batch shapes"):
+            run_estimator(torch.randn(2, 3, 16, 8), torch.randn(2, 4, 16, 6), batch_size=[2])
+
+    def test_invalid_rank_raises(self, run_estimator):
+        with pytest.raises(ValueError, match=r"shape \(N, D\) or \(\.\.\., N, D\)"):
+            run_estimator(torch.randn(32), torch.randn(32))
+
+    def test_mismatched_devices_raise(self, run_estimator):
+        x = torch.randn(32, 8)
+        y = torch.randn(32, 6, device="meta")
+
+        with pytest.raises(ValueError, match="same device"):
+            run_estimator(x, y)
+
+    def test_at_least_two_samples_required(self, run_estimator):
+        with pytest.raises(ValueError, match="at least 2 samples"):
+            run_estimator(torch.randn(1, 4), torch.randn(1, 3))
+
+    def test_integer_inputs_are_promoted_to_float32(self, run_estimator):
+        x = torch.arange(128, dtype=torch.int64).reshape(64, 2)
+        y = torch.arange(192, dtype=torch.int64).reshape(64, 3)
+
+        result = run_estimator(x, y)
+        assert result["information_imbalance_a_to_b"].dtype == torch.float32
+        assert result["information_imbalance_b_to_a"].dtype == torch.float32
+
+    def test_determinism(self, run_estimator):
+        x = torch.randn(96, 10)
+        y = torch.randn(96, 7)
+        r1 = run_estimator(x.clone(), y.clone())
+        r2 = run_estimator(x.clone(), y.clone())
+
+        assert torch.allclose(
+            r1["information_imbalance_a_to_b"],
+            r2["information_imbalance_a_to_b"],
+            equal_nan=True,
+        )
+        assert torch.allclose(
+            r1["information_imbalance_b_to_a"],
+            r2["information_imbalance_b_to_a"],
+            equal_nan=True,
+        )
+
+    def test_repr(self):
+        est = InformationImbalanceEstimator()
+        r = repr(est)
+
+        assert "InformationImbalanceEstimator" in r
+        assert "in_keys=['data_a', 'data_b']" in r
+        assert "out_keys=['information_imbalance_a_to_b', 'information_imbalance_b_to_a']" in r
+        assert "p=2.0" in r
