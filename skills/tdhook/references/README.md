@@ -9,7 +9,7 @@ Deep documentation for the tdhook skill. See [SKILL.md](../SKILL.md) for the qui
 | Full API (patterns, method implementations) | [api.md](api.md) |
 | Step-by-step use-case tutorials | [tutorials.md](tutorials.md) |
 | GitHub issues & solutions | [issues.md](issues.md) |
-| Version history & breaking changes | [releases.md](releases.md) |
+| Version history & breaking changes | [GitHub Releases](https://github.com/Xmaster6y/tdhook/releases) |
 | Codebase navigation | [file_structure.md](file_structure.md) |
 
 ## Official Documentation

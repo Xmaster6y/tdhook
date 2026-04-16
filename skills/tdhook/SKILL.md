@@ -197,7 +197,6 @@ Colab dev setup: see [tutorials.md](references/tutorials.md) Setup section.
 | [references/api.md](references/api.md) | Full API: HookedModule, methods by category |
 | [references/tutorials.md](references/tutorials.md) | Use-case tutorials |
 | [references/issues.md](references/issues.md) | GitHub issues & solutions |
-| [references/releases.md](references/releases.md) | Version history |
 | [references/file_structure.md](references/file_structure.md) | Codebase navigation |
 
-**Official docs**: [Home](https://tdhook.readthedocs.io/en/latest/) · [Methods](https://tdhook.readthedocs.io/en/latest/methods.html) · [Tutorials](https://tdhook.readthedocs.io/en/latest/tutorials.html) · [API Reference](https://tdhook.readthedocs.io/en/latest/api/index.html)
+**Official docs**: [Home](https://tdhook.readthedocs.io/en/latest/) · [Methods](https://tdhook.readthedocs.io/en/latest/methods.html) · [Tutorials](https://tdhook.readthedocs.io/en/latest/tutorials.html) · [API Reference](https://tdhook.readthedocs.io/en/latest/api/index.html) · [Releases](https://github.com/Xmaster6y/tdhook/releases)
