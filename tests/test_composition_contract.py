@@ -3,6 +3,7 @@ from pathlib import Path
 
 from tdhook import attribution, latent, weights
 from tdhook.latent import dimension_estimation
+from tdhook.stages import DOCUMENTED_STAGE_CAPABILITIES, capability_for_stage
 
 
 CAPABILITY_MATRIX = Path(__file__).parents[1] / "docs" / "source" / "_static" / "composition-capabilities.csv"
@@ -54,3 +55,12 @@ def test_callback_and_module_key_capabilities_are_not_undercounted():
     assert rows["GradCAM"]["produced_keys"] == "attribution_key/modules_to_attribute"
     assert "potentially unbounded" in rows["TaskVectors"]["model_passes"]
     assert "both evaluation callbacks" in rows["TaskVectors"]["device_batch_gradient"]
+
+
+def test_documented_built_in_stage_rows_have_executable_capabilities():
+    rows = {row["symbol"] for row in _capability_rows()}
+    assert set(DOCUMENTED_STAGE_CAPABILITIES).issubset(rows)
+    for method in DOCUMENTED_STAGE_CAPABILITIES.values():
+        capability = capability_for_stage(method)
+        assert capability.required_keys
+        assert capability.provided_keys

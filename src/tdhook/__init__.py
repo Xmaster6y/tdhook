@@ -18,4 +18,5 @@ __all__ = [
     "weights",
     "pipeline",
     "artifacts",
+    "stages",
 ]
