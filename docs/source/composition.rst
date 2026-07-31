@@ -1,6 +1,35 @@
 Composition contract
 ====================
 
+Sequential pipelines
+--------------------
+
+For workflows that need more than one model execution, use
+``tdhook.pipeline.Pipeline``.  A pipeline is an ordered list of stages with
+explicit TensorDict input and output keys; it is intentionally not a DAG
+scheduler and never converts artifacts implicitly.  ``MethodStage`` adapts an
+existing ``HookingContextFactory`` and runs the model once, while
+``TransformStage`` applies a TensorDict-to-TensorDict function.  Pipeline
+preflight checks dependencies and output collisions before it runs a model.
+
+.. code-block:: python
+
+   from tdhook.contexts import HookingContextFactory
+   from tdhook.pipeline import MethodStage, Pipeline, TransformStage
+
+   pipeline = Pipeline([
+       MethodStage("method", HookingContextFactory(),
+                   required_keys=["input"], provided_keys=["output"]),
+       TransformStage("summary", lambda td: td.set("mean", td["output"].mean(-1)),
+                      required_keys=["output"], provided_keys=["mean"]),
+   ])
+   result = pipeline.run(model, artifacts)
+   final_artifacts = result.artifacts
+
+Every method stage uses the same ``with factory.prepare(model)`` lifecycle as
+standalone code.  Context cleanup is therefore guaranteed if setup or a later
+stage raises.
+
 .. note::
 
    This is the Phase 0 architecture decision for `issue 57

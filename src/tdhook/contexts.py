@@ -51,26 +51,47 @@ class HookingContext:
         self._managed_by_context_manager = managed_by_context_manager
 
         working_module = self._module
-        with ExitStack() as stack:
-            for factory in self._pre_factories:
-                working_module = stack.enter_context(factory.prepare(working_module, self._in_keys, self._out_keys))
-            self._stack = stack.pop_all()
-
-        prep_module = self._prepare(working_module, self._in_keys, self._out_keys, self._extra_relative_path)
-        self._hooked_module = self._spawn(prep_module, self, self._extra_relative_path)
-        self._handle = self._hook(self._hooked_module)
-        return self._hooked_module
+        prepared = False
+        try:
+            with ExitStack() as stack:
+                for factory in self._pre_factories:
+                    working_module = stack.enter_context(
+                        factory.prepare(working_module, self._in_keys, self._out_keys)
+                    )
+                self._stack = stack.pop_all()
+            prep_module = self._prepare(working_module, self._in_keys, self._out_keys, self._extra_relative_path)
+            prepared = True
+            self._hooked_module = self._spawn(prep_module, self, self._extra_relative_path)
+            self._handle = self._hook(self._hooked_module)
+            return self._hooked_module
+        except Exception:
+            if self._handle is not None:
+                self._handle.remove()
+            if prepared:
+                self._restore(self._module, self._in_keys, self._out_keys, self._extra_relative_path)
+            if self._stack is not None:
+                self._stack.__exit__(None, None, None)
+            self._in_context = False
+            self._hooked_module = None
+            self._handle = None
+            self._stack = None
+            raise
 
     def __enter__(self):
         return self._enter(managed_by_context_manager=True)
 
     def __exit__(self, exc_type, exc_value, traceback):
-        self._handle.remove()
-        self._restore(self._module, self._in_keys, self._out_keys, self._extra_relative_path)
-        self._in_context = False
-        self._hooked_module = None
-        self._handle = None
-        self._stack.__exit__(exc_type, exc_value, traceback)
+        try:
+            if self._handle is not None:
+                self._handle.remove()
+            self._restore(self._module, self._in_keys, self._out_keys, self._extra_relative_path)
+        finally:
+            self._in_context = False
+            self._hooked_module = None
+            self._handle = None
+            if self._stack is not None:
+                self._stack.__exit__(exc_type, exc_value, traceback)
+                self._stack = None
 
     @contextmanager
     def disable_hooks(self) -> Generator[None, None, None]:
