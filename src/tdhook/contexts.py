@@ -64,18 +64,28 @@ class HookingContext:
             self._hooked_module = self._spawn(prep_module, self, self._extra_relative_path)
             self._handle = self._hook(self._hooked_module)
             return self._hooked_module
-        except Exception:
+        except BaseException:
+            self._abort_enter(prepared)
+            raise
+
+    def _abort_enter(self, prepared: bool) -> None:
+        """Undo a partially-entered context without allowing one cleanup failure to skip another."""
+        try:
             if self._handle is not None:
                 self._handle.remove()
-            if prepared:
-                self._restore(self._module, self._in_keys, self._out_keys, self._extra_relative_path)
-            if self._stack is not None:
-                self._stack.__exit__(None, None, None)
-            self._in_context = False
-            self._hooked_module = None
-            self._handle = None
-            self._stack = None
-            raise
+        finally:
+            try:
+                if prepared:
+                    self._restore(self._module, self._in_keys, self._out_keys, self._extra_relative_path)
+            finally:
+                try:
+                    if self._stack is not None:
+                        self._stack.__exit__(None, None, None)
+                finally:
+                    self._in_context = False
+                    self._hooked_module = None
+                    self._handle = None
+                    self._stack = None
 
     def __enter__(self):
         return self._enter(managed_by_context_manager=True)

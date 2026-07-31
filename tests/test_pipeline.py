@@ -1,6 +1,7 @@
 import pytest
 import torch
 from tensordict import TensorDict
+from tensordict.nn import TensorDictModule
 
 from tdhook.contexts import HookingContextFactory
 from tdhook.hooks import MultiHookHandle
@@ -53,6 +54,28 @@ def test_transform_then_method_with_nested_key(default_test_model):
     assert torch.allclose(result.artifacts["output"], default_test_model(torch.ones(2, 10) * 2))
 
 
+def test_method_stage_keeps_artifact_contract_separate_from_model_signature(default_test_model):
+    model = TensorDictModule(default_test_model, in_keys=["model_input"], out_keys=["prediction"])
+    artifacts = TensorDict({"model_input": torch.ones(2, 10), "baseline": torch.zeros(2, 10)}, batch_size=[2])
+    pipeline = Pipeline(
+        [
+            MethodStage(
+                "predict",
+                HookingContextFactory(),
+                required_keys=["model_input", "baseline"],
+                provided_keys=["prediction"],
+                model_in_keys=["model_input"],
+                model_out_keys=["prediction"],
+            )
+        ]
+    )
+
+    result = pipeline.run(model, artifacts)
+
+    assert "baseline" in result.artifacts
+    assert torch.allclose(result.artifacts["prediction"], default_test_model(artifacts["model_input"]))
+
+
 def test_invalid_dependencies_fail_before_model_execution(default_test_model):
     called = False
 
@@ -74,6 +97,13 @@ def test_duplicate_outputs_and_reserved_keys_are_rejected():
         Pipeline([first, second])
     with pytest.raises(ValueError, match="reserved pipeline key"):
         Pipeline([TransformStage("bad", lambda td: td, provided_keys=["_pipeline"])])
+    with pytest.raises(ValueError, match="duplicates output key.*report.*first"):
+        Pipeline(
+            [
+                TransformStage("first", lambda td: td, provided_keys=["report"]),
+                TransformStage("second", lambda td: td, provided_keys=[("report", "mean")]),
+            ]
+        )
     with pytest.raises(ValueError, match="reader.*writes_model.*writer"):
         Pipeline(
             [
@@ -113,6 +143,10 @@ def test_pipeline_reports_input_output_and_transform_contract_errors(default_tes
     with pytest.raises(ValueError, match="collision.*existing artifact keys.*input"):
         collision.run(default_test_model, TensorDict({"input": torch.ones(1)}, batch_size=[1]))
 
+    nested_collision = Pipeline([TransformStage("collision", lambda td: td, provided_keys=["report"])])
+    with pytest.raises(ValueError, match="collision.*existing artifact keys.*report"):
+        nested_collision.run(default_test_model, TensorDict({"report": {"mean": torch.ones(1)}}, batch_size=[1]))
+
     missing_output = Pipeline([TransformStage("missing-output", lambda td: td, provided_keys=["output"])])
     with pytest.raises(ValueError, match="missing-output.*did not provide.*output"):
         missing_output.run(default_test_model, TensorDict({}, batch_size=[]))
@@ -129,6 +163,18 @@ def test_pipeline_rejects_a_stage_that_returns_non_tensordict(default_test_model
         pipeline.run(default_test_model, TensorDict({}, batch_size=[]))
 
 
+def test_pipeline_rechecks_requirements_after_a_transform(default_test_model):
+    pipeline = Pipeline(
+        [
+            TransformStage("remove-input", lambda td: td.del_("input"), required_keys=["input"]),
+            TransformStage("needs-input", lambda td: td, required_keys=["input"]),
+        ]
+    )
+
+    with pytest.raises(ValueError, match="needs-input.*missing artifact keys.*input"):
+        pipeline.run(default_test_model, TensorDict({"input": torch.ones(1)}, batch_size=[1]))
+
+
 class FailingPrepare(HookingContextFactory):
     def _prepare_module(self, module, in_keys, out_keys, extra_relative_path):
         module.pipeline_setup_flag = True
@@ -142,6 +188,16 @@ class FailingPrepare(HookingContextFactory):
         raise RuntimeError("hook setup failed")
 
 
+class InterruptingPrepare(FailingPrepare):
+    def _hook_module(self, module):
+        raise KeyboardInterrupt("interrupted")
+
+
+class FailingCleanup(FailingPrepare):
+    def _restore_module(self, module, in_keys, out_keys, extra_relative_path):
+        raise RuntimeError("restore failed")
+
+
 def test_context_cleanup_on_method_setup_and_execution_failure(default_test_model):
     setup = Pipeline([MethodStage("setup", FailingPrepare(), required_keys=["input"], provided_keys=["output"])])
     with pytest.raises(RuntimeError, match="setup.*hook setup failed"):
@@ -151,3 +207,42 @@ def test_context_cleanup_on_method_setup_and_execution_failure(default_test_mode
     execute = Pipeline([TransformStage("explode", lambda td: (_ for _ in ()).throw(RuntimeError("boom")))])
     with pytest.raises(RuntimeError, match="explode.*boom"):
         execute.run(default_test_model, TensorDict({}, batch_size=[]))
+
+
+def test_context_cleanup_handles_interrupts_and_cleanup_errors(default_test_model):
+    interrupted = Pipeline(
+        [MethodStage("interrupt", InterruptingPrepare(), required_keys=["input"], provided_keys=["output"])]
+    )
+    with pytest.raises(KeyboardInterrupt, match="interrupted"):
+        interrupted.run(default_test_model, TensorDict({"input": torch.ones(2, 10)}, batch_size=[2]))
+    assert not hasattr(default_test_model, "pipeline_setup_flag")
+
+    class Handle:
+        removed = False
+
+        def remove(self):
+            self.removed = True
+
+    class Stack:
+        exited = False
+
+        def __exit__(self, *args):
+            self.exited = True
+
+    context = AddOne().prepare(default_test_model)
+    handle, stack = Handle(), Stack()
+    context._handle = handle
+    context._stack = stack
+    context._in_context = True
+    context._abort_enter(prepared=False)
+    assert not context._in_context
+    assert context._handle is None
+    assert handle.removed
+    assert stack.exited
+
+    context = FailingCleanup().prepare(default_test_model)
+    with pytest.raises(RuntimeError, match="restore failed"):
+        context.__enter__()
+    assert not context._in_context
+    assert context._handle is None
+    assert context._hooked_module is None

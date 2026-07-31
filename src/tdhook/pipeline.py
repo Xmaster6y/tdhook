@@ -33,6 +33,16 @@ def _keys(keys: Iterable[PipelineKey]) -> tuple[PipelineKey, ...]:
     return result
 
 
+def _path(key: PipelineKey) -> tuple[str, ...]:
+    return (key,) if isinstance(key, str) else key
+
+
+def _keys_conflict(first: PipelineKey, second: PipelineKey) -> bool:
+    """Whether two TensorDict keys are identical or ancestor/descendant paths."""
+    first_path, second_path = _path(first), _path(second)
+    return first_path[: len(second_path)] == second_path or second_path[: len(first_path)] == first_path
+
+
 @dataclass(frozen=True)
 class StageResult:
     """Metadata recorded for one completed stage."""
@@ -87,6 +97,8 @@ class MethodStage(Stage):
         provided_keys: Iterable[PipelineKey],
         effects: Iterable[str] = (),
         incompatible_effects: Iterable[str] = (),
+        model_in_keys: Iterable[PipelineKey] | None = None,
+        model_out_keys: Iterable[PipelineKey] | None = None,
     ) -> None:
         super().__init__(
             name,
@@ -96,10 +108,14 @@ class MethodStage(Stage):
             incompatible_effects=incompatible_effects,
         )
         self.factory = factory
+        self.model_in_keys = None if model_in_keys is None else _keys(model_in_keys)
+        self.model_out_keys = None if model_out_keys is None else _keys(model_out_keys)
 
     def run(self, model: nn.Module, artifacts: TensorDictBase) -> TensorDictBase:
         with self.factory.prepare(
-            model, in_keys=list(self.required_keys), out_keys=list(self.provided_keys)
+            model,
+            in_keys=None if self.model_in_keys is None else list(self.model_in_keys),
+            out_keys=None if self.model_out_keys is None else list(self.model_out_keys),
         ) as method:
             result = method(artifacts)
         return artifacts if result is None else result
@@ -166,17 +182,19 @@ class Pipeline:
             effects.update({effect: stage.name for effect in stage.effects})
             incompatible_effects.update({effect: stage.name for effect in stage.incompatible_effects})
             for key in stage.provided_keys:
-                if key in self.reserved_keys:
+                if any(_keys_conflict(key, reserved_key) for reserved_key in self.reserved_keys):
                     raise ValueError(f"Stage {stage.name!r} writes reserved pipeline key {key!r}")
-                if key in produced:
+                conflicting_key = next((output for output in produced if _keys_conflict(key, output)), None)
+                if conflicting_key is not None:
                     raise ValueError(
-                        f"Stage {stage.name!r} duplicates output key {key!r} already provided by {produced[key]!r}"
+                        f"Stage {stage.name!r} duplicates output key {key!r} already provided by "
+                        f"{produced[conflicting_key]!r}"
                     )
                 produced[key] = stage.name
 
     @staticmethod
     def _artifact_keys(artifacts: TensorDictBase) -> set[PipelineKey]:
-        return set(artifacts.keys(include_nested=True, leaves_only=True))
+        return set(artifacts.keys(include_nested=True, leaves_only=False))
 
     def validate(self, artifacts: TensorDictBase) -> None:
         """Fail before model execution when a stage dependency is unavailable."""
@@ -187,7 +205,9 @@ class Pipeline:
             missing = [key for key in stage.required_keys if key not in available]
             if missing:
                 raise ValueError(f"Stage {stage.name!r} requires missing artifact keys: {missing!r}")
-            collisions = [key for key in stage.provided_keys if key in available]
+            collisions = [
+                key for key in stage.provided_keys if any(_keys_conflict(key, existing) for existing in available)
+            ]
             if collisions:
                 raise ValueError(f"Stage {stage.name!r} writes existing artifact keys: {collisions!r}")
             available.update(stage.provided_keys)
@@ -197,6 +217,9 @@ class Pipeline:
         stage_results: list[StageResult] = []
         current = artifacts
         for stage in self.stages:
+            missing = [key for key in stage.required_keys if key not in self._artifact_keys(current)]
+            if missing:
+                raise ValueError(f"Stage {stage.name!r} requires missing artifact keys: {missing!r}")
             try:
                 current = stage.run(model, current)
             except Exception as error:
