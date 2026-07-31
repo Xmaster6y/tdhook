@@ -106,6 +106,13 @@ def test_public_artifact_contract_and_provenance(default_test_model):
     assert result.provenance[0].configuration == {"normalise": False}
 
 
+def test_artifact_contract_cannot_be_combined_with_legacy_storage_keys():
+    contract = ArtifactContract(provides={"prediction": ("outputs", "prediction")})
+
+    with pytest.raises(ValueError, match="either artifact_contract or storage keys"):
+        TransformStage("predict", lambda td: td, provided_keys=["prediction"], artifact_contract=contract)
+
+
 def test_invalid_dependencies_fail_before_model_execution(default_test_model):
     called = False
 

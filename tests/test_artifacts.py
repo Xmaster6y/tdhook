@@ -1,5 +1,8 @@
 import pytest
+import torch
+from torch import nn
 
+import tdhook.artifacts as artifacts
 from tdhook.artifacts import (
     ArtifactAdapter,
     ArtifactContract,
@@ -7,6 +10,8 @@ from tdhook.artifacts import (
     activation_caching_adapter,
     attribution_adapter,
     probing_adapter,
+    is_private_key,
+    make_provenance,
     validate_artifact_key,
     weight_adapter,
 )
@@ -23,6 +28,10 @@ def test_public_and_private_namespace_validation():
         validate_artifact_key("image")
     with pytest.raises(ValueError, match="Private artifact keys"):
         validate_artifact_key("scratch", public=False)
+    with pytest.raises(TypeError, match="Artifact keys"):
+        validate_artifact_key(("inputs", 1))
+    assert is_private_key(("_private", "saliency"))
+    assert not is_private_key(("inputs", "image"))
 
 
 def test_contracts_and_existing_method_adapters_are_storage_independent():
@@ -34,6 +43,32 @@ def test_contracts_and_existing_method_adapters_are_storage_independent():
     assert probing_adapter().contract.provided_keys == (("probes", "results"),)
     assert attribution_adapter().contract.provided_keys == (("attributions", "values"),)
     assert weight_adapter().contract.provided_keys == (("interventions", "weights"),)
+
+    with pytest.raises(ValueError, match="names must be non-empty"):
+        ArtifactContract(requires={"": ("inputs", "image")})
+    with pytest.raises(ValueError, match="keys must be unique"):
+        ArtifactContract(provides={"one": ("metrics", "score"), "two": ("metrics", "score")})
+    with pytest.raises(ValueError, match="method identifier"):
+        ArtifactAdapter("", contract, {"source": "image", "score": "score"})
+    with pytest.raises(ValueError, match="exactly match"):
+        ArtifactAdapter("legacy-score", contract, {"source": "image"})
+
+
+def test_provenance_handles_missing_package_metadata_and_buffer_only_models(monkeypatch):
+    class BufferOnlyModel(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.register_buffer("scale", torch.ones(1))
+
+    def missing_package(_):
+        raise artifacts.PackageNotFoundError
+
+    monkeypatch.setattr(artifacts, "version", missing_package)
+    provenance = make_provenance(stage="cache", method="ActivationCaching", model=BufferOnlyModel())
+
+    assert provenance.package_version == "unknown"
+    assert provenance.device == "cpu"
+    assert provenance.dtype == "torch.float32"
 
 
 def test_registry_rejects_conflicting_owners_and_stale_artifacts():
