@@ -1,6 +1,7 @@
 import pytest
 import torch
 from torch import nn
+from tensordict import TensorDict
 
 import tdhook.artifacts as artifacts
 from tdhook.artifacts import (
@@ -52,6 +53,24 @@ def test_contracts_and_existing_method_adapters_are_storage_independent():
         ArtifactAdapter("", contract, {"source": "image", "score": "score"})
     with pytest.raises(ValueError, match="exactly match"):
         ArtifactAdapter("legacy-score", contract, {"source": "image"})
+
+
+def test_adapter_copies_public_requirements_and_products_through_legacy_storage():
+    adapter = ArtifactAdapter(
+        "legacy-score",
+        ArtifactContract(requires={"source": ("inputs", "image")}, provides={"score": ("metrics", "score")}),
+        {"source": "image", "score": "score"},
+    )
+    artifacts_td = TensorDict({"inputs": {"image": torch.ones(2)}}, batch_size=[2])
+    storage = adapter.prepare(artifacts_td)
+    assert torch.equal(storage["image"], artifacts_td[("inputs", "image")])
+
+    storage.set("score", torch.ones(2))
+    result = adapter.finalize(artifacts_td, storage)
+    assert torch.equal(result[("metrics", "score")], torch.ones(2))
+
+    with pytest.raises(ValueError, match="did not provide"):
+        adapter.finalize(artifacts_td, TensorDict())
 
 
 def test_provenance_handles_missing_package_metadata_and_buffer_only_models(monkeypatch):

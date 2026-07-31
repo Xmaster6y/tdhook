@@ -4,10 +4,10 @@ from tensordict import TensorDict
 from tensordict.nn import TensorDictModule
 
 from tdhook.contexts import HookingContextFactory
-from tdhook.artifacts import ArtifactContract
+from tdhook.artifacts import ArtifactAdapter, ArtifactContract
 from tdhook.hooks import MultiHookHandle
 from tdhook.modules import HookedModule
-from tdhook.pipeline import MethodStage, Pipeline, Stage, TransformStage
+from tdhook.pipeline import AdapterStage, MethodStage, Pipeline, Stage, TransformStage
 
 
 class AddOne(HookingContextFactory):
@@ -100,6 +100,7 @@ def test_public_artifact_contract_and_provenance(default_test_model):
     )
 
     assert result.artifacts[("outputs", "prediction")].shape == (2, 10)
+    assert result.provenance[0].method.endswith(".<lambda>")
     assert result.provenance[0].model_id == "demo-model-v1"
     assert result.provenance[0].seed == 7
     assert result.provenance[0].parents == (("inputs", "model"),)
@@ -111,6 +112,32 @@ def test_artifact_contract_cannot_be_combined_with_legacy_storage_keys():
 
     with pytest.raises(ValueError, match="either artifact_contract or storage keys"):
         TransformStage("predict", lambda td: td, provided_keys=["prediction"], artifact_contract=contract)
+
+
+def test_adapter_stage_bridges_legacy_storage_and_records_concrete_method(default_test_model):
+    adapter = ArtifactAdapter(
+        "legacy-score",
+        ArtifactContract(requires={"source": ("inputs", "value")}, provides={"score": ("metrics", "score")}),
+        {"source": "value", "score": "score"},
+    )
+
+    def execute(model, artifacts, storage):
+        storage.set("score", storage["value"] + 1)
+
+    result = Pipeline([AdapterStage("score", adapter, execute)]).run(
+        default_test_model, TensorDict({"inputs": {"value": torch.ones(1)}}, batch_size=[1])
+    )
+
+    assert result.artifacts[("metrics", "score")].item() == 2
+    assert result.provenance[0].method == "legacy-score"
+
+
+def test_method_stage_records_factory_identity(default_test_model):
+    result = Pipeline([MethodStage("predict", AddOne(), required_keys=["input"], provided_keys=["output"])]).run(
+        default_test_model, TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
+    )
+
+    assert result.provenance[0].method == "AddOne"
 
 
 def test_invalid_dependencies_fail_before_model_execution(default_test_model):
@@ -153,6 +180,8 @@ def test_duplicate_outputs_and_reserved_keys_are_rejected():
 def test_stage_contract_validation_errors():
     with pytest.raises(ValueError, match="non-empty"):
         TransformStage("", lambda td: td)
+    with pytest.raises(ValueError, match="method identifier"):
+        TransformStage("missing-method", lambda td: td, method_id="")
     with pytest.raises(TypeError, match="Pipeline keys"):
         TransformStage("bad-key", lambda td: td, required_keys=[1])
     with pytest.raises(ValueError, match="duplicate keys"):

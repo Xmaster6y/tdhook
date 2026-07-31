@@ -13,6 +13,7 @@ from importlib.metadata import PackageNotFoundError, version
 from typing import Iterable, Mapping
 
 from torch import nn
+from tensordict import TensorDict, TensorDictBase
 
 from tdhook._types import UnraveledKey
 
@@ -102,8 +103,10 @@ class ArtifactAdapter:
     """Map a public contract onto the keys used by an existing method.
 
     ``storage`` maps each contract name to the method's current TensorDict
-    key.  It is intentionally metadata-only: adopting it never changes a
-    standalone method's return value or cache ownership.
+    key. :meth:`prepare` copies public requirements into that legacy storage;
+    :meth:`finalize` copies declared products back to the public contract.
+    These methods provide the runtime bridge used by ``AdapterStage`` while
+    leaving standalone methods unchanged.
     """
 
     method: str
@@ -118,6 +121,23 @@ class ArtifactAdapter:
             raise ValueError("Adapter storage keys must exactly match its contract names")
         for key in self.storage.values():
             _path(key)
+
+    def prepare(self, artifacts: TensorDictBase, storage: TensorDictBase | None = None) -> TensorDictBase:
+        """Populate legacy storage with this adapter's public requirements."""
+        storage = TensorDict() if storage is None else storage
+        for name, public_key in self.contract.requires.items():
+            storage.set(self.storage[name], artifacts.get(public_key))
+        return storage
+
+    def finalize(self, artifacts: TensorDictBase, storage: TensorDictBase) -> TensorDictBase:
+        """Publish declared legacy products under their stable public keys."""
+        for name, public_key in self.contract.provides.items():
+            legacy_key = self.storage[name]
+            if legacy_key not in storage.keys(include_nested=True, leaves_only=True):
+                raise ValueError(f"Legacy method {self.method!r} did not provide {legacy_key!r}")
+            value = storage.get(legacy_key)
+            artifacts.set(public_key, value)
+        return artifacts
 
 
 def activation_caching_adapter(cache_key: ArtifactKey = "cache") -> ArtifactAdapter:

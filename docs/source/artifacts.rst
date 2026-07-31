@@ -12,8 +12,12 @@ Stages can declare an :class:`tdhook.artifacts.ArtifactContract`, which gives
 each requirement and product a method-facing name and a public TensorDict key.
 An :class:`tdhook.artifacts.ArtifactAdapter` maps this contract onto existing
 method storage without changing that method's standalone return behaviour.
-The built-in adapter helpers cover activation caching, probing, attribution,
-and weight adapters.
+Use :class:`tdhook.pipeline.AdapterStage` to copy declared public requirements
+into that storage before execution and publish declared products afterwards.
+Its ``execute`` callback receives ``(model, artifacts, storage)``; pass the
+provided storage as the legacy method's cache or result TensorDict. The built-in
+adapter helpers cover activation caching, probing, attribution, and weight
+adapters.
 
 ``Pipeline.run`` returns provenance alongside artifacts and stage metadata.
 Pass the caller's stable ``model_id``, an optional ``seed``, and per-stage
