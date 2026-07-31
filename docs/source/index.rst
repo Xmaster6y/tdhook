@@ -10,6 +10,7 @@
 
     start
     methods
+    composition
     tutorials
     api/index
     references

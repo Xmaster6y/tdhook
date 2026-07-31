@@ -41,3 +41,13 @@ Most methods should work with minimal configuration. Here's a basic example of r
         td = hooked_model(td)  # Access attribution with td.get(("attr", "input"))
 
 For more detailed examples, see the :doc:`methods` page.
+
+Composition terminology
+-----------------------
+
+TDHook distinguishes a **composed model** (a model with multiple inputs,
+outputs, or submodules), **same-run hook composition** (compatible hook
+operations sharing one execution), and a **multi-stage pipeline** (ordered
+stages exchanging named TensorDict artifacts).  Model support does not imply
+method compatibility.  See the :doc:`composition` contract and capability
+matrix before combining methods.

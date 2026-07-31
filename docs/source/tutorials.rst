@@ -1,6 +1,11 @@
 Tutorials
 =========
 
+Tutorials may demonstrate a method on a **composed model**, a **same-run hook
+composition**, or a **multi-stage pipeline**.  These terms follow the
+:doc:`composition` contract.  Passing a cache or Python value between notebook
+cells is illustrative glue, not a declared pipeline artifact.
+
 .. raw:: html
 
    <script>
