@@ -11,8 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
-    environment: ci
+        python-version: ["3.11", "3.12", "3.13"]
     timeout-minutes: 10
     steps:
     - uses: actions/checkout@v4
@@ -34,12 +33,14 @@ jobs:
       run: |
         just tests
     - name: Upload coverage reports to Codecov
-      if: matrix.python-version == '3.10'
+      if: matrix.python-version == '3.11'
       uses: codecov/codecov-action@v5
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
+        files: coverage.xml
+        fail_ci_if_error: true
     - name: Upload test results to Codecov
-      if: matrix.python-version == '3.10' && ${{ !cancelled() }}
+      if: matrix.python-version == '3.11' && ${{ !cancelled() }}
       uses: codecov/test-results-action@v1
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
