@@ -10,12 +10,13 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Callable, Iterable, Sequence
+from typing import Callable, Iterable, Mapping, Sequence
 
 from torch import nn
 from tensordict import TensorDictBase
 
 from tdhook._types import UnraveledKey
+from tdhook.artifacts import ArtifactAdapter, ArtifactContract, ArtifactProvenance, make_provenance
 from tdhook.contexts import HookingContextFactory
 
 
@@ -58,6 +59,7 @@ class PipelineResult:
 
     artifacts: TensorDictBase
     stages: tuple[StageResult, ...]
+    provenance: tuple[ArtifactProvenance, ...] = ()
 
 
 class Stage(ABC):
@@ -71,12 +73,20 @@ class Stage(ABC):
         provided_keys: Iterable[PipelineKey] = (),
         effects: Iterable[str] = (),
         incompatible_effects: Iterable[str] = (),
+        artifact_contract: ArtifactContract | None = None,
+        method_id: str | None = None,
     ) -> None:
         if not name:
             raise ValueError("A stage must have a non-empty name")
         self.name = name
-        self.required_keys = _keys(required_keys)
-        self.provided_keys = _keys(provided_keys)
+        if artifact_contract is not None and (tuple(required_keys) or tuple(provided_keys)):
+            raise ValueError("Use either artifact_contract or storage keys, not both")
+        self.artifact_contract = artifact_contract
+        self.method_id = type(self).__name__ if method_id is None else method_id
+        if not self.method_id:
+            raise ValueError("A stage method identifier must be non-empty")
+        self.required_keys = _keys(artifact_contract.required_keys if artifact_contract else required_keys)
+        self.provided_keys = _keys(artifact_contract.provided_keys if artifact_contract else provided_keys)
         self.effects = frozenset(effects)
         self.incompatible_effects = frozenset(incompatible_effects)
 
@@ -93,12 +103,14 @@ class MethodStage(Stage):
         name: str,
         factory: HookingContextFactory,
         *,
-        required_keys: Iterable[PipelineKey],
-        provided_keys: Iterable[PipelineKey],
+        required_keys: Iterable[PipelineKey] = (),
+        provided_keys: Iterable[PipelineKey] = (),
         effects: Iterable[str] = (),
         incompatible_effects: Iterable[str] = (),
         model_in_keys: Iterable[PipelineKey] | None = None,
         model_out_keys: Iterable[PipelineKey] | None = None,
+        artifact_contract: ArtifactContract | None = None,
+        method_id: str | None = None,
     ) -> None:
         super().__init__(
             name,
@@ -106,6 +118,8 @@ class MethodStage(Stage):
             provided_keys=provided_keys,
             effects=("model_execution", *effects),
             incompatible_effects=incompatible_effects,
+            artifact_contract=artifact_contract,
+            method_id=type(factory).__name__ if method_id is None else method_id,
         )
         self.factory = factory
         self.model_in_keys = None if model_in_keys is None else _keys(model_in_keys)
@@ -133,6 +147,8 @@ class TransformStage(Stage):
         provided_keys: Iterable[PipelineKey] = (),
         effects: Iterable[str] = (),
         incompatible_effects: Iterable[str] = (),
+        artifact_contract: ArtifactContract | None = None,
+        method_id: str | None = None,
     ) -> None:
         super().__init__(
             name,
@@ -140,6 +156,8 @@ class TransformStage(Stage):
             provided_keys=provided_keys,
             effects=effects,
             incompatible_effects=incompatible_effects,
+            artifact_contract=artifact_contract,
+            method_id=_callable_identity(transform) if method_id is None else method_id,
         )
         self.transform = transform
 
@@ -148,6 +166,46 @@ class TransformStage(Stage):
         if not isinstance(result, TensorDictBase):
             raise TypeError(f"Transform stage {self.name!r} must return a TensorDict, got {type(result).__name__}")
         return result
+
+
+def _callable_identity(transform: Callable[..., object]) -> str:
+    """Return a useful identifier for provenance."""
+    module = getattr(transform, "__module__", type(transform).__module__)
+    name = getattr(transform, "__qualname__", type(transform).__qualname__)
+    return f"{module}.{name}"
+
+
+class AdapterStage(Stage):
+    """Run a legacy method against adapter-managed storage.
+
+    ``execute`` receives the model, public artifacts, and a TensorDict using
+    the legacy method's keys. It may return replacement public artifacts or
+    ``None`` after mutating them in place.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        adapter: ArtifactAdapter,
+        execute: Callable[[nn.Module, TensorDictBase, TensorDictBase], TensorDictBase | None],
+        *,
+        effects: Iterable[str] = (),
+        incompatible_effects: Iterable[str] = (),
+    ) -> None:
+        super().__init__(
+            name,
+            artifact_contract=adapter.contract,
+            effects=effects,
+            incompatible_effects=incompatible_effects,
+            method_id=adapter.method,
+        )
+        self.adapter = adapter
+        self.execute = execute
+
+    def run(self, model: nn.Module, artifacts: TensorDictBase) -> TensorDictBase:
+        storage = self.adapter.prepare(artifacts)
+        result = self.execute(model, artifacts, storage)
+        return self.adapter.finalize(artifacts if result is None else result, storage)
 
 
 class Pipeline:
@@ -212,9 +270,18 @@ class Pipeline:
                 raise ValueError(f"Stage {stage.name!r} writes existing artifact keys: {collisions!r}")
             available.update(stage.provided_keys)
 
-    def run(self, model: nn.Module, artifacts: TensorDictBase) -> PipelineResult:
+    def run(
+        self,
+        model: nn.Module,
+        artifacts: TensorDictBase,
+        *,
+        model_id: str | None = None,
+        seed: int | None = None,
+        stage_configurations: Mapping[str, Mapping[str, object]] | None = None,
+    ) -> PipelineResult:
         self.validate(artifacts)
         stage_results: list[StageResult] = []
+        provenance: list[ArtifactProvenance] = []
         current = artifacts
         for stage in self.stages:
             missing = [key for key in stage.required_keys if key not in self._artifact_keys(current)]
@@ -230,4 +297,15 @@ class Pipeline:
             if missing:
                 raise ValueError(f"Stage {stage.name!r} did not provide declared artifact keys: {missing!r}")
             stage_results.append(StageResult(stage.name, stage.provided_keys, stage.effects))
-        return PipelineResult(current, tuple(stage_results))
+            provenance.append(
+                make_provenance(
+                    stage=stage.name,
+                    method=stage.method_id,
+                    configuration=(stage_configurations or {}).get(stage.name),
+                    model_id=model_id,
+                    seed=seed,
+                    parents=stage.required_keys,
+                    model=model,
+                )
+            )
+        return PipelineResult(current, tuple(stage_results), tuple(provenance))
