@@ -1,6 +1,7 @@
 from contextlib import contextmanager
 from contextlib import ExitStack
 from typing import List, Optional, Generator, Dict, overload, Literal
+from weakref import WeakKeyDictionary
 from torch import nn
 from tensordict.nn import TensorDictModuleBase, TensorDictModule
 from tensordict import TensorDict
@@ -269,6 +270,7 @@ class CompositeHookingContextFactory(HookingContextFactory):
     def __init__(self, *contexts: HookingContextFactory):
         super().__init__()
         self._contexts = contexts
+        self._prepared_children = WeakKeyDictionary()
         self._validate_capabilities()
 
     def _validate_capabilities(self) -> None:
@@ -307,21 +309,24 @@ class CompositeHookingContextFactory(HookingContextFactory):
         extra_relative_path: str,
     ) -> TensorDictModuleBase:
         prepared_contexts = []
+        prepared_modules = []
         original_module = module
         try:
             for context in self._contexts:
                 module = context._prepare_module(module, in_keys, out_keys, extra_relative_path)
                 prepared_contexts.append(context)
+                prepared_modules.append(module)
+            self._prepared_children[module] = prepared_modules
             return module
         except BaseException:
             # A child can mutate the original module before raising.  Restore
             # the failing child as well as every successfully prepared child
             # in reverse order, just as on a normal context exit. Preserve the
             # original exception.
-            for context in reversed([context, *prepared_contexts]):
+            for context in [context, *reversed(prepared_contexts)]:
                 try:
                     context._restore_module(original_module, in_keys, out_keys, extra_relative_path)
-                except BaseException:
+                except Exception:
                     pass
             raise
 
@@ -339,30 +344,37 @@ class CompositeHookingContextFactory(HookingContextFactory):
     def _hook_module(self, module: HookedModule) -> MultiHookHandle:
         handles = []
         try:
-            for context in self._contexts:
-                handles.append(context._hook_module(self._child_module(module)))
+            prepared_children = self._prepared_children.get(module.td_module)
+            if prepared_children is None:
+                raise RuntimeError("Cannot compose hooks: missing prepared child modules")
+            for context, child_module in zip(self._contexts, prepared_children):
+                handles.append(context._hook_module(self._child_module(module, child_module)))
             return MultiHookHandle(handles)
         except BaseException:
             # Hooks registered by earlier children are live immediately.  Do
             # not leave them installed when a later child cannot be installed.
-            MultiHookHandle(handles).remove()
+            for handle in reversed(handles):
+                try:
+                    handle.remove()
+                except Exception:
+                    pass
             raise
 
     @staticmethod
-    def _child_module(module: HookedModule) -> HookedModule:
-        """Give a child a view whose relative root is the original module.
+    def _child_module(module: HookedModule, prepared_module: TensorDictModuleBase) -> HookedModule:
+        """Give a child its own prepared wrapper and original-module root.
 
-        Preparation often wraps the input in a ``TensorDictSequential``.  The
-        original TensorDict module remains an object inside that final wrapper;
-        locating it by identity means every child's paths continue to resolve
-        as they did before composition, independent of the order of rewrites.
+        A child may need state stored on its wrapper (for example, a cache
+        reference) while its hooks must resolve paths relative to the original
+        model. Locating that original module by identity supplies the latter
+        without replacing the former with a later child's wrapper.
         """
         original = module.hooking_context._module
-        for name, candidate in module.td_module.named_modules(remove_duplicate=False):
+        for name, candidate in prepared_module.named_modules(remove_duplicate=False):
             if candidate is original:
                 relative_path = merge_paths("td_module", name, module.hooking_context._extra_relative_path)
                 return HookedModule(
-                    module.td_module, hooking_context=module.hooking_context, relative_path=relative_path
+                    prepared_module, hooking_context=module.hooking_context, relative_path=relative_path
                 )
         raise RuntimeError("Cannot compose hooks: the prepared module no longer contains the original module")
 

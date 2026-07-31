@@ -164,8 +164,14 @@ class MultiHookHandle:
         self._handles = handles or []
 
     def remove(self):
+        error = None
         for handle in self._handles:
-            handle.remove()
+            try:
+                handle.remove()
+            except Exception as exc:
+                error = error or exc
+        if error is not None:
+            raise error
 
     def __enter__(self):
         return self

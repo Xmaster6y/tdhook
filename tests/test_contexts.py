@@ -19,7 +19,7 @@ from tdhook.modules import HookedModule
 from tdhook.hooks import MultiHookHandle
 from tdhook._types import UnraveledKey
 from tdhook.attribution import Saliency
-from tdhook.latent import SteeringVectors
+from tdhook.latent import SteeringVectors, ActivationPatching
 
 
 class Context1(HookingContextFactory):
@@ -102,6 +102,44 @@ class RestoreFailureFactory(HookingContextFactory):
 class ReplacementFactory(HookingContextFactory):
     def _prepare_module(self, module, in_keys, out_keys, extra_relative_path):
         return TensorDictModule(torch.nn.Identity(), in_keys=in_keys, out_keys=out_keys)
+
+
+class OrderedFailingFactory(PrepFlagFactory):
+    def __init__(self, name, events, fail=False):
+        super().__init__(name)
+        self.events = events
+        self.fail = fail
+
+    def _prepare_module(self, module, in_keys, out_keys, extra_relative_path):
+        self.events.append(f"prepare {self.flag_name}")
+        super()._prepare_module(module, in_keys, out_keys, extra_relative_path)
+        if self.fail:
+            raise RuntimeError("preparation failed")
+        return module
+
+    def _restore_module(self, module, in_keys, out_keys, extra_relative_path):
+        self.events.append(f"restore {self.flag_name}")
+        return super()._restore_module(module, in_keys, out_keys, extra_relative_path)
+
+
+class RemoveFailureHandle:
+    def __init__(self, should_fail, removed):
+        self.should_fail = should_fail
+        self.removed = removed
+
+    def remove(self):
+        self.removed.append(self.should_fail)
+        if self.should_fail:
+            raise RuntimeError("removal failed")
+
+
+class PartialRemovalFactory(HookingContextFactory):
+    def __init__(self, removed):
+        super().__init__()
+        self.removed = removed
+
+    def _hook_module(self, module):
+        return MultiHookHandle([RemoveFailureHandle(True, self.removed), RemoveFailureHandle(False, self.removed)])
 
 
 class TestBaseContext:
@@ -303,6 +341,16 @@ class TestCompositeTensorDictModule:
             with composite.prepare(default_test_model):
                 pass
 
+    def test_composite_restores_failed_preparation_in_lifo_order(self, default_test_model):
+        events = []
+        composite = CompositeHookingContextFactory(
+            OrderedFailingFactory("first", events), OrderedFailingFactory("second", events, fail=True)
+        )
+        with pytest.raises(RuntimeError, match="preparation failed"):
+            with composite.prepare(default_test_model):
+                pass
+        assert events == ["prepare first", "prepare second", "restore second", "restore first"]
+
     def test_composite_hook_failure_removes_registered_hooks(self, default_test_model):
         composite = CompositeHookingContextFactory(Context1(), FailingHookFactory())
         x = torch.randn(2, 3, 10)
@@ -311,6 +359,14 @@ class TestCompositeTensorDictModule:
             with composite.prepare(default_test_model):
                 pass
         assert torch.allclose(default_test_model(x), original)
+
+    def test_composite_hook_failure_attempts_every_registered_removal(self, default_test_model):
+        removed = []
+        composite = CompositeHookingContextFactory(PartialRemovalFactory(removed), FailingHookFactory())
+        with pytest.raises(RuntimeError, match="hook installation failed"):
+            with composite.prepare(default_test_model):
+                pass
+        assert removed == [True, False]
 
     def test_saliency_and_steering_share_original_module_paths(self, default_test_model):
         x = torch.randn(2, 3, 10)
@@ -323,6 +379,14 @@ class TestCompositeTensorDictModule:
             hooked_module(data)
         assert data["_mod_out", "output"].shape == (2, 3, 5)
         assert data["attr", "input"].shape == x.shape
+
+    def test_wrapped_children_keep_their_own_wrapper_state(self, default_test_model):
+        composite = CompositeHookingContextFactory(Saliency(), ActivationPatching([""]))
+        # Both children access a cache stored on their own TensorDict wrapper
+        # during hook installation. Context entry used to fail before a run
+        # because Saliency received ActivationPatching's wrapper instead.
+        with composite.prepare(default_test_model):
+            pass
 
     def test_composite_rejects_rewrites_that_drop_the_original_module(self, default_test_model):
         composite = CompositeHookingContextFactory(ReplacementFactory(), Context1())
