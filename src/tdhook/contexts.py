@@ -1,6 +1,7 @@
 from contextlib import contextmanager
 from contextlib import ExitStack
 from typing import List, Optional, Generator, Dict, overload, Literal
+from weakref import WeakKeyDictionary
 from torch import nn
 from tensordict.nn import TensorDictModuleBase, TensorDictModule
 from tensordict import TensorDict
@@ -269,19 +270,36 @@ class CompositeHookingContextFactory(HookingContextFactory):
     def __init__(self, *contexts: HookingContextFactory):
         super().__init__()
         self._contexts = contexts
-        attributes = ("_spawn_hooked_module", "_hooking_context_class", "_hooked_module_class")
-        composite_overriden = {
-            attr: getattr(type(self), attr) != getattr(HookingContextFactory, attr) for attr in attributes
-        }
-        for context in contexts:
-            for attr in attributes:
-                if (
-                    getattr(type(context), attr) != getattr(HookingContextFactory, attr)
-                    and not composite_overriden[attr]
-                ):
-                    raise ValueError(
-                        f"Cannot compose factories that override {attr}, consider subclassing this factory to override {attr}"
-                    )
+        self._prepared_children = WeakKeyDictionary()
+        self._validate_capabilities()
+
+    def _validate_capabilities(self) -> None:
+        """Reject capabilities that cannot be represented by one shared context.
+
+        A same-run group owns one :class:`HookingContext` and one
+        :class:`HookedModule`.  Factories that need a specialised context or
+        wrapper therefore cannot be safely composed yet; failing before any
+        module mutation is preferable to silently giving the child the wrong
+        runtime object.
+        """
+        for context in self._contexts:
+            if type(context)._hooking_context_class is not HookingContext:
+                raise ValueError(
+                    f"Cannot compose {type(context).__name__}: it requires the specialised "
+                    f"{type(context)._hooking_context_class.__name__} capability. "
+                    "Same-run composition currently supports factories using HookingContext."
+                )
+            if type(context)._hooked_module_class is not HookedModule:
+                raise ValueError(
+                    f"Cannot compose {type(context).__name__}: it requires the specialised "
+                    f"{type(context)._hooked_module_class.__name__} capability. "
+                    "Same-run composition currently supports factories using HookedModule."
+                )
+            if type(context)._spawn_hooked_module is not HookingContextFactory._spawn_hooked_module:
+                raise ValueError(
+                    f"Cannot compose {type(context).__name__}: it customises hooked-module spawning, "
+                    "which is not a shared-context capability."
+                )
 
     def _prepare_module(
         self,
@@ -290,9 +308,27 @@ class CompositeHookingContextFactory(HookingContextFactory):
         out_keys: List[UnraveledKey],
         extra_relative_path: str,
     ) -> TensorDictModuleBase:
-        for context in self._contexts:
-            module = context._prepare_module(module, in_keys, out_keys, extra_relative_path)
-        return module
+        prepared_contexts = []
+        prepared_modules = []
+        original_module = module
+        try:
+            for context in self._contexts:
+                module = context._prepare_module(module, in_keys, out_keys, extra_relative_path)
+                prepared_contexts.append(context)
+                prepared_modules.append(module)
+            self._prepared_children[module] = prepared_modules
+            return module
+        except BaseException:
+            # A child can mutate the original module before raising.  Restore
+            # the failing child as well as every successfully prepared child
+            # in reverse order, just as on a normal context exit. Preserve the
+            # original exception.
+            for context in [context, *reversed(prepared_contexts)]:
+                try:
+                    context._restore_module(original_module, in_keys, out_keys, extra_relative_path)
+                except Exception:
+                    pass
+            raise
 
     def _restore_module(
         self,
@@ -306,5 +342,43 @@ class CompositeHookingContextFactory(HookingContextFactory):
         return module
 
     def _hook_module(self, module: HookedModule) -> MultiHookHandle:
-        handles = [context._hook_module(module) for context in self._contexts]
-        return MultiHookHandle(handles)
+        handles = []
+        try:
+            prepared_children = self._prepared_children.get(module.td_module)
+            if prepared_children is None:
+                raise RuntimeError("Cannot compose hooks: missing prepared child modules")
+            for context, child_module in zip(self._contexts, prepared_children):
+                handles.append(context._hook_module(self._child_module(module, child_module)))
+            return MultiHookHandle(handles)
+        except BaseException:
+            # Hooks registered by earlier children are live immediately.  Do
+            # not leave them installed when a later child cannot be installed.
+            for handle in reversed(handles):
+                try:
+                    handle.remove()
+                except Exception:
+                    pass
+            raise
+
+    @staticmethod
+    def _child_module(module: HookedModule, prepared_module: TensorDictModuleBase) -> HookedModule:
+        """Give a child its own prepared wrapper and original-module root.
+
+        A child may need state stored on its wrapper (for example, a cache
+        reference) while its hooks must resolve paths relative to the original
+        model. Locating that original module by identity supplies the latter
+        without replacing the former with a later child's wrapper.
+        """
+        original = module.hooking_context._module
+        for name, candidate in prepared_module.named_modules(remove_duplicate=False):
+            if candidate is original:
+                relative_path = merge_paths("td_module", name, module.hooking_context._extra_relative_path)
+                return HookedModule(
+                    prepared_module, hooking_context=module.hooking_context, relative_path=relative_path
+                )
+        raise RuntimeError("Cannot compose hooks: the prepared module no longer contains the original module")
+
+
+# A clearer public name for the same-run composition API.  Keep the original
+# name for backwards compatibility.
+HookGroup = CompositeHookingContextFactory
