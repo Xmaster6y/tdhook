@@ -9,10 +9,12 @@ from typing import List
 
 import pytest
 
-from tdhook.contexts import HookingContextFactory, CompositeHookingContextFactory
+from tdhook.contexts import HookingContextFactory, CompositeHookingContextFactory, HookGroup
 from tdhook.modules import HookedModule
 from tdhook.hooks import MultiHookHandle
 from tdhook._types import UnraveledKey
+from tdhook.attribution import Saliency
+from tdhook.latent import SteeringVectors
 
 
 class Context1(HookingContextFactory):
@@ -64,6 +66,17 @@ class BadSpawnFactory(HookingContextFactory):
         return super()._spawn_hooked_module(prep_module, hooking_context, extra_relative_path)
 
 
+class FailingPrepFactory(PrepFlagFactory):
+    def _prepare_module(self, module, in_keys, out_keys, extra_relative_path):
+        super()._prepare_module(module, in_keys, out_keys, extra_relative_path)
+        raise RuntimeError("preparation failed")
+
+
+class FailingHookFactory(HookingContextFactory):
+    def _hook_module(self, module):
+        raise RuntimeError("hook installation failed")
+
+
 class TestBaseContext:
     """Basic single-context behavior."""
 
@@ -101,6 +114,9 @@ class TestCompositeContext:
             hooked_module(data)
             assert data["output"].shape == (2, 3, 5)
             assert torch.allclose(data["output"], (original_output + 1) * 2)
+
+    def test_hook_group_is_compatibility_alias(self):
+        assert HookGroup is CompositeHookingContextFactory
 
 
 class TestHookingContextLifecycle:
@@ -234,8 +250,38 @@ class TestCompositeTensorDictModule:
 
     def test_composite_raises_on_bad_spawn_override(self, default_test_model):
         """Composite rejects contexts overriding _spawn_hooked_module."""
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="customises hooked-module spawning"):
             CompositeHookingContextFactory(BadSpawnFactory())
+
+    def test_composite_preparation_failure_restores_earlier_children(self, default_test_model):
+        td_mod = TensorDictModule(module=default_test_model, in_keys=["input"], out_keys=["output"])
+        composite = CompositeHookingContextFactory(PrepFlagFactory("first"), FailingPrepFactory("second"))
+        with pytest.raises(RuntimeError, match="preparation failed"):
+            with composite.prepare(td_mod):
+                pass
+        assert not hasattr(td_mod, "first")
+        assert not hasattr(td_mod, "second")
+
+    def test_composite_hook_failure_removes_registered_hooks(self, default_test_model):
+        composite = CompositeHookingContextFactory(Context1(), FailingHookFactory())
+        x = torch.randn(2, 3, 10)
+        original = default_test_model(x)
+        with pytest.raises(RuntimeError, match="hook installation failed"):
+            with composite.prepare(default_test_model):
+                pass
+        assert torch.allclose(default_test_model(x), original)
+
+    def test_saliency_and_steering_share_original_module_paths(self, default_test_model):
+        x = torch.randn(2, 3, 10)
+        composite = CompositeHookingContextFactory(
+            Saliency(),
+            SteeringVectors([""], lambda module_key, output: output + 1),
+        )
+        with composite.prepare(default_test_model) as hooked_module:
+            data = TensorDict({"input": x}, batch_size=[2, 3])
+            hooked_module(data)
+        assert data["_mod_out", "output"].shape == (2, 3, 5)
+        assert data["attr", "input"].shape == x.shape
 
 
 class TestDirectHookedModuleUsage:

@@ -181,6 +181,10 @@ share one execution:
    :class:`SteeringVectors <tdhook.latent.SteeringVectors>`.  They use the
    standard context/module classes and do not wrap the model.
 
+   ``HookGroup`` (also available as ``CompositeHookingContextFactory``) installs
+   children in the order supplied. Reads observe preceding writes in the same
+   direction, and writes are applied in that same deterministic order.
+
 ``wrapped methods``
    Attribution methods, :class:`ActivationAddition
    <tdhook.latent.ActivationAddition>`, and :class:`ActivationPatching
@@ -211,20 +215,21 @@ share one execution:
      - Untested: registration order is deterministic, but cross-method
        conformance and cleanup tests are pending.  Target: promote compatible
        pairs after conformance coverage.
-     - Current blocker: the composite factory does not preserve the wrapped
-       child's relative path.  Target: path-safe composition or a planned stage
-       split.
-     - Current blocker: the generic composite cannot select or merge the
-       required specialised context/module classes.  Target: isolate the
-       specialised stage unless it declares a merge strategy.
+     - Supported for standard-context children: each child resolves paths
+       against the original module after any ordered wrapper rewrites. Setup
+       rolls back prepared children and already-installed hooks on failure.
+     - Unsupported before mutation with a capability diagnostic: specialised
+       context/module requirements need an explicit merge strategy. Use a
+       separate pipeline stage meanwhile.
      - Not applicable: place the operator at a pipeline boundary.
    * - Wrapped methods
-     - Current blocker: the wrapped child's relative path is lost.  Target:
-       path-safe composition or a planned stage split.
-     - Current blocker: child wrappers and relative paths are not merged.
-       Target: merge compatible wrappers and split the rest.
-     - Current blocker: wrapper and specialised context/module requirements are
-       not merged.  Target: an explicit merge strategy or stage isolation.
+     - Supported for standard-context children; relative paths are rebased to
+       the original module after wrapper rewrites.
+     - Supported when both wrappers retain the original module and use the
+       standard shared context/module. Otherwise fail before mutation and
+       split into stages.
+     - Unsupported before mutation with a capability diagnostic; an explicit
+       merge strategy is required.
      - Not applicable: place the operator at a pipeline boundary.
    * - Specialised methods
      - Current blocker: the generic composite rejects the specialised
