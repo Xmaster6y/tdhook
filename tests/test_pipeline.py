@@ -4,6 +4,7 @@ from tensordict import TensorDict
 from tensordict.nn import TensorDictModule
 
 from tdhook.contexts import HookingContextFactory
+from tdhook.artifacts import ArtifactContract
 from tdhook.hooks import MultiHookHandle
 from tdhook.modules import HookedModule
 from tdhook.pipeline import MethodStage, Pipeline, Stage, TransformStage
@@ -74,6 +75,35 @@ def test_method_stage_keeps_artifact_contract_separate_from_model_signature(defa
 
     assert "baseline" in result.artifacts
     assert torch.allclose(result.artifacts["prediction"], default_test_model(artifacts["model_input"]))
+
+
+def test_public_artifact_contract_and_provenance(default_test_model):
+    contract = ArtifactContract(
+        requires={"source": ("inputs", "model")}, provides={"prediction": ("outputs", "prediction")}
+    )
+    pipeline = Pipeline(
+        [
+            TransformStage(
+                "predict",
+                lambda td: td.set(("outputs", "prediction"), td[("inputs", "model")] + 1),
+                artifact_contract=contract,
+            )
+        ]
+    )
+
+    result = pipeline.run(
+        default_test_model,
+        TensorDict({"inputs": {"model": torch.ones(2, 10)}}, batch_size=[2]),
+        model_id="demo-model-v1",
+        seed=7,
+        stage_configurations={"predict": {"normalise": False}},
+    )
+
+    assert result.artifacts[("outputs", "prediction")].shape == (2, 10)
+    assert result.provenance[0].model_id == "demo-model-v1"
+    assert result.provenance[0].seed == 7
+    assert result.provenance[0].parents == (("inputs", "model"),)
+    assert result.provenance[0].configuration == {"normalise": False}
 
 
 def test_invalid_dependencies_fail_before_model_execution(default_test_model):

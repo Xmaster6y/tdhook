@@ -11,6 +11,7 @@
     start
     methods
     composition
+    artifacts
     tutorials
     api/index
     references
