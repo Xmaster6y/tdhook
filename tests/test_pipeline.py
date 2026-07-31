@@ -5,7 +5,7 @@ from tensordict import TensorDict
 from tdhook.contexts import HookingContextFactory
 from tdhook.hooks import MultiHookHandle
 from tdhook.modules import HookedModule
-from tdhook.pipeline import MethodStage, Pipeline, TransformStage
+from tdhook.pipeline import MethodStage, Pipeline, Stage, TransformStage
 
 
 class AddOne(HookingContextFactory):
@@ -81,6 +81,52 @@ def test_duplicate_outputs_and_reserved_keys_are_rejected():
                 TransformStage("reader", lambda td: td, incompatible_effects=["writes_model"]),
             ]
         )
+
+
+def test_stage_contract_validation_errors():
+    with pytest.raises(ValueError, match="non-empty"):
+        TransformStage("", lambda td: td)
+    with pytest.raises(TypeError, match="Pipeline keys"):
+        TransformStage("bad-key", lambda td: td, required_keys=[1])
+    with pytest.raises(ValueError, match="duplicate keys"):
+        TransformStage("duplicate-key", lambda td: td, provided_keys=["output", "output"])
+    with pytest.raises(ValueError, match="stage names"):
+        Pipeline([TransformStage("same", lambda td: td), TransformStage("same", lambda td: td)])
+    with pytest.raises(ValueError, match="writer.*reads_model.*reader"):
+        Pipeline(
+            [
+                TransformStage("reader", lambda td: td, incompatible_effects=["reads_model"]),
+                TransformStage("writer", lambda td: td, effects=["reads_model"]),
+            ]
+        )
+
+
+def test_pipeline_reports_input_output_and_transform_contract_errors(default_test_model):
+    pipeline = Pipeline([TransformStage("transform", lambda td: "not a tensordict")])
+    with pytest.raises(RuntimeError, match="transform.*must return a TensorDict"):
+        pipeline.run(default_test_model, TensorDict({}, batch_size=[]))
+
+    with pytest.raises(TypeError, match="artifacts must be a TensorDict"):
+        pipeline.validate({})
+
+    collision = Pipeline([TransformStage("collision", lambda td: td, provided_keys=["input"])])
+    with pytest.raises(ValueError, match="collision.*existing artifact keys.*input"):
+        collision.run(default_test_model, TensorDict({"input": torch.ones(1)}, batch_size=[1]))
+
+    missing_output = Pipeline([TransformStage("missing-output", lambda td: td, provided_keys=["output"])])
+    with pytest.raises(ValueError, match="missing-output.*did not provide.*output"):
+        missing_output.run(default_test_model, TensorDict({}, batch_size=[]))
+
+
+class InvalidResultStage(Stage):
+    def run(self, model, artifacts):
+        return "not a tensordict"
+
+
+def test_pipeline_rejects_a_stage_that_returns_non_tensordict(default_test_model):
+    pipeline = Pipeline([InvalidResultStage("invalid")])
+    with pytest.raises(TypeError, match="invalid.*not a TensorDict"):
+        pipeline.run(default_test_model, TensorDict({}, batch_size=[]))
 
 
 class FailingPrepare(HookingContextFactory):
