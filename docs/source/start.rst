@@ -41,3 +41,13 @@ Most methods should work with minimal configuration. Here's a basic example of r
         td = hooked_model(td)  # Access attribution with td.get(("attr", "input"))
 
 For more detailed examples, see the :doc:`methods` page.
+
+Composition terminology
+-----------------------
+
+TDHook's goal is to make every public method available to a declared
+**multi-stage pipeline**, coalescing compatible hooks into the fewest safe model
+executions.  The contract distinguishes a **composed model** (a model with
+multiple inputs, outputs, or submodules), **same-run hook composition**, and
+pipeline stages exchanging named TensorDict artifacts.  See the
+:doc:`composition` contract for the planner target and capability matrix.

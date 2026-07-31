@@ -1,6 +1,11 @@
 Tutorials
 =========
 
+Tutorials may demonstrate a method on a **composed model**, a **same-run hook
+composition**, or a **multi-stage pipeline**.  These terms follow the
+:doc:`composition` contract.  Existing notebook hand-offs are migration
+candidates for named TensorDict artifacts and declared pipeline stages.
+
 .. raw:: html
 
    <script>
