@@ -11,7 +11,11 @@ from tdhook.stages import (
     AttributionStage,
     ProbingStage,
     WeightInterventionStage,
+    activation_caching_stage,
+    attribution_stage,
     capability_for_stage,
+    probing_stage,
+    weight_intervention_stage,
 )
 from tdhook.contexts import HookingContextFactory
 
@@ -70,3 +74,10 @@ def test_pipeline_claims_and_checks_artifact_generation_during_execution(default
 def test_capabilities_are_executable_contracts():
     assert capability_for_stage("ActivationCaching").provided_keys == (("activations", "cache"),)
     assert capability_for_stage("WeightIntervention").provided_keys == (("outputs", "model"),)
+
+
+def test_public_stage_factories_build_the_typed_stages():
+    assert isinstance(activation_caching_stage("cache", ActivationCaching("0")), ActivationCachingStage)
+    assert isinstance(attribution_stage("attr", HookingContextFactory()), AttributionStage)
+    assert isinstance(probing_stage("probe", HookingContextFactory(), object()), ProbingStage)
+    assert isinstance(weight_intervention_stage("intervene", HookingContextFactory()), WeightInterventionStage)
