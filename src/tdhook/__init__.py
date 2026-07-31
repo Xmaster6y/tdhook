@@ -16,4 +16,5 @@ __all__ = [
     "attribution",
     "auto",
     "weights",
+    "pipeline",
 ]
