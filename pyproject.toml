@@ -8,7 +8,7 @@ license-files = ["LICENSE"]
 authors = [
     {name = "Yoann Poupart", email = "yoann.poupart@ens-lyon.org"},
 ]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "tensordict>=0.10",
     "torch>=2.7.1",
@@ -17,9 +17,9 @@ classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Science/Research",
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
 ]
 
 [project.urls]
@@ -36,6 +36,7 @@ dev = [
     "pytest>=8.3.5",
     "pytest-cov>=6.1.1",
     "nnsight>=0.4.11",
+    "sentencepiece>=0.2.1",
     "zennit>=0.5.1",
     "scikit-learn>=1.7.1",
 ]
