@@ -4,8 +4,9 @@ Composition contract
 .. note::
 
    This is the Phase 0 architecture decision for `issue 57
-   <https://github.com/Xmaster6y/tdhook/issues/57>`_.  It describes behavior
-   that exists today and deliberately does not introduce a pipeline runtime.
+   <https://github.com/Xmaster6y/tdhook/issues/57>`_.  It defines the
+   composability target and records the implementation work required to reach
+   it.  The pipeline runtime itself is implemented by later roadmap phases.
 
 Decision
 --------
@@ -35,6 +36,31 @@ The terms above are canonical for source documentation, tutorials, and the ECML
 demo.  A workflow may use more than one term: for example, a multi-stage
 pipeline may run a same-run hook composition inside one stage on a composed
 model.
+
+Design goal
+-----------
+
+TDHook is designed to make every public method usable in a declared
+multi-stage pipeline.  Within that pipeline, the planner should coalesce
+compatible hooks into the fewest safe model executions.  A method that cannot
+share one execution is not outside the composability goal: the planner places
+it at an explicit stage boundary and carries its named TensorDict artifacts
+forward.
+
+The target contract is therefore:
+
+* every public method is representable as a model stage, TensorDict transform,
+  weight-mutation stage, or owned support component;
+* every stage declares the complete capability record below;
+* compatible reads and writes can share a run with deterministic ordering;
+* incompatible hook paths, context classes, mutations, devices, or gradient
+  requirements cause a planned stage split rather than implicit behavior;
+* the planner minimizes model executions subject to those constraints; and
+* preflight returns an executable stage plan or an actionable incompatibility,
+  before the first model call.
+
+This is a strong workflow-level composability promise, not a promise that every
+pair of methods must occupy the same forward/backward execution.
 
 Capability model
 ----------------
@@ -73,16 +99,22 @@ operators.
    Device, shape/batch, and autograd requirements that preflight must check or
    explicitly delegate to a callback.
 
-Composition states
-------------------
+Current evidence states
+-----------------------
+
+The capability inventory uses the following states to track implementation
+progress toward the design goal.  They describe the current release, not the
+roadmap ceiling.
 
 ``supported``
    The current public contract has enough information to validate the
    operation.  This is not a blanket claim about every callback or key choice.
 
 ``unsupported``
-   The current implementation has a known incompatibility.  The reason is
-   stated below or in the capability inventory.
+   The current implementation has a known incompatibility in that composition
+   mode.  The planner target is to repair it or isolate the method at an
+   explicit stage boundary; the reason is stated below or in the capability
+   inventory.
 
 ``untested``
    The implementation may be mechanically eligible, but TDHook does not yet
@@ -110,8 +142,10 @@ are not exported by those modules are not stable public methods.
 Same-run compatibility
 ----------------------
 
-The matrix groups methods by the implementation property that determines
-same-run behavior:
+Same-run composition is an optimization inside the broader pipeline contract.
+The matrix records today's implementation blockers and the intended resolution.
+It groups methods by the property that determines whether they can currently
+share one execution:
 
 ``simple hooks``
    :class:`Probing <tdhook.latent.probing.Probing>` and
@@ -146,24 +180,31 @@ same-run behavior:
      - TensorDict operators
    * - Simple hooks
      - Untested: registration order is deterministic, but cross-method
-       conformance and cleanup tests are pending.
-     - Unsupported: the composite factory does not preserve the wrapped
-       child's relative path.
-     - Unsupported: the generic composite cannot select or merge the required
-       specialised context/module classes.
+       conformance and cleanup tests are pending.  Target: promote compatible
+       pairs after conformance coverage.
+     - Current blocker: the composite factory does not preserve the wrapped
+       child's relative path.  Target: path-safe composition or a planned stage
+       split.
+     - Current blocker: the generic composite cannot select or merge the
+       required specialised context/module classes.  Target: isolate the
+       specialised stage unless it declares a merge strategy.
      - Not applicable: place the operator at a pipeline boundary.
    * - Wrapped methods
-     - Unsupported: the wrapped child's relative path is lost.
-     - Unsupported: child wrappers and relative paths are not merged.
-     - Unsupported: wrapper and specialised context/module requirements are
-       not merged.
+     - Current blocker: the wrapped child's relative path is lost.  Target:
+       path-safe composition or a planned stage split.
+     - Current blocker: child wrappers and relative paths are not merged.
+       Target: merge compatible wrappers and split the rest.
+     - Current blocker: wrapper and specialised context/module requirements are
+       not merged.  Target: an explicit merge strategy or stage isolation.
      - Not applicable: place the operator at a pipeline boundary.
    * - Specialised methods
-     - Unsupported: the generic composite rejects the specialised
-       context/module requirement.
-     - Unsupported: specialised classes and wrappers are not merged.
-     - Unsupported: there is no rule for selecting or merging competing
-       specialised classes.
+     - Current blocker: the generic composite rejects the specialised
+       context/module requirement.  Target: stage isolation by default.
+     - Current blocker: specialised classes and wrappers are not merged.
+       Target: an explicit merge strategy or stage isolation.
+     - Current blocker: there is no rule for selecting or merging competing
+       specialised classes.  Target: stage isolation unless both declare the
+       same compatible owner.
      - Not applicable: place the operator at a pipeline boundary.
    * - TensorDict operators
      - Not applicable: place the operator at a pipeline boundary.
@@ -207,11 +248,11 @@ the capability of their base read/write operator with the direction shown
 above.  Hook handles are removed when the run exits, including exceptional
 exit.
 
-Multi-stage preflight contract
-------------------------------
+Multi-stage planner contract
+----------------------------
 
-Until a pipeline runtime is implemented, a declared workflow is valid only if
-all of the following can be decided before the first model execution:
+The pipeline runtime must make all of the following decisions before the first
+model execution:
 
 #. Every stage names one row in the capability inventory or declares an
    equivalent custom capability record.
@@ -225,16 +266,21 @@ all of the following can be decided before the first model execution:
    evaluations, and callback-controlled evaluation loops.
 #. Temporary model mutation has a scoped owner and restoration occurs before a
    later incompatible stage starts.
-#. Any ``unsupported`` combination fails preflight with the reason in this
-   document.  Any ``untested`` combination requires an explicit opt-in; it must
-   never be promoted to ``supported`` from shared inheritance alone.
+#. A same-run incompatibility produces a stage split when the required artifact
+   boundary is available.  It fails preflight only when no valid split or
+   adapter exists.
+#. Any remaining ``unsupported`` combination fails preflight with the reason
+   in this document.  Any ``untested`` same-run combination remains split by
+   default; it must never be promoted to ``supported`` from shared inheritance
+   alone.
 
 Consequences
 ------------
 
-This decision intentionally makes current limitations visible.  Generic
-same-run factory composition is not a public cross-family promise, notebook
-glue is not a declared artifact contract, and pure TensorDict operators are the
-only currently supported multi-stage composition class.  Issues that add the
-runtime, artifact schemas, conformance tests, or demos may promote individual
-matrix cells only when implementation and evidence change together.
+This decision makes composability the organizing architecture of TDHook.  The
+pipeline is the public abstraction; same-run hook composition is its
+execution-minimizing optimization, and TensorDict artifacts are its stable
+boundaries.  Current wrapper, path, and specialised-context limitations become
+concrete runtime and conformance work rather than permanent API exclusions.
+Later roadmap issues promote matrix cells as implementation and evidence land,
+while preserving a usable pipeline through explicit stage splits.

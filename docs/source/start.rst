@@ -45,9 +45,9 @@ For more detailed examples, see the :doc:`methods` page.
 Composition terminology
 -----------------------
 
-TDHook distinguishes a **composed model** (a model with multiple inputs,
-outputs, or submodules), **same-run hook composition** (compatible hook
-operations sharing one execution), and a **multi-stage pipeline** (ordered
-stages exchanging named TensorDict artifacts).  Model support does not imply
-method compatibility.  See the :doc:`composition` contract and capability
-matrix before combining methods.
+TDHook's goal is to make every public method available to a declared
+**multi-stage pipeline**, coalescing compatible hooks into the fewest safe model
+executions.  The contract distinguishes a **composed model** (a model with
+multiple inputs, outputs, or submodules), **same-run hook composition**, and
+pipeline stages exchanging named TensorDict artifacts.  See the
+:doc:`composition` contract for the planner target and capability matrix.

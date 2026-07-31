@@ -42,13 +42,13 @@ with IntegratedGradients(init_attr_targets=init_attr_targets).prepare(model) as 
 
 ### Composition
 
-TDHook distinguishes a **composed model** (multiple inputs, outputs, or
-submodules), **same-run hook composition** (compatible hooks sharing one
-execution), and a **multi-stage pipeline** (ordered stages exchanging named
-TensorDict artifacts). These are separate guarantees: support for a composed
-model does not imply that two methods are compatible. See the
+TDHook's composability goal is that every public method can participate in a
+declared **multi-stage pipeline**, with compatible hooks combined into the
+fewest safe model executions. The contract distinguishes a **composed model**
+(multiple inputs, outputs, or submodules), **same-run hook composition**, and
+pipeline stages exchanging named TensorDict artifacts. See the
 [composition contract](./docs/source/composition.rst) for the capability
-inventory and the current supported, unsupported, and untested states.
+inventory, planner target, and current implementation status.
 
 To dig deeper, see the [documentation](https://tdhook.readthedocs.io).
 
