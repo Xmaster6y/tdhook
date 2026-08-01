@@ -4,6 +4,7 @@ from torch import nn
 from tensordict import TensorDict
 from tensordict.nn import TensorDictModule
 
+from tdhook.attribution import ActivationMaximisation
 from tdhook.contexts import HookingContextFactory, HookingContextWithCache
 from tdhook.artifacts import ArtifactAdapter, ArtifactContract
 from tdhook.hooks import MultiHookHandle
@@ -131,6 +132,46 @@ def test_plan_does_not_prepare_factories_and_isolates_specialised_contexts(defau
     assert not specialised.prepared
 
 
+def test_plan_splits_empty_keys_subclasses_and_factories_with_instance_setup():
+    class CustomMethodStage(MethodStage):
+        def run(self, model, artifacts):
+            return super().run(model, artifacts)
+
+    pipelines = [
+        (
+            Pipeline(
+                [
+                    MethodStage("first", AddOne(), coexecution_key=""),
+                    MethodStage("second", TimesTwo(), coexecution_key=""),
+                ]
+            ),
+            [("first",), ("second",)],
+        ),
+        (
+            Pipeline(
+                [
+                    CustomMethodStage("first", AddOne(), coexecution_key="safe"),
+                    CustomMethodStage("second", TimesTwo(), coexecution_key="safe"),
+                ]
+            ),
+            [("first",), ("second",)],
+        ),
+        (
+            Pipeline(
+                [
+                    MethodStage("configured", ActivationMaximisation(["linear"], n_steps=1), coexecution_key="safe"),
+                    MethodStage("second", TimesTwo(), coexecution_key="safe"),
+                ]
+            ),
+            [("configured",), ("second",)],
+        ),
+    ]
+
+    for pipeline, expected_runs in pipelines:
+        plan = pipeline.plan()
+        assert [run.stages for run in plan.runs] == expected_runs
+
+
 @pytest.mark.parametrize(
     "stages",
     [
@@ -159,9 +200,10 @@ def test_coalescing_rejects_each_incomplete_compatibility_contract(stages):
     assert not Pipeline._can_coalesce(stages)
 
 
-def test_stage_rejects_a_negative_model_pass_declaration():
-    with pytest.raises(ValueError, match="model_passes"):
-        MethodStage("invalid", AddOne(), model_passes=-1)
+@pytest.mark.parametrize("model_passes", [-1, 0])
+def test_model_executing_stage_rejects_a_non_positive_pass_declaration(model_passes):
+    with pytest.raises(ValueError, match="model_passes|positive"):
+        MethodStage("invalid", AddOne(), model_passes=model_passes)
 
 
 def test_transform_then_method_with_nested_key(default_test_model):

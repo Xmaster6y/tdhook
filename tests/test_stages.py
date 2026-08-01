@@ -110,6 +110,25 @@ def test_capabilities_are_executable_contracts():
         capability_for_stage("Attribution")
 
 
+def test_attribution_capabilities_preserve_subclass_pass_budgets():
+    class CustomIntegratedGradients(IntegratedGradients):
+        pass
+
+    class CustomActivationMaximisation(ActivationMaximisation):
+        pass
+
+    assert (
+        capability_for_stage(
+            "Attribution", factory=CustomIntegratedGradients(n_steps=2, compute_convergence_delta=True)
+        ).model_passes
+        == 3
+    )
+    assert (
+        capability_for_stage("Attribution", factory=CustomActivationMaximisation(["linear"], n_steps=4)).model_passes
+        == 4
+    )
+
+
 def test_public_stage_factories_build_the_typed_stages():
     assert isinstance(activation_caching_stage("cache", ActivationCaching("0")), ActivationCachingStage)
     assert isinstance(attribution_stage("attr", HookingContextFactory()), AttributionStage)

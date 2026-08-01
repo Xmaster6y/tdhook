@@ -125,6 +125,8 @@ class Stage(ABC):
         self.model_passes = inferred_passes if model_passes is None else model_passes
         if self.model_passes < 0:
             raise ValueError("Stage model_passes must be non-negative")
+        if "model_execution" in self.effects and self.model_passes == 0:
+            raise ValueError("Model-executing stages require positive model_passes")
         self.gradient_mode = gradient_mode
         self.device_batch_constraints = tuple(device_batch_constraints)
         self.coexecution_key = coexecution_key
@@ -327,10 +329,10 @@ class Pipeline:
     @staticmethod
     def _can_coalesce(stages: Sequence[Stage]) -> bool:
         """Return whether explicit capabilities prove one shared model run safe."""
-        if not stages or not all(isinstance(stage, MethodStage) for stage in stages):
+        if not stages or not all(type(stage) is MethodStage for stage in stages):
             return False
         first = stages[0]
-        if first.coexecution_key is None or any(stage.coexecution_key != first.coexecution_key for stage in stages):
+        if not first.coexecution_key or any(stage.coexecution_key != first.coexecution_key for stage in stages):
             return False
         if any(stage.model_passes != 1 for stage in stages):
             return False
@@ -356,6 +358,12 @@ class Pipeline:
             produced.update(stage.provided_keys)
             effects.update(stage.effects)
             incompatible.update(stage.incompatible_effects)
+            # HookGroup owns one context and does not enter child contexts.
+            # Factories that configure context or wrapper state per instance
+            # therefore need their standalone lifecycle until they expose an
+            # explicit shared-group contract.
+            if stage.factory._hooking_context_kwargs or stage.factory._hooked_module_kwargs:
+                return False
         try:
             HookGroup(*(stage.factory for stage in stages))
         except ValueError:
@@ -394,7 +402,7 @@ class Pipeline:
         index = 0
         while index < len(self.stages):
             candidate = [self.stages[index]]
-            if isinstance(candidate[0], MethodStage) and candidate[0].coexecution_key is not None:
+            if type(candidate[0]) is MethodStage and candidate[0].coexecution_key:
                 while index + len(candidate) < len(self.stages):
                     next_stage = self.stages[index + len(candidate)]
                     if not self._can_coalesce([*candidate, next_stage]):
