@@ -16,7 +16,7 @@ from torch import nn
 from tensordict import TensorDictBase
 
 from tdhook._types import UnraveledKey
-from tdhook.artifacts import ArtifactAdapter, ArtifactContract, ArtifactProvenance, make_provenance
+from tdhook.artifacts import ArtifactAdapter, ArtifactContract, ArtifactProvenance, ArtifactRegistry, make_provenance
 from tdhook.contexts import HookingContextFactory
 
 
@@ -211,9 +211,16 @@ class AdapterStage(Stage):
 class Pipeline:
     """Validate and execute an ordered sequence of stages."""
 
-    def __init__(self, stages: Sequence[Stage], *, reserved_keys: Iterable[PipelineKey] = RESERVED_KEYS) -> None:
+    def __init__(
+        self,
+        stages: Sequence[Stage],
+        *,
+        reserved_keys: Iterable[PipelineKey] = RESERVED_KEYS,
+        artifact_registry: ArtifactRegistry | None = None,
+    ) -> None:
         self.stages = tuple(stages)
         self.reserved_keys = frozenset(_keys(reserved_keys))
+        self.artifact_registry = artifact_registry
         self._validate_static()
 
     def _validate_static(self) -> None:
@@ -280,6 +287,16 @@ class Pipeline:
         stage_configurations: Mapping[str, Mapping[str, object]] | None = None,
     ) -> PipelineResult:
         self.validate(artifacts)
+        registry = self.artifact_registry or ArtifactRegistry()
+        generation = registry.begin_generation()
+        # Only declared pipeline inputs are owned by the caller for this
+        # execution. Retained but undeclared artifacts can belong to another
+        # pipeline sharing this registry and must not cause an ownership clash.
+        initial_required_keys = {
+            key for stage in self.stages for key in stage.required_keys if key in self._artifact_keys(artifacts)
+        }
+        for key in initial_required_keys:
+            registry.claim(key, "<pipeline-input>", generation=generation)
         stage_results: list[StageResult] = []
         provenance: list[ArtifactProvenance] = []
         current = artifacts
@@ -287,6 +304,8 @@ class Pipeline:
             missing = [key for key in stage.required_keys if key not in self._artifact_keys(current)]
             if missing:
                 raise ValueError(f"Stage {stage.name!r} requires missing artifact keys: {missing!r}")
+            for key in stage.required_keys:
+                registry.require_fresh(key, generation=generation)
             try:
                 current = stage.run(model, current)
             except Exception as error:
@@ -296,6 +315,9 @@ class Pipeline:
             missing = [key for key in stage.provided_keys if key not in self._artifact_keys(current)]
             if missing:
                 raise ValueError(f"Stage {stage.name!r} did not provide declared artifact keys: {missing!r}")
+            for key in stage.provided_keys:
+                registry.claim(key, stage.name, generation=generation)
+                registry.require_fresh(key, generation=generation)
             stage_results.append(StageResult(stage.name, stage.provided_keys, stage.effects))
             provenance.append(
                 make_provenance(

@@ -163,6 +163,23 @@ probing objects are included so the public surface is complete, but are marked
 ``probing support`` rather than executable stages.  Implementation helpers that
 are not exported by those modules are not stable public methods.
 
+Executable built-in stages
+--------------------------
+
+For the method families used by the ECML demonstrations, use the factories in
+``tdhook.stages`` rather than writing an ``AdapterStage`` callback. They run
+the existing public method unchanged and translate its legacy storage into
+stable artifact paths. For example, ``activation_caching_stage`` publishes the
+real context cache at ``("activations", "cache")``; it never labels that cache
+as weights. ``attribution_stage``, ``probing_stage``, and
+``weight_intervention_stage`` respectively publish attribution values, probe
+manager results, and an intervention pass's model output.
+
+Each factory has an executable ``StageCapability`` record. The composition
+contract tests check that the documented rows for ``ActivationCaching``,
+``Probing``, and ``Adapters`` still resolve to one of those records, so an API
+or matrix change cannot quietly drop its implementation contract.
+
 .. csv-table:: Public capability inventory
    :file: _static/composition-capabilities.csv
    :header-rows: 1
