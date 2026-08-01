@@ -138,6 +138,10 @@ def test_attribution_stage_maps_baseline_and_additional_inputs_and_reports_passe
         },
         batch_size=[2],
     )
+    plan = Pipeline([stage]).plan(artifacts)
+    assert plan.model_passes == 3
+    assert plan.runs[0].gradient_mode == "required"
+    assert plan.runs[0].device_batch_constraints
     result = Pipeline([stage]).run(default_test_model, artifacts)
     assert result.artifacts[("attributions", "values")].shape == (2, 10)
     assert AttributionStage("maximise", ActivationMaximisation(["linear1"], n_steps=4)).capability.model_passes == 4
