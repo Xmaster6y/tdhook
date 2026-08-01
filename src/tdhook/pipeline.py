@@ -289,9 +289,13 @@ class Pipeline:
         self.validate(artifacts)
         registry = self.artifact_registry or ArtifactRegistry()
         generation = registry.begin_generation()
-        # Inputs are owned by the caller for this execution.  All later
-        # requirements and products are checked against this generation.
-        for key in self._artifact_keys(artifacts):
+        # Only declared pipeline inputs are owned by the caller for this
+        # execution. Retained but undeclared artifacts can belong to another
+        # pipeline sharing this registry and must not cause an ownership clash.
+        initial_required_keys = {
+            key for stage in self.stages for key in stage.required_keys if key in self._artifact_keys(artifacts)
+        }
+        for key in initial_required_keys:
             registry.claim(key, "<pipeline-input>", generation=generation)
         stage_results: list[StageResult] = []
         provenance: list[ArtifactProvenance] = []

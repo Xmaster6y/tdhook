@@ -7,8 +7,8 @@ the adapter owns the temporary legacy storage used for one model pass.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Iterable
+from dataclasses import dataclass, replace
+from typing import Iterable, Mapping
 
 from torch import nn
 from tensordict import TensorDict, TensorDictBase
@@ -33,6 +33,22 @@ def _execute(factory: HookingContextFactory, model: nn.Module, storage: TensorDi
     with factory.prepare(model) as method:
         result = method(storage)
     return storage if result is None else result
+
+
+def _public_input_key(key: PipelineKey) -> PipelineKey:
+    return ("inputs", key) if isinstance(key, str) else ("inputs", *key)
+
+
+def _attribution_capability(factory: HookingContextFactory) -> StageCapability:
+    """Return model-pass metadata for the concrete attribution factory."""
+    name = type(factory).__name__
+    if name == "ActivationMaximisation":
+        passes = factory._n_steps
+    elif name == "IntegratedGradients":
+        passes = 1 + (2 if factory._compute_convergence_delta else 0)
+    else:
+        passes = 1
+    return replace(AttributionStage.capability, method=name, model_passes=passes)
 
 
 class _FactoryStage(Stage):
@@ -82,7 +98,8 @@ class ActivationCachingStage(_FactoryStage):
         # unaffected after the pipeline pass.
         kwargs = self.factory._hooking_context_kwargs
         previous = kwargs.get("cache")
-        kwargs["cache"] = storage.get("cache") if "cache" in storage else TensorDict()
+        storage.set("cache", previous if previous is not None else TensorDict())
+        kwargs["cache"] = storage.get("cache")
         try:
             _execute(self.factory, model, storage)
             storage.set("cache", kwargs["cache"])
@@ -109,14 +126,27 @@ class AttributionStage(_FactoryStage):
         *,
         input_key: PipelineKey = ("inputs", "input"),
         attribution_key: PipelineKey = ("attributions", "values"),
-        legacy_attribution_key: PipelineKey = "attr",
+        legacy_attribution_key: PipelineKey = ("attr", "input"),
+        baseline_key: PipelineKey | None = None,
+        additional_keys: Mapping[PipelineKey, PipelineKey] | None = None,
     ):
+        requires: dict[str, PipelineKey] = {"input": input_key}
+        storage: dict[str, PipelineKey] = {"input": "input", "attributions": legacy_attribution_key}
+        legacy_baseline = getattr(factory, "_baseline_key", None)
+        if legacy_baseline is not None:
+            requires["baseline"] = baseline_key or _public_input_key(legacy_baseline)
+            storage["baseline"] = (legacy_baseline, "input")
+        for index, legacy_key in enumerate(getattr(factory, "_additional_init_keys", ())):
+            public_key = (additional_keys or {}).get(legacy_key, _public_input_key(legacy_key))
+            requires[f"additional_{index}"] = public_key
+            storage[f"additional_{index}"] = legacy_key
         adapter = ArtifactAdapter(
             "Attribution",
-            ArtifactContract(requires={"input": input_key}, provides={"attributions": attribution_key}),
-            {"input": "input", "attributions": legacy_attribution_key},
+            ArtifactContract(requires=requires, provides={"attributions": attribution_key}),
+            storage,
         )
         super().__init__(name, factory, adapter, effects=("gradient",))
+        self.capability = _attribution_capability(factory)
 
     def run(self, model: nn.Module, artifacts: TensorDictBase) -> TensorDictBase:
         storage = self._storage(artifacts)
@@ -138,11 +168,18 @@ class ProbingStage(_FactoryStage):
         *,
         input_key: PipelineKey = ("inputs", "input"),
         result_key: PipelineKey = ("probes", "results"),
+        additional_keys: Mapping[PipelineKey, PipelineKey] | None = None,
     ):
+        requires: dict[str, PipelineKey] = {"input": input_key}
+        storage: dict[str, PipelineKey] = {"input": "input", "results": "results"}
+        for index, legacy_key in enumerate(getattr(factory, "_additional_keys", ()) or ()):
+            public_key = (additional_keys or {}).get(legacy_key, _public_input_key(legacy_key))
+            requires[f"additional_{index}"] = public_key
+            storage[f"additional_{index}"] = legacy_key
         adapter = ArtifactAdapter(
             "Probing",
-            ArtifactContract(requires={"input": input_key}, provides={"results": result_key}),
-            {"input": "input", "results": "results"},
+            ArtifactContract(requires=requires, provides={"results": result_key}),
+            storage,
         )
         super().__init__(name, factory, adapter, effects=("probe_update",))
         self.results = results
@@ -210,8 +247,12 @@ DOCUMENTED_STAGE_CAPABILITIES = {
 }
 
 
-def capability_for_stage(method: str) -> StageCapability:
-    """Return the executable contract for a supported built-in stage."""
+def capability_for_stage(method: str, *, factory: HookingContextFactory | None = None) -> StageCapability:
+    """Return a built-in capability, deriving attribution passes per factory."""
+    if method == "Attribution":
+        if factory is None:
+            raise ValueError("Attribution capabilities require the concrete factory")
+        return _attribution_capability(factory)
     return BUILTIN_STAGE_CAPABILITIES[method]
 
 
