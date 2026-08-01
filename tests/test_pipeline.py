@@ -131,6 +131,39 @@ def test_plan_does_not_prepare_factories_and_isolates_specialised_contexts(defau
     assert not specialised.prepared
 
 
+@pytest.mark.parametrize(
+    "stages",
+    [
+        [TransformStage("transform", lambda td: td)],
+        [MethodStage("unknown", AddOne())],
+        [MethodStage("many-passes", AddOne(), coexecution_key="safe", model_passes=2)],
+        [
+            MethodStage("first", AddOne(), coexecution_key="safe", model_in_keys=["input"]),
+            MethodStage("second", TimesTwo(), coexecution_key="safe", model_in_keys=["different"]),
+        ],
+        [
+            MethodStage("first", AddOne(), coexecution_key="safe", gradient_mode="required"),
+            MethodStage("second", TimesTwo(), coexecution_key="safe", gradient_mode="optional"),
+        ],
+        [
+            MethodStage("first", AddOne(), coexecution_key="safe", provided_keys=["intermediate"]),
+            MethodStage("second", TimesTwo(), coexecution_key="safe", required_keys=["intermediate"]),
+        ],
+        [
+            MethodStage("first", AddOne(), coexecution_key="safe", effects=["writer"]),
+            MethodStage("second", TimesTwo(), coexecution_key="safe", incompatible_effects=["writer"]),
+        ],
+    ],
+)
+def test_coalescing_rejects_each_incomplete_compatibility_contract(stages):
+    assert not Pipeline._can_coalesce(stages)
+
+
+def test_stage_rejects_a_negative_model_pass_declaration():
+    with pytest.raises(ValueError, match="model_passes"):
+        MethodStage("invalid", AddOne(), model_passes=-1)
+
+
 def test_transform_then_method_with_nested_key(default_test_model):
     artifacts = TensorDict({"source": {"x": torch.ones(2, 10)}}, batch_size=[2])
     pipeline = Pipeline(
