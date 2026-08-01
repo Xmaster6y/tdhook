@@ -1,9 +1,11 @@
 import pytest
 import torch
+from torch import nn
 from tensordict import TensorDict
 from tensordict.nn import TensorDictModule
 
-from tdhook.contexts import HookingContextFactory
+from tdhook.attribution import ActivationMaximisation
+from tdhook.contexts import HookingContextFactory, HookingContextWithCache
 from tdhook.artifacts import ArtifactAdapter, ArtifactContract
 from tdhook.hooks import MultiHookHandle
 from tdhook.modules import HookedModule
@@ -13,6 +15,22 @@ from tdhook.pipeline import AdapterStage, MethodStage, Pipeline, Stage, Transfor
 class AddOne(HookingContextFactory):
     def _hook_module(self, module: HookedModule) -> MultiHookHandle:
         return module.register_submodule_hook("", lambda module, args, output: output + 1, direction="fwd")
+
+
+class TimesTwo(HookingContextFactory):
+    def _hook_module(self, module: HookedModule) -> MultiHookHandle:
+        return module.register_submodule_hook("", lambda module, args, output: output * 2, direction="fwd")
+
+
+class CountingModel(nn.Module):
+    def __init__(self, model):
+        super().__init__()
+        self.model = model
+        self.calls = 0
+
+    def forward(self, value):
+        self.calls += 1
+        return self.model(value)
 
 
 def test_method_then_transform(default_test_model):
@@ -34,6 +52,158 @@ def test_method_then_transform(default_test_model):
     assert torch.allclose(result.artifacts["output"], default_test_model(torch.ones(2, 10)) + 1)
     assert result.artifacts["summary"].shape == (2,)
     assert [stage.name for stage in result.stages] == ["predict", "summarise"]
+
+
+def test_plan_coalesces_only_explicitly_compatible_methods_and_counts_one_pass(default_test_model):
+    model = CountingModel(default_test_model)
+    artifacts = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
+    pipeline = Pipeline(
+        [
+            MethodStage(
+                "add",
+                AddOne(),
+                required_keys=["input"],
+                coexecution_key="ordered-output-hooks-v1",
+                device_batch_constraints=["same input batch"],
+            ),
+            MethodStage(
+                "multiply",
+                TimesTwo(),
+                required_keys=["input"],
+                provided_keys=["output"],
+                coexecution_key="ordered-output-hooks-v1",
+                device_batch_constraints=["same input batch"],
+            ),
+        ]
+    )
+
+    first_plan = pipeline.plan(artifacts)
+    assert first_plan == pipeline.plan(artifacts)
+    assert first_plan.model_passes == 1
+    assert first_plan.runs[0].stages == ("add", "multiply")
+    assert first_plan.runs[0].coalesced
+    assert first_plan.runs[0].device_batch_constraints == ("same input batch",)
+
+    result = pipeline.run(model, artifacts)
+
+    assert model.calls == 1
+    assert result.plan == first_plan
+    assert torch.allclose(result.artifacts["output"], (default_test_model(torch.ones(2, 10)) + 1) * 2)
+
+
+def test_plan_splits_unknown_pairs_and_artifact_boundaries(default_test_model):
+    pipeline = Pipeline(
+        [
+            MethodStage("first", AddOne(), required_keys=["input"], provided_keys=["first_output"]),
+            MethodStage("second", TimesTwo(), required_keys=["first_output"], provided_keys=["output"]),
+        ]
+    )
+
+    plan = pipeline.plan(TensorDict({"input": torch.ones(2, 10)}, batch_size=[2]))
+
+    assert [run.stages for run in plan.runs] == [("first",), ("second",)]
+    assert plan.model_passes == 2
+    assert not any(run.coalesced for run in plan.runs)
+
+
+def test_plan_does_not_prepare_factories_and_isolates_specialised_contexts(default_test_model):
+    class PreparedOnlyDuringExecution(HookingContextFactory):
+        prepared = False
+
+        def _prepare_module(self, module, in_keys, out_keys, extra_relative_path):
+            self.prepared = True
+            return module
+
+    class Specialised(PreparedOnlyDuringExecution):
+        _hooking_context_class = HookingContextWithCache
+
+    generic, specialised = PreparedOnlyDuringExecution(), Specialised()
+    pipeline = Pipeline(
+        [
+            MethodStage("generic", generic, coexecution_key="explicit"),
+            MethodStage("specialised", specialised, coexecution_key="explicit"),
+        ]
+    )
+
+    plan = pipeline.plan(TensorDict({"input": torch.ones(2, 10)}, batch_size=[2]))
+
+    assert [run.stages for run in plan.runs] == [("generic",), ("specialised",)]
+    assert not generic.prepared
+    assert not specialised.prepared
+
+
+def test_plan_splits_empty_keys_subclasses_and_factories_with_instance_setup():
+    class CustomMethodStage(MethodStage):
+        def run(self, model, artifacts):
+            return super().run(model, artifacts)
+
+    pipelines = [
+        (
+            Pipeline(
+                [
+                    MethodStage("first", AddOne(), coexecution_key=""),
+                    MethodStage("second", TimesTwo(), coexecution_key=""),
+                ]
+            ),
+            [("first",), ("second",)],
+        ),
+        (
+            Pipeline(
+                [
+                    CustomMethodStage("first", AddOne(), coexecution_key="safe"),
+                    CustomMethodStage("second", TimesTwo(), coexecution_key="safe"),
+                ]
+            ),
+            [("first",), ("second",)],
+        ),
+        (
+            Pipeline(
+                [
+                    MethodStage("configured", ActivationMaximisation(["linear"], n_steps=1), coexecution_key="safe"),
+                    MethodStage("second", TimesTwo(), coexecution_key="safe"),
+                ]
+            ),
+            [("configured",), ("second",)],
+        ),
+    ]
+
+    for pipeline, expected_runs in pipelines:
+        plan = pipeline.plan()
+        assert [run.stages for run in plan.runs] == expected_runs
+
+
+@pytest.mark.parametrize(
+    "stages",
+    [
+        [TransformStage("transform", lambda td: td)],
+        [MethodStage("unknown", AddOne())],
+        [MethodStage("many-passes", AddOne(), coexecution_key="safe", model_passes=2)],
+        [
+            MethodStage("first", AddOne(), coexecution_key="safe", model_in_keys=["input"]),
+            MethodStage("second", TimesTwo(), coexecution_key="safe", model_in_keys=["different"]),
+        ],
+        [
+            MethodStage("first", AddOne(), coexecution_key="safe", gradient_mode="required"),
+            MethodStage("second", TimesTwo(), coexecution_key="safe", gradient_mode="optional"),
+        ],
+        [
+            MethodStage("first", AddOne(), coexecution_key="safe", provided_keys=["intermediate"]),
+            MethodStage("second", TimesTwo(), coexecution_key="safe", required_keys=["intermediate"]),
+        ],
+        [
+            MethodStage("first", AddOne(), coexecution_key="safe", effects=["writer"]),
+            MethodStage("second", TimesTwo(), coexecution_key="safe", incompatible_effects=["writer"]),
+        ],
+    ],
+)
+def test_coalescing_rejects_each_incomplete_compatibility_contract(stages):
+    assert not Pipeline._can_coalesce(stages)
+
+
+@pytest.mark.parametrize("model_passes", [-1, 0])
+def test_model_executing_stage_rejects_a_non_positive_pass_declaration(model_passes):
+    with pytest.raises(ValueError, match="model_passes|positive"):
+        MethodStage("invalid", AddOne(), model_passes=model_passes)
 
 
 def test_transform_then_method_with_nested_key(default_test_model):
@@ -273,6 +443,21 @@ def test_context_cleanup_on_method_setup_and_execution_failure(default_test_mode
     execute = Pipeline([TransformStage("explode", lambda td: (_ for _ in ()).throw(RuntimeError("boom")))])
     with pytest.raises(RuntimeError, match="explode.*boom"):
         execute.run(default_test_model, TensorDict({}, batch_size=[]))
+
+
+def test_planned_group_cleanup_on_child_failure(default_test_model):
+    pipeline = Pipeline(
+        [
+            MethodStage("setup", FailingPrepare(), coexecution_key="cleanup-v1"),
+            MethodStage("later", AddOne(), provided_keys=["output"], coexecution_key="cleanup-v1"),
+        ]
+    )
+    assert pipeline.plan().runs[0].coalesced
+
+    with pytest.raises(RuntimeError, match="setup.*later.*hook setup failed"):
+        pipeline.run(default_test_model, TensorDict({"input": torch.ones(2, 10)}, batch_size=[2]))
+
+    assert not hasattr(default_test_model, "pipeline_setup_flag")
 
 
 def test_context_cleanup_handles_interrupts_and_cleanup_errors(default_test_model):

@@ -110,6 +110,25 @@ def test_capabilities_are_executable_contracts():
         capability_for_stage("Attribution")
 
 
+def test_attribution_capabilities_preserve_subclass_pass_budgets():
+    class CustomIntegratedGradients(IntegratedGradients):
+        pass
+
+    class CustomActivationMaximisation(ActivationMaximisation):
+        pass
+
+    assert (
+        capability_for_stage(
+            "Attribution", factory=CustomIntegratedGradients(n_steps=2, compute_convergence_delta=True)
+        ).model_passes
+        == 3
+    )
+    assert (
+        capability_for_stage("Attribution", factory=CustomActivationMaximisation(["linear"], n_steps=4)).model_passes
+        == 4
+    )
+
+
 def test_public_stage_factories_build_the_typed_stages():
     assert isinstance(activation_caching_stage("cache", ActivationCaching("0")), ActivationCachingStage)
     assert isinstance(attribution_stage("attr", HookingContextFactory()), AttributionStage)
@@ -138,6 +157,10 @@ def test_attribution_stage_maps_baseline_and_additional_inputs_and_reports_passe
         },
         batch_size=[2],
     )
+    plan = Pipeline([stage]).plan(artifacts)
+    assert plan.model_passes == 3
+    assert plan.runs[0].gradient_mode == "required"
+    assert plan.runs[0].device_batch_constraints
     result = Pipeline([stage]).run(default_test_model, artifacts)
     assert result.artifacts[("attributions", "values")].shape == (2, 10)
     assert AttributionStage("maximise", ActivationMaximisation(["linear1"], n_steps=4)).capability.model_passes == 4

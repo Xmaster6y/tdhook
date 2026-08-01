@@ -30,6 +30,30 @@ Every method stage uses the same ``with factory.prepare(model)`` lifecycle as
 standalone code.  Context cleanup is therefore guaranteed if setup or a later
 stage raises.
 
+Preflight planning
+------------------
+
+``Pipeline.plan()`` returns an :class:`~tdhook.pipeline.ExecutionPlan` before
+the first hook is registered or model call is made.  Each planned run names
+its stages, artifact inputs and outputs, effects, gradient mode,
+device/batch constraints, and model-pass budget.  This makes demo pass budgets
+inspectable without executing them:
+
+.. code-block:: python
+
+   plan = pipeline.plan(artifacts)
+   print(plan.model_passes)
+   for run in plan.runs:
+       print(run.stages, run.model_passes, run.coalesced)
+
+The planner is deliberately conservative.  Unknown pairs and stages separated
+by an artifact dependency receive separate runs.  Adjacent ``MethodStage``
+objects co-execute only when both opt into the same non-empty
+``coexecution_key`` and agree on model keys, pass count, effects, context
+specialisation, and device/batch requirements.  A shared run uses
+``HookGroup`` and retains its rollback and cleanup guarantees.  This is a
+linear execution plan, not a general DAG scheduler.
+
 .. note::
 
    This is the Phase 0 architecture decision for `issue 57

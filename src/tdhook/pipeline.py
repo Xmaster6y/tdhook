@@ -10,14 +10,14 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Callable, Iterable, Mapping, Sequence
+from typing import Callable, Iterable, Literal, Mapping, Sequence
 
 from torch import nn
 from tensordict import TensorDictBase
 
 from tdhook._types import UnraveledKey
 from tdhook.artifacts import ArtifactAdapter, ArtifactContract, ArtifactProvenance, ArtifactRegistry, make_provenance
-from tdhook.contexts import HookingContextFactory
+from tdhook.contexts import HookGroup, HookingContextFactory
 
 
 PipelineKey = UnraveledKey
@@ -60,6 +60,34 @@ class PipelineResult:
     artifacts: TensorDictBase
     stages: tuple[StageResult, ...]
     provenance: tuple[ArtifactProvenance, ...] = ()
+    plan: ExecutionPlan | None = None
+
+
+@dataclass(frozen=True)
+class PlannedRun:
+    """One inspectable execution unit produced by pipeline preflight."""
+
+    stages: tuple[str, ...]
+    kind: Literal["model", "transform"]
+    model_passes: int
+    gradient_mode: str
+    device_batch_constraints: tuple[str, ...]
+    effects: frozenset[str]
+    required_keys: tuple[PipelineKey, ...]
+    provided_keys: tuple[PipelineKey, ...]
+    coalesced: bool = False
+
+
+@dataclass(frozen=True)
+class ExecutionPlan:
+    """A deterministic plan created before hooks or model execution."""
+
+    runs: tuple[PlannedRun, ...]
+
+    @property
+    def model_passes(self) -> int:
+        """Total model-pass budget declared by the planned runs."""
+        return sum(run.model_passes for run in self.runs)
 
 
 class Stage(ABC):
@@ -75,6 +103,10 @@ class Stage(ABC):
         incompatible_effects: Iterable[str] = (),
         artifact_contract: ArtifactContract | None = None,
         method_id: str | None = None,
+        model_passes: int | None = None,
+        gradient_mode: str = "optional",
+        device_batch_constraints: Iterable[str] = (),
+        coexecution_key: str | None = None,
     ) -> None:
         if not name:
             raise ValueError("A stage must have a non-empty name")
@@ -89,6 +121,15 @@ class Stage(ABC):
         self.provided_keys = _keys(artifact_contract.provided_keys if artifact_contract else provided_keys)
         self.effects = frozenset(effects)
         self.incompatible_effects = frozenset(incompatible_effects)
+        inferred_passes = 1 if "model_execution" in self.effects else 0
+        self.model_passes = inferred_passes if model_passes is None else model_passes
+        if self.model_passes < 0:
+            raise ValueError("Stage model_passes must be non-negative")
+        if "model_execution" in self.effects and self.model_passes == 0:
+            raise ValueError("Model-executing stages require positive model_passes")
+        self.gradient_mode = gradient_mode
+        self.device_batch_constraints = tuple(device_batch_constraints)
+        self.coexecution_key = coexecution_key
 
     @abstractmethod
     def run(self, model: nn.Module, artifacts: TensorDictBase) -> TensorDictBase:
@@ -111,6 +152,10 @@ class MethodStage(Stage):
         model_out_keys: Iterable[PipelineKey] | None = None,
         artifact_contract: ArtifactContract | None = None,
         method_id: str | None = None,
+        model_passes: int = 1,
+        gradient_mode: str = "optional",
+        device_batch_constraints: Iterable[str] = (),
+        coexecution_key: str | None = None,
     ) -> None:
         super().__init__(
             name,
@@ -120,6 +165,10 @@ class MethodStage(Stage):
             incompatible_effects=incompatible_effects,
             artifact_contract=artifact_contract,
             method_id=type(factory).__name__ if method_id is None else method_id,
+            model_passes=model_passes,
+            gradient_mode=gradient_mode,
+            device_batch_constraints=device_batch_constraints,
+            coexecution_key=coexecution_key,
         )
         self.factory = factory
         self.model_in_keys = None if model_in_keys is None else _keys(model_in_keys)
@@ -277,6 +326,105 @@ class Pipeline:
                 raise ValueError(f"Stage {stage.name!r} writes existing artifact keys: {collisions!r}")
             available.update(stage.provided_keys)
 
+    @staticmethod
+    def _can_coalesce(stages: Sequence[Stage]) -> bool:
+        """Return whether explicit capabilities prove one shared model run safe."""
+        if not stages or not all(type(stage) is MethodStage for stage in stages):
+            return False
+        first = stages[0]
+        if not first.coexecution_key or any(stage.coexecution_key != first.coexecution_key for stage in stages):
+            return False
+        if any(stage.model_passes != 1 for stage in stages):
+            return False
+        if any(
+            (stage.model_in_keys, stage.model_out_keys) != (first.model_in_keys, first.model_out_keys)
+            for stage in stages[1:]
+        ):
+            return False
+        if any(
+            (stage.gradient_mode, stage.device_batch_constraints)
+            != (first.gradient_mode, first.device_batch_constraints)
+            for stage in stages[1:]
+        ):
+            return False
+        produced: set[PipelineKey] = set()
+        effects: set[str] = set()
+        incompatible: set[str] = set()
+        for stage in stages:
+            if produced.intersection(stage.required_keys):
+                return False
+            if stage.incompatible_effects.intersection(effects) or stage.effects.intersection(incompatible):
+                return False
+            produced.update(stage.provided_keys)
+            effects.update(stage.effects)
+            incompatible.update(stage.incompatible_effects)
+            # HookGroup owns one context and does not enter child contexts.
+            # Factories that configure context or wrapper state per instance
+            # therefore need their standalone lifecycle until they expose an
+            # explicit shared-group contract.
+            if stage.factory._hooking_context_kwargs or stage.factory._hooked_module_kwargs:
+                return False
+        try:
+            HookGroup(*(stage.factory for stage in stages))
+        except ValueError:
+            return False
+        return True
+
+    @staticmethod
+    def _planned_run(stages: Sequence[Stage], *, coalesced: bool = False) -> PlannedRun:
+        kind = "model" if any(stage.model_passes for stage in stages) else "transform"
+        gradient_modes = {stage.gradient_mode for stage in stages}
+        gradient_mode = next(iter(gradient_modes)) if len(gradient_modes) == 1 else "mixed"
+        return PlannedRun(
+            stages=tuple(stage.name for stage in stages),
+            kind=kind,
+            model_passes=1 if coalesced else sum(stage.model_passes for stage in stages),
+            gradient_mode=gradient_mode,
+            device_batch_constraints=tuple(
+                dict.fromkeys(constraint for stage in stages for constraint in stage.device_batch_constraints)
+            ),
+            effects=frozenset(effect for stage in stages for effect in stage.effects),
+            required_keys=tuple(dict.fromkeys(key for stage in stages for key in stage.required_keys)),
+            provided_keys=tuple(dict.fromkeys(key for stage in stages for key in stage.provided_keys)),
+            coalesced=coalesced,
+        )
+
+    def plan(self, artifacts: TensorDictBase | None = None) -> ExecutionPlan:
+        """Return the conservative execution plan without preparing the model.
+
+        Unknown method pairs are split. Adjacent :class:`MethodStage` objects
+        share a run only when they declare the same non-empty
+        ``coexecution_key`` and their remaining execution contracts agree.
+        """
+        if artifacts is not None:
+            self.validate(artifacts)
+        runs: list[PlannedRun] = []
+        index = 0
+        while index < len(self.stages):
+            candidate = [self.stages[index]]
+            if type(candidate[0]) is MethodStage and candidate[0].coexecution_key:
+                while index + len(candidate) < len(self.stages):
+                    next_stage = self.stages[index + len(candidate)]
+                    if not self._can_coalesce([*candidate, next_stage]):
+                        break
+                    candidate.append(next_stage)
+            coalesced = len(candidate) > 1
+            runs.append(self._planned_run(candidate, coalesced=coalesced))
+            index += len(candidate)
+        return ExecutionPlan(tuple(runs))
+
+    @staticmethod
+    def _run_coalesced(stages: Sequence[MethodStage], model: nn.Module, artifacts: TensorDictBase) -> TensorDictBase:
+        first = stages[0]
+        factory = HookGroup(*(stage.factory for stage in stages))
+        with factory.prepare(
+            model,
+            in_keys=None if first.model_in_keys is None else list(first.model_in_keys),
+            out_keys=None if first.model_out_keys is None else list(first.model_out_keys),
+        ) as method:
+            result = method(artifacts)
+        return artifacts if result is None else result
+
     def run(
         self,
         model: nn.Module,
@@ -286,7 +434,7 @@ class Pipeline:
         seed: int | None = None,
         stage_configurations: Mapping[str, Mapping[str, object]] | None = None,
     ) -> PipelineResult:
-        self.validate(artifacts)
+        plan = self.plan(artifacts)
         registry = self.artifact_registry or ArtifactRegistry()
         generation = registry.begin_generation()
         # Only declared pipeline inputs are owned by the caller for this
@@ -300,34 +448,43 @@ class Pipeline:
         stage_results: list[StageResult] = []
         provenance: list[ArtifactProvenance] = []
         current = artifacts
-        for stage in self.stages:
-            missing = [key for key in stage.required_keys if key not in self._artifact_keys(current)]
-            if missing:
-                raise ValueError(f"Stage {stage.name!r} requires missing artifact keys: {missing!r}")
-            for key in stage.required_keys:
-                registry.require_fresh(key, generation=generation)
+        stage_by_name = {stage.name: stage for stage in self.stages}
+        for planned_run in plan.runs:
+            run_stages = [stage_by_name[name] for name in planned_run.stages]
+            for stage in run_stages:
+                missing = [key for key in stage.required_keys if key not in self._artifact_keys(current)]
+                if missing:
+                    raise ValueError(f"Stage {stage.name!r} requires missing artifact keys: {missing!r}")
+                for key in stage.required_keys:
+                    registry.require_fresh(key, generation=generation)
             try:
-                current = stage.run(model, current)
+                if planned_run.coalesced:
+                    current = self._run_coalesced(run_stages, model, current)
+                else:
+                    current = run_stages[0].run(model, current)
             except Exception as error:
-                raise RuntimeError(f"Pipeline stage {stage.name!r} failed: {error}") from error
+                names = ", ".join(repr(stage.name) for stage in run_stages)
+                raise RuntimeError(f"Pipeline planned run [{names}] failed: {error}") from error
             if not isinstance(current, TensorDictBase):
-                raise TypeError(f"Stage {stage.name!r} returned {type(current).__name__}, not a TensorDict")
-            missing = [key for key in stage.provided_keys if key not in self._artifact_keys(current)]
-            if missing:
-                raise ValueError(f"Stage {stage.name!r} did not provide declared artifact keys: {missing!r}")
-            for key in stage.provided_keys:
-                registry.claim(key, stage.name, generation=generation)
-                registry.require_fresh(key, generation=generation)
-            stage_results.append(StageResult(stage.name, stage.provided_keys, stage.effects))
-            provenance.append(
-                make_provenance(
-                    stage=stage.name,
-                    method=stage.method_id,
-                    configuration=(stage_configurations or {}).get(stage.name),
-                    model_id=model_id,
-                    seed=seed,
-                    parents=stage.required_keys,
-                    model=model,
+                names = ", ".join(repr(stage.name) for stage in run_stages)
+                raise TypeError(f"Planned run [{names}] returned {type(current).__name__}, not a TensorDict")
+            for stage in run_stages:
+                missing = [key for key in stage.provided_keys if key not in self._artifact_keys(current)]
+                if missing:
+                    raise ValueError(f"Stage {stage.name!r} did not provide declared artifact keys: {missing!r}")
+                for key in stage.provided_keys:
+                    registry.claim(key, stage.name, generation=generation)
+                    registry.require_fresh(key, generation=generation)
+                stage_results.append(StageResult(stage.name, stage.provided_keys, stage.effects))
+                provenance.append(
+                    make_provenance(
+                        stage=stage.name,
+                        method=stage.method_id,
+                        configuration=(stage_configurations or {}).get(stage.name),
+                        model_id=model_id,
+                        seed=seed,
+                        parents=stage.required_keys,
+                        model=model,
+                    )
                 )
-            )
-        return PipelineResult(current, tuple(stage_results), tuple(provenance))
+        return PipelineResult(current, tuple(stage_results), tuple(provenance), plan)

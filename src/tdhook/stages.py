@@ -27,6 +27,8 @@ class StageCapability:
     provided_keys: tuple[PipelineKey, ...]
     effects: frozenset[str]
     model_passes: int
+    gradient_mode: str = "optional"
+    device_batch_constraints: tuple[str, ...] = ()
 
 
 def _execute(factory: HookingContextFactory, model: nn.Module, storage: TensorDictBase) -> TensorDictBase:
@@ -41,10 +43,14 @@ def _public_input_key(key: PipelineKey) -> PipelineKey:
 
 def _attribution_capability(factory: HookingContextFactory) -> StageCapability:
     """Return model-pass metadata for the concrete attribution factory."""
+    # Keep these imports local: the public attribution package imports its
+    # method modules, while stages only needs their runtime type here.
+    from tdhook.attribution import ActivationMaximisation, IntegratedGradients
+
     name = type(factory).__name__
-    if name == "ActivationMaximisation":
+    if isinstance(factory, ActivationMaximisation):
         passes = factory._n_steps
-    elif name == "IntegratedGradients":
+    elif isinstance(factory, IntegratedGradients):
         passes = 1 + (2 if factory._compute_convergence_delta else 0)
     else:
         passes = 1
@@ -55,8 +61,15 @@ class _FactoryStage(Stage):
     """Base class for stages backed by an existing public method factory."""
 
     def __init__(self, name: str, factory: HookingContextFactory, adapter: ArtifactAdapter, *, effects: Iterable[str]):
+        capability = type(self).capability
         super().__init__(
-            name, artifact_contract=adapter.contract, effects=("model_execution", *effects), method_id=adapter.method
+            name,
+            artifact_contract=adapter.contract,
+            effects=("model_execution", *effects),
+            method_id=adapter.method,
+            model_passes=capability.model_passes,
+            gradient_mode=capability.gradient_mode,
+            device_batch_constraints=capability.device_batch_constraints,
         )
         self.factory = factory
         self.adapter = adapter
@@ -74,6 +87,8 @@ class ActivationCachingStage(_FactoryStage):
         (("activations", "cache"),),
         frozenset({"model_execution", "activation_read"}),
         1,
+        "optional",
+        ("cached tensors retain the source device and batch shape",),
     )
 
     def __init__(
@@ -117,6 +132,8 @@ class AttributionStage(_FactoryStage):
         (("attributions", "values"),),
         frozenset({"model_execution", "gradient"}),
         1,
+        "required",
+        ("inputs, targets, and captured values must share a device",),
     )
 
     def __init__(
@@ -147,6 +164,9 @@ class AttributionStage(_FactoryStage):
         )
         super().__init__(name, factory, adapter, effects=("gradient",))
         self.capability = _attribution_capability(factory)
+        self.model_passes = self.capability.model_passes
+        self.gradient_mode = self.capability.gradient_mode
+        self.device_batch_constraints = self.capability.device_batch_constraints
 
     def run(self, model: nn.Module, artifacts: TensorDictBase) -> TensorDictBase:
         storage = self._storage(artifacts)
@@ -157,7 +177,13 @@ class ProbingStage(_FactoryStage):
     """Execute :class:`Probing` and publish the manager that holds its results."""
 
     capability = StageCapability(
-        "Probing", (("inputs", "input"),), (("probes", "results"),), frozenset({"model_execution", "probe_update"}), 1
+        "Probing",
+        (("inputs", "input"),),
+        (("probes", "results"),),
+        frozenset({"model_execution", "probe_update"}),
+        1,
+        "optional",
+        ("activation, label, and estimator devices must be compatible",),
     )
 
     def __init__(
@@ -204,6 +230,8 @@ class WeightInterventionStage(_FactoryStage):
         (("outputs", "model"),),
         frozenset({"model_execution", "weight_intervention"}),
         1,
+        "optional",
+        ("intervention tensors must match target device, shape, and dtype",),
     )
 
     def __init__(
