@@ -43,7 +43,7 @@ def test_contracts_and_existing_method_adapters_are_storage_independent():
     assert activation_caching_adapter().contract.provided_keys == (("activations", "cache"),)
     assert probing_adapter().contract.provided_keys == (("probes", "results"),)
     assert attribution_adapter().contract.provided_keys == (("attributions", "values"),)
-    assert weight_adapter().contract.provided_keys == (("interventions", "weights"),)
+    assert weight_adapter().contract.provided_keys == (("outputs", "model"),)
 
     with pytest.raises(ValueError, match="names must be non-empty"):
         ArtifactContract(requires={"": ("inputs", "image")})

@@ -53,8 +53,14 @@ class Adapters(HookingContextFactory):
                 else:
                     adapter_input = kwargs.pop(DIRECTION_TO_RETURN[kwargs["direction"]])
                 # Filter kwargs to only those accepted by the adapter
-                adapter_params = inspect.signature(adapter).parameters
-                filtered_kwargs = {k: v for k, v in kwargs.items() if k in adapter_params}
+                signature_target = adapter.forward if isinstance(adapter, nn.Module) else adapter
+                adapter_params = inspect.signature(signature_target).parameters
+                accepts_kwargs = any(
+                    parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in adapter_params.values()
+                )
+                filtered_kwargs = (
+                    kwargs if accepts_kwargs else {k: v for k, v in kwargs.items() if k in adapter_params}
+                )
                 return adapter(adapter_input, **filtered_kwargs)
 
             return callback

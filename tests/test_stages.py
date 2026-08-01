@@ -5,9 +5,10 @@ from tensordict import TensorDict
 from tensordict.nn import TensorDictModule
 
 from tdhook.artifacts import ArtifactRegistry
-from tdhook.attribution import ActivationMaximisation, IntegratedGradients
+from tdhook.attribution import ActivationMaximisation, IntegratedGradients, LRP
 from tdhook.latent import ActivationCaching, Probing
 from tdhook.pipeline import Pipeline, TransformStage
+from tdhook.weights import Adapters
 from tdhook.stages import (
     ActivationCachingStage,
     AttributionStage,
@@ -52,6 +53,103 @@ def test_builtin_stages_publish_method_accurate_contracts_without_callbacks():
     )
     assert torch.equal(output_result.artifacts[("outputs", "model")], torch.ones(2, 3))
     assert ("interventions", "weights") not in output_result.artifacts.keys(include_nested=True)
+
+
+def test_real_probing_stages_coexecute_and_publish_independent_results(default_test_model):
+    calls = []
+    handle = default_test_model.register_forward_pre_hook(lambda *_: calls.append(None))
+
+    class RecordingProbe:
+        def __init__(self):
+            self.steps = 0
+
+        def step(self, data, **kwargs):
+            self.steps += 1
+
+    first_probe, second_probe = RecordingProbe(), RecordingProbe()
+    first_results, second_results = object(), object()
+    pipeline = Pipeline(
+        [
+            ProbingStage(
+                "first-probe",
+                Probing("linear1", lambda *_: first_probe),
+                first_results,
+                result_key=("probes", "first"),
+            ),
+            ProbingStage(
+                "second-probe",
+                Probing("linear2", lambda *_: second_probe),
+                second_results,
+                result_key=("probes", "second"),
+            ),
+        ]
+    )
+    artifacts = TensorDict({"inputs": {"input": torch.ones(2, 10)}}, batch_size=[2])
+
+    plan = pipeline.plan(artifacts)
+    result = pipeline.run(default_test_model, artifacts)
+    handle.remove()
+
+    assert plan.model_passes == 1
+    assert plan.runs[0].coalesced
+    assert calls == [None]
+    assert first_probe.steps == second_probe.steps == 1
+    assert result.artifacts[("probes", "first")] is first_results
+    assert result.artifacts[("probes", "second")] is second_results
+
+
+def test_weight_intervention_stage_executes_real_adapters(default_test_model):
+    inputs = torch.ones(2, 10)
+    expected = default_test_model(inputs)
+    factory = Adapters({"identity": (nn.Identity(), "linear1", "linear1")})
+
+    result = Pipeline([WeightInterventionStage("adapter", factory)]).run(
+        default_test_model,
+        TensorDict({"inputs": {"input": inputs}}, batch_size=[2]),
+    )
+
+    torch.testing.assert_close(result.artifacts[("outputs", "model")], expected)
+
+
+def test_lrp_artifact_drives_a_second_conditioned_attribution_stage(default_test_model):
+    def condition_gradients(targets, additional):
+        scale = additional["concept"].unsqueeze(-1)
+        return targets.apply(lambda value: torch.ones_like(value) * scale)
+
+    first = AttributionStage(
+        "concept-relevance",
+        LRP(warn_on_missing_rule=False),
+        attribution_key=("attributions", "concept"),
+    )
+    select = TransformStage(
+        "select-concept",
+        lambda td: td.set(("inputs", "concept"), td[("attributions", "concept")].abs().mean(-1)),
+        required_keys=[("attributions", "concept")],
+        provided_keys=[("inputs", "concept")],
+    )
+    conditioned = AttributionStage(
+        "conditioned-relevance",
+        LRP(
+            additional_init_keys=["concept"],
+            init_attr_grads=condition_gradients,
+            warn_on_missing_rule=False,
+        ),
+        attribution_key=("attributions", "conditioned"),
+    )
+    artifacts = TensorDict({"inputs": {"input": torch.ones(2, 10)}}, batch_size=[2])
+    pipeline = Pipeline([first, select, conditioned])
+
+    plan = pipeline.plan(artifacts)
+    result = pipeline.run(default_test_model, artifacts)
+
+    assert plan.model_passes == 2
+    assert [run.stages for run in plan.runs] == [
+        ("concept-relevance",),
+        ("select-concept",),
+        ("conditioned-relevance",),
+    ]
+    assert result.artifacts[("attributions", "concept")].shape == (2, 10)
+    assert result.artifacts[("attributions", "conditioned")].shape == (2, 10)
 
 
 def test_pipeline_claims_and_checks_artifact_generation_during_execution(default_test_model):

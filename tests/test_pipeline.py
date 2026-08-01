@@ -338,13 +338,6 @@ def test_duplicate_outputs_and_reserved_keys_are_rejected():
                 TransformStage("second", lambda td: td, provided_keys=[("report", "mean")]),
             ]
         )
-    with pytest.raises(ValueError, match="reader.*writes_model.*writer"):
-        Pipeline(
-            [
-                TransformStage("writer", lambda td: td, effects=["writes_model"]),
-                TransformStage("reader", lambda td: td, incompatible_effects=["writes_model"]),
-            ]
-        )
 
 
 def test_stage_contract_validation_errors():
@@ -358,13 +351,25 @@ def test_stage_contract_validation_errors():
         TransformStage("duplicate-key", lambda td: td, provided_keys=["output", "output"])
     with pytest.raises(ValueError, match="stage names"):
         Pipeline([TransformStage("same", lambda td: td), TransformStage("same", lambda td: td)])
-    with pytest.raises(ValueError, match="writer.*reads_model.*reader"):
-        Pipeline(
-            [
-                TransformStage("reader", lambda td: td, incompatible_effects=["reads_model"]),
-                TransformStage("writer", lambda td: td, effects=["reads_model"]),
-            ]
-        )
+
+
+def test_incompatible_effects_split_a_shared_run_instead_of_rejecting_the_pipeline():
+    pipeline = Pipeline(
+        [
+            MethodStage("writer", AddOne(), effects=["writes_model"], coexecution_key="hooks-v1"),
+            MethodStage(
+                "reader",
+                TimesTwo(),
+                incompatible_effects=["writes_model"],
+                coexecution_key="hooks-v1",
+            ),
+        ]
+    )
+
+    plan = pipeline.plan()
+
+    assert [run.stages for run in plan.runs] == [("writer",), ("reader",)]
+    assert plan.model_passes == 2
 
 
 def test_pipeline_reports_input_output_and_transform_contract_errors(default_test_model):

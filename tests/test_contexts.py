@@ -142,6 +142,11 @@ class PartialRemovalFactory(HookingContextFactory):
         return MultiHookHandle([RemoveFailureHandle(True, self.removed), RemoveFailureHandle(False, self.removed)])
 
 
+class RestoreAfterRemovalFailureFactory(PrepFlagFactory):
+    def _hook_module(self, module):
+        return MultiHookHandle([RemoveFailureHandle(True, [])])
+
+
 class TestBaseContext:
     """Basic single-context behavior."""
 
@@ -182,6 +187,14 @@ class TestCompositeContext:
 
     def test_hook_group_is_compatibility_alias(self):
         assert HookGroup is CompositeHookingContextFactory
+
+    def test_reused_hook_group_releases_prepared_child_bookkeeping(self, default_test_model):
+        group = HookGroup(Context1(), Context2())
+
+        for _ in range(3):
+            with group.prepare(default_test_model):
+                pass
+            assert len(group._prepared_children) == 0
 
 
 class TestHookingContextLifecycle:
@@ -251,6 +264,15 @@ class TestHookingContextLifecycle:
         with pytest.raises(RuntimeError):
             with ctx.disable():
                 pass
+
+    def test_normal_exit_restores_after_hook_removal_failure(self, default_test_model):
+        context = RestoreAfterRemovalFailureFactory().prepare(default_test_model)
+
+        with pytest.raises(RuntimeError, match="removal failed"):
+            with context:
+                assert hasattr(context._module, "prep_flag")
+
+        assert not hasattr(context._module, "prep_flag")
 
 
 class TestCompositeContextDisable:

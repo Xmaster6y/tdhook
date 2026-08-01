@@ -162,12 +162,12 @@ def attribution_adapter(result_key: ArtifactKey = "attr") -> ArtifactAdapter:
     )
 
 
-def weight_adapter(cache_key: ArtifactKey = "cache") -> ArtifactAdapter:
-    """Adapter contract for the existing :class:`tdhook.weights.Adapters` method."""
+def weight_adapter(output_key: ArtifactKey = "output") -> ArtifactAdapter:
+    """Adapt a weight intervention pass's real model output."""
     return ArtifactAdapter(
         "weight-adapters",
-        ArtifactContract(provides={"interventions": ("interventions", "weights")}),
-        {"interventions": cache_key},
+        ArtifactContract(provides={"output": ("outputs", "model")}),
+        {"output": output_key},
     )
 
 
