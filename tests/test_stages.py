@@ -1,3 +1,4 @@
+import pytest
 import torch
 from torch import nn
 from tensordict import TensorDict
@@ -104,6 +105,8 @@ def test_shared_registry_ignores_undeclared_retained_artifacts(default_test_mode
 def test_capabilities_are_executable_contracts():
     assert capability_for_stage("ActivationCaching").provided_keys == (("activations", "cache"),)
     assert capability_for_stage("WeightIntervention").provided_keys == (("outputs", "model"),)
+    with pytest.raises(ValueError, match="concrete factory"):
+        capability_for_stage("Attribution")
 
 
 def test_public_stage_factories_build_the_typed_stages():
