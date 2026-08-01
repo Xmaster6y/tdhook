@@ -29,7 +29,10 @@ def _artifacts():
 
 def test_activation_caching_stage_executes_a_real_method_and_publishes_its_cache():
     model = nn.Sequential(nn.Linear(3, 3), nn.ReLU())
-    result = Pipeline([ActivationCachingStage("cache", ActivationCaching("0"))]).run(model, _artifacts())
+    stage = ActivationCachingStage("cache", ActivationCaching("0"))
+    assert stage.coexecution_bindings() == {}
+
+    result = Pipeline([stage]).run(model, _artifacts())
 
     assert "0" in result.artifacts[("activations", "cache")]
     assert result.provenance[0].method == "ActivationCaching"

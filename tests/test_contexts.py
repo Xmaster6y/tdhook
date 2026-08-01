@@ -196,6 +196,13 @@ class TestCompositeContext:
                 pass
             assert len(group._prepared_children) == 0
 
+    def test_hook_group_rejects_hooking_without_prepared_children(self, default_test_model):
+        group = HookGroup(Context1(), Context2())
+        hooked_module = HookedModule.from_module(default_test_model, ["input"], ["output"])
+
+        with pytest.raises(RuntimeError, match="missing prepared child modules"):
+            group._hook_module(hooked_module)
+
 
 class TestHookingContextLifecycle:
     def test_cannot_enter_twice(self, default_test_model):
@@ -273,6 +280,29 @@ class TestHookingContextLifecycle:
                 assert hasattr(context._module, "prep_flag")
 
         assert not hasattr(context._module, "prep_flag")
+
+    def test_normal_exit_reports_restore_failure(self, default_test_model):
+        context = RestoreFailureFactory().prepare(default_test_model)
+
+        with pytest.raises(RuntimeError, match="restoration failed"):
+            with context:
+                pass
+
+        assert not context._in_context
+        assert context._hooked_module is None
+
+    def test_normal_exit_reports_pre_context_stack_failure(self, default_test_model):
+        class FailingStack:
+            def __exit__(self, *args):
+                raise RuntimeError("stack cleanup failed")
+
+        context = HookingContextFactory().prepare(default_test_model)
+        with pytest.raises(RuntimeError, match="stack cleanup failed"):
+            with context:
+                context._stack = FailingStack()
+
+        assert not context._in_context
+        assert context._stack is None
 
 
 class TestCompositeContextDisable:
