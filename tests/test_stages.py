@@ -105,6 +105,7 @@ def test_shared_registry_ignores_undeclared_retained_artifacts(default_test_mode
 def test_capabilities_are_executable_contracts():
     assert capability_for_stage("ActivationCaching").provided_keys == (("activations", "cache"),)
     assert capability_for_stage("WeightIntervention").provided_keys == (("outputs", "model"),)
+    assert capability_for_stage("Attribution", factory=IntegratedGradients(n_steps=2)).model_passes == 1
     with pytest.raises(ValueError, match="concrete factory"):
         capability_for_stage("Attribution")
 
