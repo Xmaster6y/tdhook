@@ -200,6 +200,46 @@ def test_coalescing_rejects_each_incomplete_compatibility_contract(stages):
     assert not Pipeline._can_coalesce(stages)
 
 
+def test_coalescing_rejects_storage_binding_and_group_incompatibilities(monkeypatch):
+    class DifferentStorage(MethodStage):
+        def coexecution_storage_kind(self):
+            return "different-storage"
+
+    assert not Pipeline._can_coalesce(
+        [
+            MethodStage("first", AddOne(), coexecution_key="safe"),
+            DifferentStorage("second", TimesTwo(), coexecution_key="safe"),
+        ]
+    )
+
+    class BoundMethod(MethodStage):
+        def __init__(self, *args, public_key, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.public_key = public_key
+
+        def coexecution_bindings(self):
+            return {"runtime": self.public_key}
+
+    assert not Pipeline._can_coalesce(
+        [
+            BoundMethod("first", AddOne(), coexecution_key="safe", public_key="first-input"),
+            BoundMethod("second", TimesTwo(), coexecution_key="safe", public_key="second-input"),
+        ]
+    )
+
+    class RejectingHookGroup:
+        def __init__(self, *factories):
+            raise ValueError("incompatible group")
+
+    monkeypatch.setattr("tdhook.pipeline.HookGroup", RejectingHookGroup)
+    assert not Pipeline._can_coalesce(
+        [
+            MethodStage("first", AddOne(), coexecution_key="safe"),
+            MethodStage("second", TimesTwo(), coexecution_key="safe"),
+        ]
+    )
+
+
 @pytest.mark.parametrize("model_passes", [-1, 0])
 def test_model_executing_stage_rejects_a_non_positive_pass_declaration(model_passes):
     with pytest.raises(ValueError, match="model_passes|positive"):
@@ -338,13 +378,6 @@ def test_duplicate_outputs_and_reserved_keys_are_rejected():
                 TransformStage("second", lambda td: td, provided_keys=[("report", "mean")]),
             ]
         )
-    with pytest.raises(ValueError, match="reader.*writes_model.*writer"):
-        Pipeline(
-            [
-                TransformStage("writer", lambda td: td, effects=["writes_model"]),
-                TransformStage("reader", lambda td: td, incompatible_effects=["writes_model"]),
-            ]
-        )
 
 
 def test_stage_contract_validation_errors():
@@ -358,13 +391,25 @@ def test_stage_contract_validation_errors():
         TransformStage("duplicate-key", lambda td: td, provided_keys=["output", "output"])
     with pytest.raises(ValueError, match="stage names"):
         Pipeline([TransformStage("same", lambda td: td), TransformStage("same", lambda td: td)])
-    with pytest.raises(ValueError, match="writer.*reads_model.*reader"):
-        Pipeline(
-            [
-                TransformStage("reader", lambda td: td, incompatible_effects=["reads_model"]),
-                TransformStage("writer", lambda td: td, effects=["reads_model"]),
-            ]
-        )
+
+
+def test_incompatible_effects_split_a_shared_run_instead_of_rejecting_the_pipeline():
+    pipeline = Pipeline(
+        [
+            MethodStage("writer", AddOne(), effects=["writes_model"], coexecution_key="hooks-v1"),
+            MethodStage(
+                "reader",
+                TimesTwo(),
+                incompatible_effects=["writes_model"],
+                coexecution_key="hooks-v1",
+            ),
+        ]
+    )
+
+    plan = pipeline.plan()
+
+    assert [run.stages for run in plan.runs] == [("writer",), ("reader",)]
+    assert plan.model_passes == 2
 
 
 def test_pipeline_reports_input_output_and_transform_contract_errors(default_test_model):
@@ -391,6 +436,26 @@ def test_pipeline_reports_input_output_and_transform_contract_errors(default_tes
 class InvalidResultStage(Stage):
     def run(self, model, artifacts):
         return "not a tensordict"
+
+
+def test_stage_shared_execution_defaults_are_conservative():
+    stage = InvalidResultStage("invalid")
+    artifacts = TensorDict({}, batch_size=[])
+
+    assert stage.coexecution_factory() is None
+    assert stage.coexecution_storage_kind() is None
+    assert stage.coexecution_bindings() == {}
+    assert stage.coexecution_model_keys() == (None, None)
+    with pytest.raises(TypeError, match="does not support shared execution"):
+        stage.prepare_coexecution(artifacts)
+    assert stage.finalize_coexecution(artifacts, artifacts) is artifacts
+
+
+def test_method_stage_rejects_legacy_shared_storage():
+    stage = MethodStage("method", AddOne(), coexecution_key="safe")
+
+    with pytest.raises(ValueError, match="legacy adapter"):
+        stage.prepare_coexecution(TensorDict({}, batch_size=[]), TensorDict({}, batch_size=[]))
 
 
 def test_pipeline_rejects_a_stage_that_returns_non_tensordict(default_test_model):

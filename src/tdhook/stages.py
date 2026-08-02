@@ -29,6 +29,7 @@ class StageCapability:
     model_passes: int
     gradient_mode: str = "optional"
     device_batch_constraints: tuple[str, ...] = ()
+    coexecution_key: str | None = None
 
 
 def _execute(factory: HookingContextFactory, model: nn.Module, storage: TensorDictBase) -> TensorDictBase:
@@ -70,12 +71,30 @@ class _FactoryStage(Stage):
             model_passes=capability.model_passes,
             gradient_mode=capability.gradient_mode,
             device_batch_constraints=capability.device_batch_constraints,
+            coexecution_key=capability.coexecution_key,
         )
         self.factory = factory
         self.adapter = adapter
 
     def _storage(self, artifacts: TensorDictBase) -> TensorDictBase:
         return self.adapter.prepare(artifacts, TensorDict())
+
+    def coexecution_factory(self) -> HookingContextFactory | None:
+        return self.factory if self.coexecution_key else None
+
+    def coexecution_storage_kind(self) -> str | None:
+        return "legacy-adapter" if self.coexecution_key else None
+
+    def coexecution_bindings(self) -> Mapping[PipelineKey, PipelineKey]:
+        if not self.coexecution_key:
+            return {}
+        return {self.adapter.storage[name]: public_key for name, public_key in self.adapter.contract.requires.items()}
+
+    def prepare_coexecution(
+        self, artifacts: TensorDictBase, execution: TensorDictBase | None = None
+    ) -> TensorDictBase:
+        storage = TensorDict() if execution is None else execution
+        return self.adapter.prepare(artifacts, storage)
 
 
 class ActivationCachingStage(_FactoryStage):
@@ -164,6 +183,7 @@ class AttributionStage(_FactoryStage):
         )
         super().__init__(name, factory, adapter, effects=("gradient",))
         self.capability = _attribution_capability(factory)
+        self.method_id = self.capability.method
         self.model_passes = self.capability.model_passes
         self.gradient_mode = self.capability.gradient_mode
         self.device_batch_constraints = self.capability.device_batch_constraints
@@ -184,6 +204,7 @@ class ProbingStage(_FactoryStage):
         1,
         "optional",
         ("activation, label, and estimator devices must be compatible",),
+        "probing-read-hooks-v1",
     )
 
     def __init__(
@@ -215,6 +236,10 @@ class ProbingStage(_FactoryStage):
         _execute(self.factory, model, storage)
         storage.set("results", self.results)
         return self.adapter.finalize(artifacts, storage)
+
+    def finalize_coexecution(self, artifacts: TensorDictBase, execution: TensorDictBase) -> TensorDictBase:
+        execution.set("results", self.results)
+        return self.adapter.finalize(artifacts, execution)
 
 
 class WeightInterventionStage(_FactoryStage):
@@ -270,6 +295,8 @@ BUILTIN_STAGE_CAPABILITIES = {
 # loses its executable implementation contract.
 DOCUMENTED_STAGE_CAPABILITIES = {
     "ActivationCaching": "ActivationCaching",
+    "IntegratedGradients": "Attribution",
+    "LRP": "Attribution",
     "Probing": "Probing",
     "Adapters": "WeightIntervention",
 }

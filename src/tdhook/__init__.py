@@ -10,7 +10,7 @@ __all__ = [
     "contexts",
     "hooks",
     "metrics",
-    "module",
+    "modules",
     # Methods
     "latent",
     "attribution",

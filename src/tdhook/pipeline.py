@@ -135,6 +135,34 @@ class Stage(ABC):
     def run(self, model: nn.Module, artifacts: TensorDictBase) -> TensorDictBase:
         """Execute the stage and return its TensorDict artifacts."""
 
+    def coexecution_factory(self) -> HookingContextFactory | None:
+        """Return the hook factory used for an explicitly compatible shared run."""
+        return None
+
+    def coexecution_storage_kind(self) -> str | None:
+        """Identify the runtime storage layout used by a shared run."""
+        return None
+
+    def coexecution_bindings(self) -> Mapping[PipelineKey, PipelineKey]:
+        """Map runtime input keys to their public artifact keys."""
+        return {}
+
+    def coexecution_model_keys(
+        self,
+    ) -> tuple[tuple[PipelineKey, ...] | None, tuple[PipelineKey, ...] | None]:
+        """Return the model signature used by a shared run."""
+        return None, None
+
+    def prepare_coexecution(
+        self, artifacts: TensorDictBase, execution: TensorDictBase | None = None
+    ) -> TensorDictBase:
+        """Prepare or extend the TensorDict passed to a shared model run."""
+        raise TypeError(f"Stage {self.name!r} does not support shared execution")
+
+    def finalize_coexecution(self, artifacts: TensorDictBase, execution: TensorDictBase) -> TensorDictBase:
+        """Publish this stage's products after a shared model run."""
+        return artifacts
+
 
 class MethodStage(Stage):
     """Execute a model once under an existing :class:`HookingContextFactory`."""
@@ -182,6 +210,32 @@ class MethodStage(Stage):
         ) as method:
             result = method(artifacts)
         return artifacts if result is None else result
+
+    def coexecution_factory(self) -> HookingContextFactory | None:
+        if type(self).run is not MethodStage.run:
+            return None
+        return self.factory
+
+    def coexecution_storage_kind(self) -> str:
+        return "public-artifacts"
+
+    def coexecution_bindings(self) -> Mapping[PipelineKey, PipelineKey]:
+        return {key: key for key in self.required_keys}
+
+    def coexecution_model_keys(
+        self,
+    ) -> tuple[tuple[PipelineKey, ...] | None, tuple[PipelineKey, ...] | None]:
+        return self.model_in_keys, self.model_out_keys
+
+    def prepare_coexecution(
+        self, artifacts: TensorDictBase, execution: TensorDictBase | None = None
+    ) -> TensorDictBase:
+        if execution is not None and execution is not artifacts:
+            raise ValueError("MethodStage cannot share a legacy adapter's execution storage")
+        return artifacts
+
+    def finalize_coexecution(self, artifacts: TensorDictBase, execution: TensorDictBase) -> TensorDictBase:
+        return execution
 
 
 class TransformStage(Stage):
@@ -277,24 +331,7 @@ class Pipeline:
         if len(set(names)) != len(names):
             raise ValueError("Pipeline stage names must be unique")
         produced: dict[PipelineKey, str] = {}
-        effects: dict[str, str] = {}
-        incompatible_effects: dict[str, str] = {}
         for stage in self.stages:
-            incompatible = stage.incompatible_effects.intersection(effects)
-            if incompatible:
-                effect = sorted(incompatible)[0]
-                raise ValueError(
-                    f"Stage {stage.name!r} is incompatible with effect {effect!r} from {effects[effect]!r}"
-                )
-            reverse_incompatible = stage.effects.intersection(incompatible_effects)
-            if reverse_incompatible:
-                effect = sorted(reverse_incompatible)[0]
-                raise ValueError(
-                    f"Stage {stage.name!r} conflicts with incompatible effect {effect!r} from "
-                    f"{incompatible_effects[effect]!r}"
-                )
-            effects.update({effect: stage.name for effect in stage.effects})
-            incompatible_effects.update({effect: stage.name for effect in stage.incompatible_effects})
             for key in stage.provided_keys:
                 if any(_keys_conflict(key, reserved_key) for reserved_key in self.reserved_keys):
                     raise ValueError(f"Stage {stage.name!r} writes reserved pipeline key {key!r}")
@@ -310,6 +347,18 @@ class Pipeline:
     def _artifact_keys(artifacts: TensorDictBase) -> set[PipelineKey]:
         return set(artifacts.keys(include_nested=True, leaves_only=False))
 
+    @staticmethod
+    def _writes_existing_artifact(key: PipelineKey, existing: PipelineKey, artifacts: TensorDictBase) -> bool:
+        """Return whether writing *key* replaces an existing value rather than extending a namespace."""
+        if not _keys_conflict(key, existing):
+            return False
+        if key == existing:
+            return True
+        key_path, existing_path = _path(key), _path(existing)
+        if key_path[: len(existing_path)] == existing_path:
+            return not isinstance(artifacts.get(existing), TensorDictBase)
+        return True
+
     def validate(self, artifacts: TensorDictBase) -> None:
         """Fail before model execution when a stage dependency is unavailable."""
         if not isinstance(artifacts, TensorDictBase):
@@ -320,7 +369,9 @@ class Pipeline:
             if missing:
                 raise ValueError(f"Stage {stage.name!r} requires missing artifact keys: {missing!r}")
             collisions = [
-                key for key in stage.provided_keys if any(_keys_conflict(key, existing) for existing in available)
+                key
+                for key in stage.provided_keys
+                if any(self._writes_existing_artifact(key, existing, artifacts) for existing in available)
             ]
             if collisions:
                 raise ValueError(f"Stage {stage.name!r} writes existing artifact keys: {collisions!r}")
@@ -329,17 +380,16 @@ class Pipeline:
     @staticmethod
     def _can_coalesce(stages: Sequence[Stage]) -> bool:
         """Return whether explicit capabilities prove one shared model run safe."""
-        if not stages or not all(type(stage) is MethodStage for stage in stages):
+        if not stages or any(stage.coexecution_factory() is None for stage in stages):
             return False
         first = stages[0]
         if not first.coexecution_key or any(stage.coexecution_key != first.coexecution_key for stage in stages):
             return False
         if any(stage.model_passes != 1 for stage in stages):
             return False
-        if any(
-            (stage.model_in_keys, stage.model_out_keys) != (first.model_in_keys, first.model_out_keys)
-            for stage in stages[1:]
-        ):
+        if any(stage.coexecution_model_keys() != first.coexecution_model_keys() for stage in stages[1:]):
+            return False
+        if any(stage.coexecution_storage_kind() != first.coexecution_storage_kind() for stage in stages[1:]):
             return False
         if any(
             (stage.gradient_mode, stage.device_batch_constraints)
@@ -350,6 +400,7 @@ class Pipeline:
         produced: set[PipelineKey] = set()
         effects: set[str] = set()
         incompatible: set[str] = set()
+        runtime_bindings: dict[PipelineKey, PipelineKey] = {}
         for stage in stages:
             if produced.intersection(stage.required_keys):
                 return False
@@ -358,14 +409,15 @@ class Pipeline:
             produced.update(stage.provided_keys)
             effects.update(stage.effects)
             incompatible.update(stage.incompatible_effects)
-            # HookGroup owns one context and does not enter child contexts.
-            # Factories that configure context or wrapper state per instance
-            # therefore need their standalone lifecycle until they expose an
-            # explicit shared-group contract.
-            if stage.factory._hooking_context_kwargs or stage.factory._hooked_module_kwargs:
+            for runtime_key, public_key in stage.coexecution_bindings().items():
+                if runtime_key in runtime_bindings and runtime_bindings[runtime_key] != public_key:
+                    return False
+                runtime_bindings[runtime_key] = public_key
+            factory = stage.coexecution_factory()
+            if factory is None or factory.planner_coexecution_incompatibility() is not None:
                 return False
         try:
-            HookGroup(*(stage.factory for stage in stages))
+            HookGroup(*(stage.coexecution_factory() for stage in stages))
         except ValueError:
             return False
         return True
@@ -402,7 +454,7 @@ class Pipeline:
         index = 0
         while index < len(self.stages):
             candidate = [self.stages[index]]
-            if type(candidate[0]) is MethodStage and candidate[0].coexecution_key:
+            if candidate[0].coexecution_factory() is not None and candidate[0].coexecution_key:
                 while index + len(candidate) < len(self.stages):
                     next_stage = self.stages[index + len(candidate)]
                     if not self._can_coalesce([*candidate, next_stage]):
@@ -414,16 +466,24 @@ class Pipeline:
         return ExecutionPlan(tuple(runs))
 
     @staticmethod
-    def _run_coalesced(stages: Sequence[MethodStage], model: nn.Module, artifacts: TensorDictBase) -> TensorDictBase:
+    def _run_coalesced(stages: Sequence[Stage], model: nn.Module, artifacts: TensorDictBase) -> TensorDictBase:
         first = stages[0]
-        factory = HookGroup(*(stage.factory for stage in stages))
+        execution = None
+        for stage in stages:
+            execution = stage.prepare_coexecution(artifacts, execution)
+        factory = HookGroup(*(stage.coexecution_factory() for stage in stages))
+        model_in_keys, model_out_keys = first.coexecution_model_keys()
         with factory.prepare(
             model,
-            in_keys=None if first.model_in_keys is None else list(first.model_in_keys),
-            out_keys=None if first.model_out_keys is None else list(first.model_out_keys),
+            in_keys=None if model_in_keys is None else list(model_in_keys),
+            out_keys=None if model_out_keys is None else list(model_out_keys),
         ) as method:
-            result = method(artifacts)
-        return artifacts if result is None else result
+            result = method(execution)
+        execution = execution if result is None else result
+        current = artifacts
+        for stage in stages:
+            current = stage.finalize_coexecution(current, execution)
+        return current
 
     def run(
         self,

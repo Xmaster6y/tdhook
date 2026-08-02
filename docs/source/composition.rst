@@ -47,19 +47,18 @@ inspectable without executing them:
        print(run.stages, run.model_passes, run.coalesced)
 
 The planner is deliberately conservative.  Unknown pairs and stages separated
-by an artifact dependency receive separate runs.  Adjacent ``MethodStage``
-objects co-execute only when both opt into the same non-empty
-``coexecution_key`` and agree on model keys, pass count, effects, context
-specialisation, and device/batch requirements.  A shared run uses
-``HookGroup`` and retains its rollback and cleanup guarantees.  This is a
-linear execution plan, not a general DAG scheduler.
+by an artifact dependency receive separate runs.  Adjacent stages co-execute
+only when both expose the shared-execution protocol, opt into the same
+non-empty ``coexecution_key``, and agree on runtime storage, model keys, pass
+count, effects, context specialisation, and device/batch requirements.  A
+shared run uses ``HookGroup`` and retains its rollback and cleanup guarantees.
+This is a linear execution plan, not a general DAG scheduler.
 
-.. note::
-
-   This is the Phase 0 architecture decision for `issue 57
-   <https://github.com/Xmaster6y/tdhook/issues/57>`_.  It defines the
-   composability target and records the implementation work required to reach
-   it.  The pipeline runtime itself is implemented by later roadmap phases.
+The contract originated in `issue 57
+<https://github.com/Xmaster6y/tdhook/issues/57>`_.  The sequential runtime,
+artifact adapters, executable built-in stages, and conservative planner are now
+implemented; the evidence states below identify the public methods that have
+completed conformance coverage.
 
 Decision
 --------
@@ -118,9 +117,10 @@ pair of methods must occupy the same forward/backward execution.
 Capability model
 ----------------
 
-A future preflight validator must evaluate each stage against the following
-fields.  The inventory below records them for the current public methods and
-operators.
+Pipeline preflight evaluates the executable subset of these fields.  The
+inventory records the complete target contract for current public methods and
+operators; rows remain ``untested`` until their executable metadata and a real
+method test agree.
 
 ``execution``
    Whether the stage executes a model, transforms existing TensorDict
@@ -201,8 +201,27 @@ manager results, and an intervention pass's model output.
 
 Each factory has an executable ``StageCapability`` record. The composition
 contract tests check that the documented rows for ``ActivationCaching``,
-``Probing``, and ``Adapters`` still resolve to one of those records, so an API
-or matrix change cannot quietly drop its implementation contract.
+``IntegratedGradients``, ``LRP``, ``Probing``, and ``Adapters`` agree with real
+stage contracts, so a supported matrix row cannot quietly drift from its
+runtime artifact keys or same-run opt-in.
+
+The current evidence anchors are:
+
+.. list-table:: Built-in composition evidence
+   :header-rows: 1
+
+   * - Public method
+     - Evidence
+   * - ``ActivationCaching``
+     - ``test_activation_caching_stage_executes_a_real_method_and_publishes_its_cache``
+   * - ``IntegratedGradients``
+     - ``test_attribution_stage_maps_baseline_and_additional_inputs_and_reports_passes``
+   * - ``LRP``
+     - ``test_lrp_artifact_drives_a_second_conditioned_attribution_stage``
+   * - ``Probing``
+     - ``test_real_probing_stages_coexecute_and_publish_independent_results``
+   * - ``Adapters``
+     - ``test_weight_intervention_stage_executes_real_adapters``
 
 .. csv-table:: Public capability inventory
    :file: _static/composition-capabilities.csv
@@ -253,9 +272,9 @@ share one execution:
      - Specialised methods
      - TensorDict operators
    * - Simple hooks
-     - Untested: registration order is deterministic, but cross-method
-       conformance and cleanup tests are pending.  Target: promote compatible
-       pairs after conformance coverage.
+     - Supported for compatible ``ProbingStage`` pairs with the same runtime
+       bindings. Other simple-hook pairs remain untested until they acquire an
+       executable stage contract and conformance coverage.
      - Supported for standard-context children: each child resolves paths
        against the original module after any ordered wrapper rewrites. Setup
        rolls back prepared children and already-installed hooks on failure.
@@ -341,7 +360,8 @@ model execution:
    evaluations, and callback-controlled evaluation loops.
 #. Temporary model mutation has a scoped owner and restoration occurs before a
    later incompatible stage starts.
-#. A same-run incompatibility produces a stage split when the required artifact
+#. ``incompatible_effects`` describe shared-run conflicts, not a ban on placing
+   both stages in one workflow. A same-run incompatibility produces a stage split when the required artifact
    boundary is available.  It fails preflight only when no valid split or
    adapter exists.
 #. Any remaining ``unsupported`` combination fails preflight with the reason

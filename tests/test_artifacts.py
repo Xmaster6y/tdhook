@@ -43,7 +43,7 @@ def test_contracts_and_existing_method_adapters_are_storage_independent():
     assert activation_caching_adapter().contract.provided_keys == (("activations", "cache"),)
     assert probing_adapter().contract.provided_keys == (("probes", "results"),)
     assert attribution_adapter().contract.provided_keys == (("attributions", "values"),)
-    assert weight_adapter().contract.provided_keys == (("interventions", "weights"),)
+    assert weight_adapter().contract.provided_keys == (("outputs", "model"),)
 
     with pytest.raises(ValueError, match="names must be non-empty"):
         ArtifactContract(requires={"": ("inputs", "image")})
@@ -53,6 +53,17 @@ def test_contracts_and_existing_method_adapters_are_storage_independent():
         ArtifactAdapter("", contract, {"source": "image", "score": "score"})
     with pytest.raises(ValueError, match="exactly match"):
         ArtifactAdapter("legacy-score", contract, {"source": "image"})
+
+
+def test_weight_adapter_preserves_deprecated_cache_key_alias():
+    with pytest.warns(DeprecationWarning, match="cache_key is deprecated"):
+        adapter = weight_adapter(cache_key="legacy-output")
+
+    assert adapter.storage["output"] == "legacy-output"
+    assert adapter.contract.provided_keys == (("outputs", "model"),)
+
+    with pytest.raises(TypeError, match="both output_key and cache_key"):
+        weight_adapter("new-output", cache_key="legacy-output")
 
 
 def test_adapter_copies_public_requirements_and_products_through_legacy_storage():

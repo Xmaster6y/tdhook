@@ -92,17 +92,29 @@ class HookingContext:
         return self._enter(managed_by_context_manager=True)
 
     def __exit__(self, exc_type, exc_value, traceback):
+        cleanup_error = None
         try:
             if self._handle is not None:
-                self._handle.remove()
-            self._restore(self._module, self._in_keys, self._out_keys, self._extra_relative_path)
+                try:
+                    self._handle.remove()
+                except BaseException as error:
+                    cleanup_error = error
+            try:
+                self._restore(self._module, self._in_keys, self._out_keys, self._extra_relative_path)
+            except BaseException as error:
+                cleanup_error = cleanup_error or error
         finally:
             self._in_context = False
             self._hooked_module = None
             self._handle = None
             if self._stack is not None:
-                self._stack.__exit__(exc_type, exc_value, traceback)
+                try:
+                    self._stack.__exit__(exc_type, exc_value, traceback)
+                except BaseException as error:
+                    cleanup_error = cleanup_error or error
                 self._stack = None
+        if cleanup_error is not None:
+            raise cleanup_error
 
     @contextmanager
     def disable_hooks(self) -> Generator[None, None, None]:
@@ -261,6 +273,25 @@ class HookingContextFactory:
     def _hook_module(self, module: HookedModule) -> MultiHookHandle:
         return MultiHookHandle()
 
+    def hook_group_incompatibility(self) -> str | None:
+        """Explain why this factory cannot use one generic shared context."""
+        if type(self)._hooking_context_class is not HookingContext:
+            return f"it requires the specialised {type(self)._hooking_context_class.__name__} capability"
+        if type(self)._hooked_module_class is not HookedModule:
+            return f"it requires the specialised {type(self)._hooked_module_class.__name__} capability"
+        if type(self)._spawn_hooked_module is not HookingContextFactory._spawn_hooked_module:
+            return "it customises hooked-module spawning"
+        return None
+
+    def planner_coexecution_incompatibility(self) -> str | None:
+        """Explain why planner coexecution cannot bypass standalone lifecycle state."""
+        incompatibility = self.hook_group_incompatibility()
+        if incompatibility is not None:
+            return incompatibility
+        if self._hooking_context_kwargs or self._hooked_module_kwargs:
+            return "it configures per-context or per-wrapper instance state"
+        return None
+
 
 class CompositeHookingContextFactory(HookingContextFactory):
     """
@@ -283,22 +314,11 @@ class CompositeHookingContextFactory(HookingContextFactory):
         runtime object.
         """
         for context in self._contexts:
-            if type(context)._hooking_context_class is not HookingContext:
+            incompatibility = context.hook_group_incompatibility()
+            if incompatibility is not None:
                 raise ValueError(
-                    f"Cannot compose {type(context).__name__}: it requires the specialised "
-                    f"{type(context)._hooking_context_class.__name__} capability. "
-                    "Same-run composition currently supports factories using HookingContext."
-                )
-            if type(context)._hooked_module_class is not HookedModule:
-                raise ValueError(
-                    f"Cannot compose {type(context).__name__}: it requires the specialised "
-                    f"{type(context)._hooked_module_class.__name__} capability. "
-                    "Same-run composition currently supports factories using HookedModule."
-                )
-            if type(context)._spawn_hooked_module is not HookingContextFactory._spawn_hooked_module:
-                raise ValueError(
-                    f"Cannot compose {type(context).__name__}: it customises hooked-module spawning, "
-                    "which is not a shared-context capability."
+                    f"Cannot compose {type(context).__name__}: {incompatibility}. "
+                    "Same-run composition currently supports stateless factories using HookingContext and HookedModule."
                 )
 
     def _prepare_module(
@@ -344,7 +364,11 @@ class CompositeHookingContextFactory(HookingContextFactory):
     def _hook_module(self, module: HookedModule) -> MultiHookHandle:
         handles = []
         try:
-            prepared_children = self._prepared_children.get(module.td_module)
+            prepared_children = self._prepared_children.pop(module.td_module, None)
+            if prepared_children is None:
+                prepared_children = getattr(module, "_composed_prepared_children", None)
+            else:
+                module._composed_prepared_children = prepared_children
             if prepared_children is None:
                 raise RuntimeError("Cannot compose hooks: missing prepared child modules")
             for context, child_module in zip(self._contexts, prepared_children):

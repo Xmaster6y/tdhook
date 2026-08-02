@@ -1,9 +1,20 @@
 import csv
 from pathlib import Path
 
+from torch import nn
+
 from tdhook import attribution, latent, weights
+from tdhook.attribution import IntegratedGradients, LRP
 from tdhook.latent import dimension_estimation
-from tdhook.stages import DOCUMENTED_STAGE_CAPABILITIES, capability_for_stage
+from tdhook.latent import ActivationCaching, Probing
+from tdhook.stages import (
+    ActivationCachingStage,
+    AttributionStage,
+    DOCUMENTED_STAGE_CAPABILITIES,
+    ProbingStage,
+    WeightInterventionStage,
+)
+from tdhook.weights import Adapters
 
 
 CAPABILITY_MATRIX = Path(__file__).parents[1] / "docs" / "source" / "_static" / "composition-capabilities.csv"
@@ -58,9 +69,28 @@ def test_callback_and_module_key_capabilities_are_not_undercounted():
 
 
 def test_documented_built_in_stage_rows_have_executable_capabilities():
-    rows = {row["symbol"] for row in _capability_rows()}
-    assert set(DOCUMENTED_STAGE_CAPABILITIES).issubset(rows)
-    for method in DOCUMENTED_STAGE_CAPABILITIES.values():
-        capability = capability_for_stage(method)
-        assert capability.required_keys
-        assert capability.provided_keys
+    rows = {row["symbol"]: row for row in _capability_rows()}
+    stages = {
+        "ActivationCaching": ActivationCachingStage("cache", ActivationCaching("0")),
+        "IntegratedGradients": AttributionStage("ig", IntegratedGradients(n_steps=2)),
+        "LRP": AttributionStage("lrp", LRP(warn_on_missing_rule=False)),
+        "Probing": ProbingStage("probe", Probing("0", lambda *_: object()), object()),
+        "Adapters": WeightInterventionStage("adapter", Adapters({"identity": (nn.Identity(), "0", "0")})),
+    }
+    supported_hook_stages = {
+        row["symbol"]
+        for row in rows.values()
+        if row["kind"] in {"hook method", "weight method"} and row["multi_stage"] == "supported"
+    }
+
+    assert set(DOCUMENTED_STAGE_CAPABILITIES) == set(stages) == supported_hook_stages
+    for symbol, stage in stages.items():
+        row = rows[symbol]
+        assert row["multi_stage"] == "supported"
+        assert (row["same_run"] == "supported") is bool(stage.coexecution_key)
+        for key in stage.required_keys:
+            path = key if isinstance(key, str) else "/".join(key)
+            assert path in row["required_keys"]
+        for key in stage.provided_keys:
+            path = key if isinstance(key, str) else "/".join(key)
+            assert path in row["produced_keys"]
