@@ -19,4 +19,5 @@ __all__ = [
     "pipeline",
     "artifacts",
     "stages",
+    "concepts",
 ]
