@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from importlib.metadata import PackageNotFoundError, version
 from typing import Iterable, Mapping
+from warnings import warn
 
 from torch import nn
 from tensordict import TensorDict, TensorDictBase
@@ -162,8 +163,17 @@ def attribution_adapter(result_key: ArtifactKey = "attr") -> ArtifactAdapter:
     )
 
 
-def weight_adapter(output_key: ArtifactKey = "output") -> ArtifactAdapter:
-    """Adapt a weight intervention pass's real model output."""
+def weight_adapter(output_key: ArtifactKey = "output", *, cache_key: ArtifactKey | None = None) -> ArtifactAdapter:
+    """Adapt a weight intervention pass's real model output.
+
+    ``cache_key`` is retained as a deprecated alias for callers using the
+    original helper signature.
+    """
+    if cache_key is not None:
+        if output_key != "output":
+            raise TypeError("weight_adapter() cannot receive both output_key and cache_key")
+        warn("cache_key is deprecated; use output_key instead", DeprecationWarning, stacklevel=2)
+        output_key = cache_key
     return ArtifactAdapter(
         "weight-adapters",
         ArtifactContract(provides={"output": ("outputs", "model")}),

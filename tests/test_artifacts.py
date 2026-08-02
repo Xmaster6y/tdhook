@@ -55,6 +55,17 @@ def test_contracts_and_existing_method_adapters_are_storage_independent():
         ArtifactAdapter("legacy-score", contract, {"source": "image"})
 
 
+def test_weight_adapter_preserves_deprecated_cache_key_alias():
+    with pytest.warns(DeprecationWarning, match="cache_key is deprecated"):
+        adapter = weight_adapter(cache_key="legacy-output")
+
+    assert adapter.storage["output"] == "legacy-output"
+    assert adapter.contract.provided_keys == (("outputs", "model"),)
+
+    with pytest.raises(TypeError, match="both output_key and cache_key"):
+        weight_adapter("new-output", cache_key="legacy-output")
+
+
 def test_adapter_copies_public_requirements_and_products_through_legacy_storage():
     adapter = ArtifactAdapter(
         "legacy-score",
