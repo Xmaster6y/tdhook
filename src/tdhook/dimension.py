@@ -172,18 +172,32 @@ class DimensionSummaryStage(Stage):
         )
         reduce_dims = tuple(dim if dim >= 0 else dimensions.ndim + dim for dim in reduce_dims)
         if (
-            not reduce_dims
+            (not reduce_dims and self.dims is not None)
             or len(set(reduce_dims)) != len(reduce_dims)
             or any(dim < 0 or dim >= dimensions.ndim for dim in reduce_dims)
         ):
             raise ValueError("Summary dimensions must be unique valid dimensions")
         finite = torch.isfinite(dimensions)
+        if not reduce_dims:
+            count = finite.to(dtype=torch.long)
+            nan = torch.full_like(dimensions, float("nan"))
+            summary = TensorDict(
+                {
+                    "count": count,
+                    "mean": torch.where(finite, dimensions, nan),
+                    "std": torch.where(finite, torch.zeros_like(dimensions), nan),
+                },
+                batch_size=[],
+            )
+            _store_shape_neutral(artifacts, self.summary_key, summary)
+            return artifacts
         values = torch.where(finite, dimensions, torch.zeros_like(dimensions))
         count = finite.sum(dim=reduce_dims, keepdim=True)
         divisor = count.clamp_min(1)
-        mean = values.sum(dim=reduce_dims, keepdim=True) / divisor
+        nan = torch.full_like(values.sum(dim=reduce_dims, keepdim=True), float("nan"))
+        mean = torch.where(count > 0, values.sum(dim=reduce_dims, keepdim=True) / divisor, nan)
         centered = torch.where(finite, dimensions - mean, torch.zeros_like(dimensions))
-        variance = centered.square().sum(dim=reduce_dims, keepdim=True) / divisor
+        variance = torch.where(count > 0, centered.square().sum(dim=reduce_dims, keepdim=True) / divisor, nan)
         count, mean, variance = (value.squeeze(dim=reduce_dims) for value in (count, mean, variance))
         summary = TensorDict({"count": count, "mean": mean, "std": variance.sqrt()}, batch_size=[])
         _store_shape_neutral(artifacts, self.summary_key, summary)

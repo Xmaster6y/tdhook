@@ -167,6 +167,24 @@ def test_summary_can_preserve_condition_axes_and_ignores_non_finite_values():
     torch.testing.assert_close(summary["std"], torch.tensor([1.0, (8 / 3) ** 0.5]))
 
 
+def test_summary_handles_scalar_dimensions_and_marks_empty_slices_undefined():
+    scalar = TensorDict({"metrics": {"dimension": NonTensorData(torch.tensor(2.5), batch_size=[])}}, batch_size=[])
+    scalar_summary = Pipeline([DimensionSummaryStage("scalar-summary")]).run(nn.Identity(), scalar)
+    assert scalar_summary.artifacts[("metrics", "dimension_summary")].data["count"].item() == 1
+    torch.testing.assert_close(
+        scalar_summary.artifacts[("metrics", "dimension_summary")].data["mean"], torch.tensor(2.5)
+    )
+
+    empty = TensorDict(
+        {"metrics": {"dimension": NonTensorData(torch.full((2, 3), float("nan")), batch_size=[])}}, batch_size=[]
+    )
+    empty_summary = Pipeline([DimensionSummaryStage("empty-summary", dims=-1)]).run(nn.Identity(), empty)
+    summary = empty_summary.artifacts[("metrics", "dimension_summary")].data
+    torch.testing.assert_close(summary["count"], torch.zeros(2, dtype=torch.long))
+    assert torch.isnan(summary["mean"]).all()
+    assert torch.isnan(summary["std"]).all()
+
+
 def test_summary_rejects_non_tensor_dimensions_and_invalid_reduction_axes():
     artifacts = TensorDict({"metrics": {"dimension": NonTensorData("not-a-tensor", batch_size=[])}}, batch_size=[])
     with pytest.raises(TypeError, match="Dimensions"):
@@ -175,3 +193,5 @@ def test_summary_rejects_non_tensor_dimensions_and_invalid_reduction_axes():
     artifacts.set(("metrics", "dimension"), NonTensorData(torch.ones(2, 2), batch_size=[]))
     with pytest.raises(ValueError, match="unique valid dimensions"):
         DimensionSummaryStage("invalid-axes", dims=(0, 0)).run(nn.Identity(), artifacts)
+    with pytest.raises(ValueError, match="unique valid dimensions"):
+        DimensionSummaryStage("empty-axes", dims=()).run(nn.Identity(), artifacts)
