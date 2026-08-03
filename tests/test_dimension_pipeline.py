@@ -73,6 +73,18 @@ def test_channel_and_spatial_selectors_match_the_notebook_reshapes(activation_fi
     )
 
 
+@pytest.mark.parametrize(
+    ("selector", "activations", "message"),
+    [
+        (channel_conditioned_samples, torch.ones(2, 3), "Channel-conditioned"),
+        (spatial_conditioned_samples, torch.ones(2, 3, 4), "Spatial-conditioned"),
+    ],
+)
+def test_conditioned_selectors_reject_incompatible_activation_shapes(selector, activations, message):
+    with pytest.raises(ValueError, match=message):
+        selector(activations)
+
+
 def test_multiple_cached_layers_can_feed_independent_conditioned_slices(activation_fixture):
     model, inputs = activation_fixture
     first = model(inputs)
@@ -118,6 +130,32 @@ def test_existing_estimators_are_swappable_artifact_only_stages(estimator):
     assert result.plan.model_passes == 0
 
 
+def test_dimension_stages_reject_invalid_artifacts_and_estimator_contracts():
+    artifacts = TensorDict(
+        {"activations": {"cache": {"invalid": NonTensorData("not-a-tensor", batch_size=[])}}}, batch_size=[]
+    )
+    with pytest.raises(TypeError, match="Cached activation"):
+        ActivationSampleStage("invalid-cache", "invalid", lambda value: value).run(nn.Identity(), artifacts)
+
+    tensor_artifacts = TensorDict({"activations": {"cache": {"value": torch.ones(3, 2, 2)}}}, batch_size=[])
+    with pytest.raises(TypeError, match="must return a tensor"):
+        ActivationSampleStage("invalid-transform", "value", lambda value: "not-a-tensor").run(
+            nn.Identity(), tensor_artifacts
+        )
+    with pytest.raises(ValueError, match="points, features"):
+        ActivationSampleStage("invalid-shape", "value", lambda value: value[0, 0]).run(nn.Identity(), tensor_artifacts)
+
+    with pytest.raises(TypeError, match="in_key and out_key"):
+        DimensionEstimationStage("invalid-estimator", nn.Identity())
+
+    samples = TensorDict({"activations": {"samples": NonTensorData("not-a-tensor", batch_size=[])}}, batch_size=[])
+    with pytest.raises(TypeError, match="Estimator samples"):
+        DimensionEstimationStage("invalid-samples", TwoNnDimensionEstimator()).run(nn.Identity(), samples)
+    samples.set(("activations", "samples"), NonTensorData(torch.ones(2), batch_size=[]))
+    with pytest.raises(ValueError, match="points, features"):
+        DimensionEstimationStage("one-dimensional-samples", TwoNnDimensionEstimator()).run(nn.Identity(), samples)
+
+
 def test_summary_can_preserve_condition_axes_and_ignores_non_finite_values():
     dimensions = torch.tensor([[1.0, float("nan"), 3.0], [2.0, 4.0, 6.0]])
     artifacts = TensorDict({"metrics": {"dimension": NonTensorData(dimensions, batch_size=[2])}}, batch_size=[2])
@@ -127,3 +165,13 @@ def test_summary_can_preserve_condition_axes_and_ignores_non_finite_values():
     torch.testing.assert_close(summary["count"], torch.tensor([2, 3]))
     torch.testing.assert_close(summary["mean"], torch.tensor([2.0, 4.0]))
     torch.testing.assert_close(summary["std"], torch.tensor([1.0, (8 / 3) ** 0.5]))
+
+
+def test_summary_rejects_non_tensor_dimensions_and_invalid_reduction_axes():
+    artifacts = TensorDict({"metrics": {"dimension": NonTensorData("not-a-tensor", batch_size=[])}}, batch_size=[])
+    with pytest.raises(TypeError, match="Dimensions"):
+        DimensionSummaryStage("invalid-dimensions").run(nn.Identity(), artifacts)
+
+    artifacts.set(("metrics", "dimension"), NonTensorData(torch.ones(2, 2), batch_size=[]))
+    with pytest.raises(ValueError, match="unique valid dimensions"):
+        DimensionSummaryStage("invalid-axes", dims=(0, 0)).run(nn.Identity(), artifacts)
