@@ -1,0 +1,129 @@
+import pytest
+import torch
+from torch import nn
+from tensordict import TensorDict
+from tensordict.tensorclass import NonTensorData
+
+from tdhook.dimension import (
+    ActivationSampleStage,
+    DimensionEstimationStage,
+    DimensionSummaryStage,
+    channel_conditioned_samples,
+    conditioned_dimension_pipeline,
+    spatial_conditioned_samples,
+)
+from tdhook.latent import ActivationCaching
+from tdhook.latent.dimension_estimation import (
+    CaPcaDimensionEstimator,
+    LocalKnnDimensionEstimator,
+    LocalPcaDimensionEstimator,
+    TwoNnDimensionEstimator,
+)
+from tdhook.pipeline import Pipeline
+
+
+@pytest.fixture
+def activation_fixture():
+    model = nn.Sequential(nn.Conv2d(3, 4, kernel_size=1, bias=False))
+    with torch.no_grad():
+        model[0].weight.copy_(torch.arange(12, dtype=torch.float32).reshape(4, 3, 1, 1) / 10 + 0.1)
+    inputs = torch.arange(8 * 3 * 2 * 2, dtype=torch.float32).reshape(8, 3, 2, 2) / 20
+    return model, inputs
+
+
+def test_conditioned_dimension_pipeline_has_one_capture_pass_and_frozen_channel_fixture(activation_fixture):
+    model, inputs = activation_fixture
+    pipeline = conditioned_dimension_pipeline(
+        ActivationCaching("0"), "0", channel_conditioned_samples, TwoNnDimensionEstimator()
+    )
+    artifacts = TensorDict({"inputs": {"input": inputs}}, batch_size=[len(inputs)])
+
+    result = pipeline.run(model, artifacts, model_id="frozen-conv", seed=0)
+
+    assert [(run.stages, run.model_passes) for run in result.plan.runs] == [
+        (("capture-activations",), 1),
+        (("select-samples",), 0),
+        (("estimate-dimension",), 0),
+        (("summarize-dimension",), 0),
+    ]
+    torch.testing.assert_close(result.artifacts[("metrics", "dimension")].data, torch.full((4,), 3.0))
+    summary = result.artifacts[("metrics", "dimension_summary")].data
+    assert summary["count"].item() == 4
+    torch.testing.assert_close(summary["mean"], torch.tensor(3.0))
+    torch.testing.assert_close(summary["std"], torch.tensor(0.0))
+    assert [item.parents for item in result.provenance] == [
+        (("inputs", "input"),),
+        (("activations", "cache"),),
+        (("activations", "samples"),),
+        (("metrics", "dimension"),),
+    ]
+
+
+def test_channel_and_spatial_selectors_match_the_notebook_reshapes(activation_fixture):
+    model, inputs = activation_fixture
+    activations = model(inputs)
+
+    assert channel_conditioned_samples(activations).shape == (4, 8, 4)
+    assert spatial_conditioned_samples(activations).shape == (4, 8, 4)
+    torch.testing.assert_close(
+        channel_conditioned_samples(activations), activations.permute(1, 0, 2, 3).reshape(4, 8, 4)
+    )
+    torch.testing.assert_close(
+        spatial_conditioned_samples(activations), activations.permute(2, 3, 0, 1).reshape(4, 8, 4)
+    )
+
+
+def test_multiple_cached_layers_can_feed_independent_conditioned_slices(activation_fixture):
+    model, inputs = activation_fixture
+    first = model(inputs)
+    artifacts = TensorDict({"activations": {"cache": {"first": first, "second": first + 1}}}, batch_size=[len(inputs)])
+    pipeline = Pipeline(
+        [
+            ActivationSampleStage(
+                "first-layer", "first", channel_conditioned_samples, sample_key=("activations", "first")
+            ),
+            ActivationSampleStage(
+                "second-layer", "second", spatial_conditioned_samples, sample_key=("activations", "second")
+            ),
+        ]
+    )
+
+    result = pipeline.run(model, artifacts)
+
+    assert result.plan.model_passes == 0
+    assert result.artifacts[("activations", "first")].data.shape == (4, 8, 4)
+    assert result.artifacts[("activations", "second")].data.shape == (4, 8, 4)
+
+
+@pytest.mark.parametrize(
+    "estimator",
+    [
+        TwoNnDimensionEstimator(),
+        LocalKnnDimensionEstimator(k=2),
+        LocalPcaDimensionEstimator(k=2),
+        CaPcaDimensionEstimator(k=2),
+    ],
+)
+def test_existing_estimators_are_swappable_artifact_only_stages(estimator):
+    samples = torch.tensor(
+        [[[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0], [2.0, 1.0], [1.0, 2.0]]], dtype=torch.float32
+    )
+    artifacts = TensorDict({"activations": {"samples": NonTensorData(samples, batch_size=[2])}}, batch_size=[2])
+    pipeline = Pipeline([DimensionEstimationStage("estimate", estimator)])
+
+    result = pipeline.run(nn.Identity(), artifacts)
+
+    dimensions = result.artifacts[("metrics", "dimension")].data
+    assert dimensions.shape[0] == 1
+    assert result.plan.model_passes == 0
+
+
+def test_summary_can_preserve_condition_axes_and_ignores_non_finite_values():
+    dimensions = torch.tensor([[1.0, float("nan"), 3.0], [2.0, 4.0, 6.0]])
+    artifacts = TensorDict({"metrics": {"dimension": NonTensorData(dimensions, batch_size=[2])}}, batch_size=[2])
+    result = Pipeline([DimensionSummaryStage("summary", dims=-1)]).run(nn.Identity(), artifacts)
+
+    summary = result.artifacts[("metrics", "dimension_summary")].data
+    torch.testing.assert_close(summary["count"], torch.tensor([2, 3]))
+    torch.testing.assert_close(summary["mean"], torch.tensor([2.0, 4.0]))
+    torch.testing.assert_close(summary["std"], torch.tensor([1.0, (8 / 3) ** 0.5]))

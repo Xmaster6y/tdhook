@@ -256,6 +256,26 @@ The current evidence anchors are:
    * - ``Adapters``
      - ``test_weight_intervention_stage_executes_real_adapters``
 
+Declared intrinsic dimension
+----------------------------
+
+``tdhook.dimension.conditioned_dimension_pipeline`` is the canonical
+activation-to-dimension workflow.  It contains one
+``ActivationCachingStage`` model pass followed by explicit artifact-only
+selection, estimator, and summary stages.  ``channel_conditioned_samples``
+and ``spatial_conditioned_samples`` provide generic reshapes for
+``(samples, channels, ...)`` and ``(samples, channels, height, width)``
+activations; application-specific layer selection and plotting remain outside
+the pipeline.
+
+The estimator stage accepts the existing ``TwoNnDimensionEstimator``,
+``LocalKnnDimensionEstimator``, ``LocalPcaDimensionEstimator``, and
+``CaPcaDimensionEstimator`` without changing their public APIs.  Its samples,
+dimensions, and summary are shape-neutral TensorDict artifacts so condition
+axes do not have to match the original model batch.  The compact CPU fixture
+in ``test_dimension_pipeline.py`` fixes the channel-conditioned TwoNN result
+and verifies both the one-pass plan and estimator interchangeability.
+
 .. csv-table:: Public capability inventory
    :file: _static/composition-capabilities.csv
    :header-rows: 1
