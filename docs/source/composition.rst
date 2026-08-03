@@ -205,6 +205,39 @@ contract tests check that the documented rows for ``ActivationCaching``,
 stage contracts, so a supported matrix row cannot quietly drift from its
 runtime artifact keys or same-run opt-in.
 
+Declared concept attribution
+----------------------------
+
+The concept-attribution demo is a three-stage pipeline: LRP collects labelled
+concept-example relevances, ``ConceptSelectionStage`` records the selected
+channel and its positive or negative direction, and
+``ChannelConditionedLRPStage`` binds that explicit artifact to a second LRP
+pass.  This makes the two model passes and their artifact boundary visible to
+``Pipeline.plan()``; no notebook callback needs to retain hook context or a
+selected Python channel.
+
+.. code-block:: python
+
+   from tdhook.attribution import LRP
+   from tdhook.concepts import ChannelConditionedLRPStage, ConceptSelectionStage
+   from tdhook.pipeline import Pipeline
+   from tdhook.stages import AttributionStage
+
+   pipeline = Pipeline([
+       AttributionStage("concept-relevances", LRP(input_modules=["features.28"]),
+                        attribution_key=("attributions", "concept_examples"),
+                        legacy_attribution_key=("attr", "features.28")),
+       ConceptSelectionStage("select-concept"),
+       ChannelConditionedLRPStage("conditioned-relevance", LRP(),
+                                  condition_module="features.28", gradient_channel_axis=1),
+   ])
+
+The initial artifacts provide ``("inputs", "input")`` and the matching
+binary ``("inputs", "concept_labels")``.  The selection artifact is stored at
+``("metrics", "concept_selection")`` and contains the positive/negative
+means, scores, channel, direction, and selected score.  A different selection
+policy can produce that same schema without rewriting the conditioned stage.
+
 The current evidence anchors are:
 
 .. list-table:: Built-in composition evidence
