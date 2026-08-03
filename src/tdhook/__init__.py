@@ -20,4 +20,5 @@ __all__ = [
     "artifacts",
     "stages",
     "concepts",
+    "dimension",
 ]
