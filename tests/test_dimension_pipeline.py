@@ -4,6 +4,7 @@ from torch import nn
 from tensordict import TensorDict
 from tensordict.tensorclass import NonTensorData
 
+from tdhook.artifacts import ArtifactRegistry
 from tdhook.dimension import (
     ActivationSampleStage,
     DimensionEstimationStage,
@@ -33,9 +34,12 @@ def activation_fixture():
 
 def test_conditioned_dimension_pipeline_has_one_capture_pass_and_frozen_channel_fixture(activation_fixture):
     model, inputs = activation_fixture
+    hooks_before = sum(len(module._forward_hooks) + len(module._forward_pre_hooks) for module in model.modules())
+    registry = ArtifactRegistry()
     pipeline = conditioned_dimension_pipeline(
         ActivationCaching("0"), "0", channel_conditioned_samples, TwoNnDimensionEstimator()
     )
+    pipeline.artifact_registry = registry
     artifacts = TensorDict({"inputs": {"input": inputs}}, batch_size=[len(inputs)])
 
     result = pipeline.run(model, artifacts, model_id="frozen-conv", seed=0)
@@ -47,6 +51,9 @@ def test_conditioned_dimension_pipeline_has_one_capture_pass_and_frozen_channel_
         (("summarize-dimension",), 0),
     ]
     torch.testing.assert_close(result.artifacts[("metrics", "dimension")].data, torch.full((4,), 3.0))
+    assert result.artifacts[("activations", "cache")]["0"].shape == (8, 4, 2, 2)
+    assert result.artifacts[("activations", "samples")].data.shape == (4, 8, 4)
+    assert result.artifacts[("metrics", "dimension")].data.device == inputs.device
     summary = result.artifacts[("metrics", "dimension_summary")].data
     assert summary["count"].item() == 4
     torch.testing.assert_close(summary["mean"], torch.tensor(3.0))
@@ -57,6 +64,40 @@ def test_conditioned_dimension_pipeline_has_one_capture_pass_and_frozen_channel_
         (("activations", "samples"),),
         (("metrics", "dimension"),),
     ]
+    for key in (
+        ("activations", "cache"),
+        ("activations", "samples"),
+        ("metrics", "dimension"),
+        ("metrics", "dimension_summary"),
+    ):
+        registry.require_fresh(key, generation=1)
+    with pytest.raises(ValueError, match="already owned"):
+        registry.claim(("metrics", "dimension"), "another-stage", generation=1)
+    assert all(parameter.grad is None for parameter in model.parameters())
+    assert (
+        sum(len(module._forward_hooks) + len(module._forward_pre_hooks) for module in model.modules()) == hooks_before
+    )
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA parity is optional")
+def test_conditioned_dimension_pipeline_matches_cpu_on_cuda(activation_fixture):
+    cpu_model, cpu_inputs = activation_fixture
+    cpu_result = conditioned_dimension_pipeline(
+        ActivationCaching("0"), "0", channel_conditioned_samples, TwoNnDimensionEstimator()
+    ).run(cpu_model, TensorDict({"inputs": {"input": cpu_inputs}}, batch_size=[len(cpu_inputs)]))
+
+    cuda_model = cpu_model.to("cuda")
+    cuda_inputs = cpu_inputs.to("cuda")
+    cuda_result = conditioned_dimension_pipeline(
+        ActivationCaching("0"), "0", channel_conditioned_samples, TwoNnDimensionEstimator()
+    ).run(cuda_model, TensorDict({"inputs": {"input": cuda_inputs}}, batch_size=[len(cuda_inputs)]))
+
+    assert cuda_result.plan.model_passes == 1
+    assert cuda_result.artifacts[("metrics", "dimension")].data.device.type == "cuda"
+    torch.testing.assert_close(
+        cuda_result.artifacts[("metrics", "dimension")].data.cpu(),
+        cpu_result.artifacts[("metrics", "dimension")].data,
+    )
 
 
 def test_channel_and_spatial_selectors_match_the_notebook_reshapes(activation_fixture):

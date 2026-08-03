@@ -256,6 +256,19 @@ The current evidence anchors are:
    * - ``Adapters``
      - ``test_weight_intervention_stage_executes_real_adapters``
 
+Cross-family conformance
+------------------------
+
+The release conformance matrix names the exact test and preflight decision for
+each supported workflow or method pairing.  A supported multi-stage row does
+not imply same-run support: activation capture with probing, and intervention
+with an activation read, are deliberately split into two model passes.  Unknown
+pairs remain unsupported and are split conservatively.
+
+.. csv-table:: Cross-family composition evidence
+   :file: _static/composition-conformance.csv
+   :header-rows: 1
+
 Declared intrinsic dimension
 ----------------------------
 

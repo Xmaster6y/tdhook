@@ -1,0 +1,8 @@
+combination,status,test_id,expected_plan,model_passes
+"LRP -> concept selection -> conditioned LRP",supported,test_concept_attribution_workflow_is_declared_inspectable_and_matches_frozen_fixture,"split model -> transform -> model",2
+"ActivationCaching -> conditioned slicing -> TwoNN",supported,test_conditioned_dimension_pipeline_has_one_capture_pass_and_frozen_channel_fixture,"split model -> transform -> transform -> transform",1
+"Probing + Probing",supported,test_real_probing_stages_coexecute_and_publish_independent_results,"coalesced same run",1
+"ActivationCaching + Probing",supported,test_activation_capture_and_probing_follow_declared_conservative_split,"conservative split",2
+"Adapters + ActivationCaching",supported,test_real_intervention_and_activation_read_split_without_state_leaks,"conservative split",2
+"Adapters + Probing failure",supported,test_cross_family_failure_removes_hooks_and_restores_model,"conservative split with cleanup",2
+"Unknown hook pair",unsupported,test_plan_splits_unknown_pairs_and_artifact_boundaries,"conservative split",2
