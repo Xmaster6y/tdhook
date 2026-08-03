@@ -2,6 +2,7 @@ import torch
 import pytest
 from tensordict import TensorDict
 
+from tests.composition_conformance import assert_conformance
 from tdhook.artifacts import ArtifactRegistry
 from tdhook.attribution import LRP
 from tdhook.concepts import ChannelConditionedLRPStage, ConceptSelectionStage, concept_channel_gradient_callback
@@ -47,6 +48,11 @@ def test_concept_attribution_workflow_is_declared_inspectable_and_matches_frozen
     pipeline.artifact_registry = registry
 
     plan = pipeline.plan(artifacts)
+    assert_conformance(
+        "test_concept_attribution_workflow_is_declared_inspectable_and_matches_frozen_fixture",
+        plan,
+        status="supported",
+    )
     first = pipeline.run(model, artifacts.clone(), model_id="tiny-linear", seed=0)
     second = pipeline.run(model, artifacts.clone(), model_id="tiny-linear", seed=0)
 

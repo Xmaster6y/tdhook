@@ -4,6 +4,7 @@ from torch import nn
 from tensordict import TensorDict
 from tensordict.nn import TensorDictModule
 
+from tests.composition_conformance import assert_conformance
 from tdhook.artifacts import ArtifactRegistry
 from tdhook.attribution import ActivationMaximisation, IntegratedGradients, LRP
 from tdhook.latent import ActivationCaching, Probing
@@ -90,6 +91,7 @@ def test_real_probing_stages_coexecute_and_publish_independent_results(default_t
     artifacts = TensorDict({"inputs": {"input": torch.ones(2, 10)}}, batch_size=[2])
 
     plan = pipeline.plan(artifacts)
+    assert_conformance("test_real_probing_stages_coexecute_and_publish_independent_results", plan, status="supported")
     result = pipeline.run(default_test_model, artifacts)
     handle.remove()
 

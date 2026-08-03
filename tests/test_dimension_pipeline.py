@@ -4,6 +4,7 @@ from torch import nn
 from tensordict import TensorDict
 from tensordict.tensorclass import NonTensorData
 
+from tests.composition_conformance import assert_conformance
 from tdhook.artifacts import ArtifactRegistry
 from tdhook.dimension import (
     ActivationSampleStage,
@@ -43,6 +44,11 @@ def test_conditioned_dimension_pipeline_has_one_capture_pass_and_frozen_channel_
     artifacts = TensorDict({"inputs": {"input": inputs}}, batch_size=[len(inputs)])
 
     result = pipeline.run(model, artifacts, model_id="frozen-conv", seed=0)
+    assert_conformance(
+        "test_conditioned_dimension_pipeline_has_one_capture_pass_and_frozen_channel_fixture",
+        result.plan,
+        status="supported",
+    )
 
     assert [(run.stages, run.model_passes) for run in result.plan.runs] == [
         (("capture-activations",), 1),

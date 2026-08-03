@@ -1,4 +1,3 @@
-import csv
 from pathlib import Path
 
 import pytest
@@ -7,14 +6,12 @@ from torch import nn
 from tensordict import TensorDict
 from tensordict.nn import TensorDictModule
 
+from tests.composition_conformance import assert_conformance, conformance_rows
 from tdhook.contexts import HookingContextFactory
 from tdhook.latent import ActivationCaching, Probing
 from tdhook.pipeline import MethodStage, Pipeline
 from tdhook.stages import ActivationCachingStage, ProbingStage, WeightInterventionStage
 from tdhook.weights import Adapters
-
-
-CONFORMANCE_MATRIX = Path(__file__).parents[1] / "docs" / "source" / "_static" / "composition-conformance.csv"
 
 
 def _hook_count(model):
@@ -44,6 +41,9 @@ def test_activation_capture_and_probing_follow_declared_conservative_split(defau
     hooks_before = _hook_count(default_test_model)
 
     plan = pipeline.plan(artifacts)
+    assert_conformance(
+        "test_activation_capture_and_probing_follow_declared_conservative_split", plan, status="supported"
+    )
     result = pipeline.run(default_test_model, artifacts, model_id="tiny-linear")
 
     assert [(run.stages, run.model_passes, run.coalesced) for run in plan.runs] == [
@@ -77,6 +77,9 @@ def test_real_intervention_and_activation_read_split_without_state_leaks(default
     artifacts = TensorDict({"inputs": {"input": inputs}}, batch_size=[2])
 
     plan = pipeline.plan(artifacts)
+    assert_conformance(
+        "test_real_intervention_and_activation_read_split_without_state_leaks", plan, status="supported"
+    )
     result = pipeline.run(default_test_model, artifacts)
 
     assert [(run.stages, run.model_passes, run.coalesced) for run in plan.runs] == [
@@ -146,6 +149,7 @@ def test_cross_family_failure_removes_hooks_and_restores_model(default_test_mode
     artifacts = TensorDict({"inputs": {"input": torch.ones(2, 10)}}, batch_size=[2])
 
     plan = pipeline.plan(artifacts)
+    assert_conformance("test_cross_family_failure_removes_hooks_and_restores_model", plan, status="supported")
     assert [(run.stages, run.model_passes, run.coalesced) for run in plan.runs] == [
         (("intervene",), 1, False),
         (("probe",), 1, False),
@@ -161,9 +165,7 @@ def test_cross_family_failure_removes_hooks_and_restores_model(default_test_mode
 
 
 def test_supported_conformance_rows_name_a_test_and_expected_plan():
-    with CONFORMANCE_MATRIX.open(newline="") as matrix_file:
-        rows = list(csv.DictReader(matrix_file))
-
+    rows = conformance_rows()
     assert {row["status"] for row in rows} <= {"supported", "unsupported"}
     supported = [row for row in rows if row["status"] == "supported"]
     unsupported = [row for row in rows if row["status"] == "unsupported"]
@@ -178,4 +180,4 @@ def test_supported_conformance_rows_name_a_test_and_expected_plan():
     source += (Path(__file__).with_name("test_stages.py")).read_text()
     for row in rows:
         assert f"def {row['test_id']}" in source, row["combination"]
-    assert all("split" in row["expected_plan"] for row in unsupported)
+        assert f'"{row["test_id"]}"' in source, row["combination"]
