@@ -229,7 +229,7 @@ selected Python channel.
                         legacy_attribution_key=("attr", "features.28")),
        ConceptSelectionStage("select-concept"),
        ChannelConditionedLRPStage("conditioned-relevance", LRP(),
-                                  condition_module="features.28", gradient_channel_axis=2),
+                                  condition_module="features.28", gradient_channel_axis=1),
    ])
 
 The initial artifacts provide ``("inputs", "input")`` and the matching

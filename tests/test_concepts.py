@@ -92,6 +92,8 @@ def test_concept_selection_rejects_invalid_contracts():
     class Artifacts:
         def __init__(self, relevances, labels):
             self.values = {stage.relevance_key: relevances, stage.labels_key: labels}
+            self.batch_dims = 1
+            self.batch_size = torch.Size([2])
 
         def get(self, key):
             return self.values[key]
@@ -101,10 +103,47 @@ def test_concept_selection_rejects_invalid_contracts():
         (Artifacts(torch.ones(2), torch.tensor([1, 0])), ValueError),
         (Artifacts(torch.ones(2, 3), torch.tensor([1])), ValueError),
         (Artifacts(torch.ones(2, 3), torch.tensor([1, 1])), ValueError),
+        (Artifacts(torch.ones(2, 3), torch.tensor([-1, 1])), ValueError),
     ]
     for artifacts, error in cases:
         with pytest.raises(error):
             stage.run(torch.nn.Identity(), artifacts)
+
+
+def test_concept_selection_preserves_batch_shape_and_uses_signed_spatial_relevance():
+    stage = ConceptSelectionStage("select")
+    artifacts = TensorDict(
+        {
+            "attributions": {
+                # Channel 0 cancels spatially, while channel 1 is positive.
+                "concept_examples": torch.tensor(
+                    [
+                        [[[[1.0, -1.0]], [[1.0, 1.0]]], [[[1.0, -1.0]], [[1.0, 1.0]]]],
+                        [[[[0.0, 0.0]], [[0.0, 0.0]]], [[[0.0, 0.0]], [[0.0, 0.0]]]],
+                    ]
+                )
+            },
+            "inputs": {"concept_labels": torch.tensor([[1, 1], [0, 0]])},
+        },
+        batch_size=[2, 2],
+    )
+
+    result = stage.run(torch.nn.Identity(), artifacts)
+
+    selection = result[stage.selection_key]
+    assert selection.batch_size == torch.Size([2, 2])
+    assert selection["channel"].unique().item() == 1
+    assert selection["scores"].shape == (2, 2, 2)
+
+    empty_channels = TensorDict(
+        {
+            "attributions": {"concept_examples": torch.ones(2, 0)},
+            "inputs": {"concept_labels": torch.tensor([1, 0])},
+        },
+        batch_size=[2],
+    )
+    with pytest.raises(ValueError, match="non-empty channel"):
+        stage.run(torch.nn.Identity(), empty_channels)
 
 
 def _conditioned_artifacts(channel, direction):
@@ -167,3 +206,5 @@ def test_concept_channel_gradient_callback_validates_its_selection_and_shape():
     callback = concept_channel_gradient_callback(2, 1)
     with pytest.raises(ValueError, match="invalid"):
         callback((torch.ones(1, 2, 2),))
+    with pytest.raises(ValueError, match="invalid"):
+        callback((torch.tensor(1.0),))

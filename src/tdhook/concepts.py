@@ -60,16 +60,26 @@ class ConceptSelectionStage(Stage):
         labels = artifacts.get(self.labels_key)
         if not isinstance(relevances, torch.Tensor) or not isinstance(labels, torch.Tensor):
             raise TypeError("Concept selection requires tensor relevances and labels")
-        if relevances.ndim < 2:
-            raise ValueError("Concept relevances must have batch and channel dimensions")
-        if labels.ndim != 1 or labels.shape[0] != relevances.shape[0]:
-            raise ValueError("Concept labels must be one-dimensional and match the relevance batch")
-        positive = labels.to(dtype=torch.bool, device=relevances.device)
+        batch_dims = artifacts.batch_dims
+        if relevances.ndim < batch_dims + 1:
+            raise ValueError("Concept relevances must have pipeline batch and channel dimensions")
+        if relevances.shape[batch_dims] == 0:
+            raise ValueError("Concept relevances must have a non-empty channel dimension")
+        if tuple(labels.shape) != tuple(artifacts.batch_size):
+            raise ValueError("Concept labels must match the pipeline batch shape")
+        if not torch.all((labels == 0) | (labels == 1)):
+            raise ValueError("Concept labels must be binary (0 or 1)")
+        positive = labels.reshape(-1).to(dtype=torch.bool, device=relevances.device)
         if not positive.any() or positive.all():
             raise ValueError("Concept examples must contain both positive and negative labels")
-        values = relevances.abs()
-        positive_mean = values[positive].mean(dim=(0, *range(2, values.ndim)))
-        negative_mean = values[~positive].mean(dim=(0, *range(2, values.ndim)))
+        values = relevances.reshape(labels.numel(), *relevances.shape[batch_dims:])
+        # RelMax ranks the magnitude of signed relevance summed over spatial
+        # dimensions; applying abs first would remove meaningful cancellation.
+        if values.ndim > 2:
+            values = values.sum(dim=tuple(range(2, values.ndim)))
+        values = values.abs()
+        positive_mean = values[positive].mean(dim=0)
+        negative_mean = values[~positive].mean(dim=0)
         scores = positive_mean - negative_mean
         channel = scores.argmax() if self.direction == "positive" else scores.argmin()
         direction = 1 if self.direction == "positive" else -1
@@ -104,8 +114,10 @@ def concept_channel_gradient_callback(channel: int, direction: int, *, channel_a
 
     def callback(grad_output, **kwargs):
         gradient = grad_output[0]
+        if gradient.ndim < 2:
+            raise ValueError(f"Concept channel {channel} is invalid for gradient shape {tuple(gradient.shape)}")
         axis = channel_axis % gradient.ndim
-        if gradient.ndim < 2 or channel >= gradient.shape[axis]:
+        if channel >= gradient.shape[axis]:
             raise ValueError(f"Concept channel {channel} is invalid for gradient shape {tuple(gradient.shape)}")
         mask = torch.zeros_like(gradient)
         mask.select(axis, channel).fill_(direction)
