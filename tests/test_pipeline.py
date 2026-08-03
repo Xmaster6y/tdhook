@@ -4,6 +4,7 @@ from torch import nn
 from tensordict import TensorDict
 from tensordict.nn import TensorDictModule
 
+from tests.composition_conformance import assert_conformance
 from tdhook.attribution import ActivationMaximisation
 from tdhook.contexts import HookingContextFactory, HookingContextWithCache
 from tdhook.artifacts import ArtifactAdapter, ArtifactContract
@@ -100,6 +101,7 @@ def test_plan_splits_unknown_pairs_and_artifact_boundaries(default_test_model):
     )
 
     plan = pipeline.plan(TensorDict({"input": torch.ones(2, 10)}, batch_size=[2]))
+    assert_conformance("test_plan_splits_unknown_pairs_and_artifact_boundaries", plan, status="unsupported")
 
     assert [run.stages for run in plan.runs] == [("first",), ("second",)]
     assert plan.model_passes == 2

@@ -2,6 +2,8 @@ import torch
 import pytest
 from tensordict import TensorDict
 
+from tests.composition_conformance import assert_conformance
+from tdhook.artifacts import ArtifactRegistry
 from tdhook.attribution import LRP
 from tdhook.concepts import ChannelConditionedLRPStage, ConceptSelectionStage, concept_channel_gradient_callback
 from tdhook.pipeline import Pipeline
@@ -27,7 +29,10 @@ def _workflow(direction="positive"):
     )
 
 
-def test_concept_attribution_workflow_is_declared_inspectable_and_deterministic(default_test_model):
+def test_concept_attribution_workflow_is_declared_inspectable_and_matches_frozen_fixture(get_model):
+    model = get_model(seed=42)
+    state_before = {key: value.detach().clone() for key, value in model.state_dict().items()}
+    module_types_before = {name: type(module) for name, module in model.named_modules()}
     torch.manual_seed(0)
     artifacts = TensorDict(
         {
@@ -38,11 +43,18 @@ def test_concept_attribution_workflow_is_declared_inspectable_and_deterministic(
         },
         batch_size=[4],
     )
+    registry = ArtifactRegistry()
     pipeline = _workflow()
+    pipeline.artifact_registry = registry
 
     plan = pipeline.plan(artifacts)
-    first = pipeline.run(default_test_model, artifacts.clone(), model_id="tiny-linear", seed=0)
-    second = pipeline.run(default_test_model, artifacts.clone(), model_id="tiny-linear", seed=0)
+    assert_conformance(
+        "test_concept_attribution_workflow_is_declared_inspectable_and_matches_frozen_fixture",
+        plan,
+        status="supported",
+    )
+    first = pipeline.run(model, artifacts.clone(), model_id="tiny-linear", seed=0)
+    second = pipeline.run(model, artifacts.clone(), model_id="tiny-linear", seed=0)
 
     assert plan.model_passes == 2
     assert [run.stages for run in plan.runs] == [
@@ -54,9 +66,52 @@ def test_concept_attribution_workflow_is_declared_inspectable_and_deterministic(
     assert set(selection.keys()) == {"positive_mean", "negative_mean", "scores", "channel", "direction", "score"}
     assert selection["direction"].unique().item() == 1
     assert selection["channel"].unique().item() == selection["scores"][0].argmax().item()
+    assert selection["channel"].unique().item() == 8
+    expected = torch.tensor(
+        [
+            [
+                -0.026217487,
+                -0.034608621,
+                0.026935985,
+                -0.020520344,
+                0.030811844,
+                -0.012047096,
+                0.029041190,
+                -0.039444517,
+                -0.025619673,
+                0.015477733,
+            ],
+            [
+                -0.058280926,
+                -0.076934248,
+                0.059878133,
+                -0.045616295,
+                0.068494089,
+                -0.026780445,
+                0.064557955,
+                -0.087684333,
+                -0.056952000,
+                0.034406677,
+            ],
+            [0.0] * 10,
+            [0.0] * 10,
+        ]
+    )
+    torch.testing.assert_close(first.artifacts[("attributions", "conditioned")], expected)
     torch.testing.assert_close(
         first.artifacts[("attributions", "conditioned")], second.artifacts[("attributions", "conditioned")]
     )
+    assert first.artifacts[("attributions", "concept_examples")].shape == (4, 20)
+    assert first.artifacts[("attributions", "conditioned")].shape == artifacts[("inputs", "input")].shape
+    assert first.artifacts[("attributions", "conditioned")].device == artifacts[("inputs", "input")].device
+    registry.require_fresh(("metrics", "concept_selection"), generation=2)
+    registry.require_fresh(("attributions", "conditioned"), generation=2)
+    with pytest.raises(ValueError, match="already owned"):
+        registry.claim(("attributions", "conditioned"), "another-stage", generation=2)
+    assert {name: type(module) for name, module in model.named_modules()} == module_types_before
+    assert all(parameter.grad is None for parameter in model.parameters())
+    for key, value in model.state_dict().items():
+        torch.testing.assert_close(value, state_before[key])
     assert [record.parents for record in first.provenance] == [
         (("inputs", "input"),),
         (("attributions", "concept_examples"), ("inputs", "concept_labels")),

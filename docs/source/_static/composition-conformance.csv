@@ -1,0 +1,8 @@
+combination,status,test_id,expected_plan,model_passes
+"LRP -> concept selection -> conditioned LRP",supported,test_concept_attribution_workflow_is_declared_inspectable_and_matches_frozen_fixture,"concept-relevances:model:1:separate; select-concept:transform:0:separate; conditioned-relevance:model:1:separate",2
+"ActivationCaching -> conditioned slicing -> TwoNN",supported,test_conditioned_dimension_pipeline_has_one_capture_pass_and_frozen_channel_fixture,"capture-activations:model:1:separate; select-samples:transform:0:separate; estimate-dimension:transform:0:separate; summarize-dimension:transform:0:separate",1
+"Probing + Probing",supported,test_real_probing_stages_coexecute_and_publish_independent_results,"first-probe+second-probe:model:1:coalesced",1
+"ActivationCaching + Probing",supported,test_activation_capture_and_probing_follow_declared_conservative_split,"capture:model:1:separate; probe:model:1:separate",2
+"Adapters + ActivationCaching",supported,test_real_intervention_and_activation_read_split_without_state_leaks,"intervene:model:1:separate; read:model:1:separate",2
+"Adapters + Probing failure",supported,test_cross_family_failure_removes_hooks_and_restores_model,"intervene:model:1:separate; probe:model:1:separate",2
+"Unknown hook pair",unsupported,test_plan_splits_unknown_pairs_and_artifact_boundaries,"first:model:1:separate; second:model:1:separate",2
