@@ -12,6 +12,52 @@ side-effect-free preflight that exposes model-pass cost and stage boundaries;
 provenance.  A split is intentional: TDHook only co-executes stages with an
 explicit compatible capability contract.
 
+Offline fixture
+---------------
+
+Run this setup once before either workflow.  The concept model exposes the
+``linear1`` feature selected by LRP; the dimension model exposes a four-
+dimensional ``features`` activation for channel-conditioned sampling.
+
+.. code-block:: python
+
+   import torch
+   from torch import nn
+
+   torch.manual_seed(0)
+
+   class TinyConceptModel(nn.Module):
+       def __init__(self):
+           super().__init__()
+           self.linear1 = nn.Linear(10, 10)
+           self.relu = nn.ReLU()
+           self.linear2 = nn.Linear(10, 2)
+
+       def forward(self, input):
+           return self.linear2(self.relu(self.linear1(input)))
+
+   class FeatureMap(nn.Module):
+       def __init__(self):
+           super().__init__()
+           self.linear = nn.Linear(10, 12)
+
+       def forward(self, input):
+           return self.linear(input).relu().reshape(-1, 3, 2, 2)
+
+   class TinyFeatureModel(nn.Module):
+       def __init__(self):
+           super().__init__()
+           self.features = FeatureMap()
+           self.head = nn.Linear(12, 2)
+
+       def forward(self, input):
+           return self.head(self.features(input).flatten(1))
+
+   concept_model = TinyConceptModel().eval()
+   dimension_model = TinyFeatureModel().eval()
+   examples = torch.randn(6, 10)
+   labels = torch.tensor([1, 1, 1, 0, 0, 0])
+
 Minimal concept-conditioned attribution
 ---------------------------------------
 
@@ -46,7 +92,7 @@ is transferred by the notebook.
    plan = concept_pipeline.plan(artifacts)
    assert plan.model_passes == 2
    print([(run.stages, run.model_passes) for run in plan.runs])
-   result = concept_pipeline.run(model, artifacts, model_id="offline-tiny", seed=0)
+   result = concept_pipeline.run(concept_model, artifacts, model_id="offline-tiny", seed=0)
 
 The selected concept is at ``("metrics", "concept_selection")`` and the
 conditioned input relevance is at ``("attributions", "conditioned")``.  The
@@ -82,7 +128,7 @@ artifact-only stages.  For image or board features, use
    plan = dimension_pipeline.plan(artifacts)
    assert plan.model_passes == 1
    print([(run.stages, run.model_passes) for run in plan.runs])
-   result = dimension_pipeline.run(model, artifacts, model_id="offline-tiny", seed=0)
+   result = dimension_pipeline.run(dimension_model, artifacts, model_id="offline-tiny", seed=0)
 
 The result publishes the real cache at ``("activations", "cache")``, shaped
 samples at ``("activations", "samples")``, estimates at ``("metrics",
