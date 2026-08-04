@@ -9,6 +9,7 @@
     :hidden:
 
     start
+    colab
     methods
     composition
     artifacts
