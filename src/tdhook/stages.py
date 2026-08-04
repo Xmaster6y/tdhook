@@ -44,18 +44,13 @@ def _public_input_key(key: PipelineKey) -> PipelineKey:
 
 def _attribution_capability(factory: HookingContextFactory) -> StageCapability:
     """Return model-pass metadata for the concrete attribution factory."""
-    # Keep these imports local: the public attribution package imports its
-    # method modules, while stages only needs their runtime type here.
-    from tdhook.attribution import ActivationMaximisation, IntegratedGradients
-
-    name = type(factory).__name__
-    if isinstance(factory, ActivationMaximisation):
-        passes = factory._n_steps
-    elif isinstance(factory, IntegratedGradients):
-        passes = 1 + (2 if factory._compute_convergence_delta else 0)
-    else:
-        passes = 1
-    return replace(AttributionStage.capability, method=name, model_passes=passes)
+    execution = factory.execution_spec
+    return replace(
+        AttributionStage.capability,
+        method=type(factory).__name__,
+        model_passes=execution.model_passes,
+        gradient_mode=execution.gradient_mode.value,
+    )
 
 
 class _FactoryStage(Stage):

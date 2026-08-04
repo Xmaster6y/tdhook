@@ -1,11 +1,6 @@
 Architecture
 ============
 
-.. note::
-
-   This page defines the target architecture for TDHook 0.2. The refactor is
-   developed in `pull request 96 <https://github.com/Xmaster6y/tdhook/pull/96>`_.
-
 TDHook is a TensorDict-native interpretability library. TensorDict is its data
 model and execution vocabulary; TDHook adds semantic model targets,
 interpretability methods, deterministic hook lifecycles, temporary model-state
@@ -28,21 +23,17 @@ Interactive sessions
 
 Declared workflows
    A workflow composes methods and ordinary TensorDict modules by their
-   ``in_keys`` and ``out_keys``. Planning validates dependencies, effects, and
-   safe co-execution before model execution.
+   ``in_keys`` and ``out_keys``. Planning validates dependencies, bound hook
+   programs, and safe co-execution before model execution.
 
 TensorDict ownership
 --------------------
 
 Scientific inputs, outputs, and intermediate artifacts remain in a
-``TensorDictBase``. TDHook does not introduce a parallel artifact store.
-Methods declare the keys they read and write. Replacing an existing key is
-allowed only when the method declares that overwrite explicitly.
-
-Standalone and interactive execution may mutate the working TensorDict when
-requested. Declared workflows default to controlled key publication. A
-structural copy does not clone tensor leaves, so full rollback of arbitrary
-in-place tensor mutation is not implied.
+``TensorDictBase``. TDHook does not introduce a parallel artifact store or key
+contract. Prepared methods and transforms expose the native ``in_keys`` and
+``out_keys`` of ``TensorDictModuleBase``. In-place updates follow TensorDict's
+normal module semantics rather than a second TDHook mutation model.
 
 Model ownership
 ---------------
@@ -55,23 +46,24 @@ hidden ownership claim over the model.
 Execution contracts
 -------------------
 
-Each method declares:
+TensorDict modules already declare the data they consume and produce. A
+configured TDHook method declares only execution requirements that TensorDict
+cannot express:
 
-* TensorDict input, output, and overwrite keys;
-* whether it executes a model or only transforms a TensorDict;
 * its model-pass and gradient requirements;
-* activation, gradient, parameter, and method-state effects;
-* runtime constraints and explicit co-execution compatibility.
+* the hooks and temporary model changes installed when it is bound;
+* whether its bound hook program can share a model execution.
 
-The planner uses these declarations conservatively. Unknown compatibility,
-conflicting writes, different gradient modes, or different runtime constraints
-produce separate executions. Internal execution nodes are planner machinery,
-not a second user-facing workflow language.
+Compatibility belongs to the bound hook programs because module targets,
+ordering, callbacks, model signatures, and temporary state determine whether
+one execution is safe. Unknown compatibility produces separate executions.
+Internal execution nodes are planner machinery, not a second user-facing
+workflow language.
 
 Dependency direction
 --------------------
 
-Pure targets and contracts sit at the bottom of TDHook. The shared runtime
+Pure targets and execution requirements sit at the bottom of TDHook. The shared runtime
 depends on those descriptions and on PyTorch and TensorDict. Methods depend on
 the runtime. Workflow planning depends on method protocols rather than concrete
 method families. Reporting depends on immutable plans and provenance records.
@@ -84,7 +76,7 @@ Scope
 -----
 
 TDHook owns interpretability semantics, hook lifecycle, safe model-state
-restoration, method contracts, and execution planning. TensorDict owns tensor
+restoration, method execution requirements, and execution planning. TensorDict owns tensor
 storage, nested keys, batching, devices, persistence, parameter containers, and
 module composition. PyTorch owns modules, hooks, and autograd.
 

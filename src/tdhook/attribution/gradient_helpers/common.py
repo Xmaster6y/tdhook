@@ -10,6 +10,7 @@ from tdhook.modules import FunctionModule, flatten_select_reshape_call, Intermed
 from tdhook._types import UnraveledKey
 from tdhook.modules import HookedModule
 from tdhook.hooks import MultiHookHandle, MutableWeakRef, TensorDictRef
+from tdhook.execution import ExecutionSpec, GradientMode
 
 
 class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
@@ -50,6 +51,12 @@ class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
         self._attr_key = attribution_key
         self._clean_intermediate_keys = clean_intermediate_keys
         self._hooked_module_kwargs["relative_path"] = "td_module.module[2]._td_module"
+
+    @property
+    def execution_spec(self) -> ExecutionSpec:
+        """Gradient attribution performs one autograd-enabled model pass."""
+
+        return ExecutionSpec(gradient_mode=GradientMode.REQUIRED)
 
     def _prepare_module(
         self,

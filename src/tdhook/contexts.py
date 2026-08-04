@@ -9,6 +9,7 @@ from tensordict import TensorDict
 from tdhook.modules import HookedModule
 from tdhook.hooks import MultiHookHandle, merge_paths
 from tdhook._types import UnraveledKey
+from tdhook.execution import ExecutionSpec
 
 
 class HookingContext:
@@ -178,6 +179,12 @@ class HookingContextFactory:
     def __init__(self):
         self._hooking_context_kwargs = {}
         self._hooked_module_kwargs = {}
+
+    @property
+    def execution_spec(self) -> ExecutionSpec:
+        """Return model-execution requirements owned by this method."""
+
+        return ExecutionSpec()
 
     @overload
     def prepare(

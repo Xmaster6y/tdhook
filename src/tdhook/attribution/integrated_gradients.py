@@ -3,6 +3,7 @@ from typing import List, Optional, Callable, Dict
 from tensordict import TensorDict, merge_tensordicts
 
 from tdhook.attribution.gradient_helpers.helpers import approximation_parameters
+from tdhook.execution import ExecutionSpec, GradientMode
 from tdhook.attribution.gradient_helpers import GradientAttributionWithBaseline
 from tdhook._types import UnraveledKey
 
@@ -58,6 +59,15 @@ class IntegratedGradients(GradientAttributionWithBaseline):
         step_sizes, alphas = step_sizes_func(self._n_steps), alphas_func(self._n_steps)
         self._step_sizes = step_sizes
         self._alphas = alphas
+
+    @property
+    def execution_spec(self) -> ExecutionSpec:
+        """Account for optional endpoint evaluations used by convergence delta."""
+
+        return ExecutionSpec(
+            model_passes=1 + (2 if self._compute_convergence_delta else 0),
+            gradient_mode=GradientMode.REQUIRED,
+        )
 
     def _reduce_baselines_fn(self, td: TensorDict, in_keys: List[UnraveledKey]) -> TensorDict:
         inputs = td.select(*in_keys)

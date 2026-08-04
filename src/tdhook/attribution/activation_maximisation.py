@@ -6,6 +6,7 @@ from tdhook.attribution import Saliency
 from tdhook.contexts import HookingContextFactory
 from tdhook.modules import PGDModule, IntermediateKeysCleaner
 from tdhook._types import UnraveledKey
+from tdhook.execution import ExecutionSpec, GradientMode
 
 
 class ActivationMaximisation(HookingContextFactory):
@@ -50,8 +51,13 @@ class ActivationMaximisation(HookingContextFactory):
         self._min_value = min_value
         self._max_value = max_value
         self._clean_intermediate_keys = clean_intermediate_keys
-
         self._hooked_module_kwargs["relative_path"] = "td_module.module[1]._td_module"
+
+    @property
+    def execution_spec(self) -> ExecutionSpec:
+        """Activation maximisation performs one gradient pass per optimisation step."""
+
+        return ExecutionSpec(model_passes=self._n_steps, gradient_mode=GradientMode.REQUIRED)
 
     def _prepare_module(
         self,
