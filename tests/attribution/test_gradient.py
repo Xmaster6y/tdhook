@@ -1,7 +1,8 @@
-"""
-Test gradient attribution.
-"""
+"""Test gradient attribution."""
 
+import json
+import subprocess
+import sys
 from typing import Tuple
 
 import torch
@@ -233,6 +234,90 @@ class TestGradientAttributionHelpers:
 
         for tdhook_tensor, captum_tensor in zip(tdhook_tensors, captum_tensors):
             assert tdhook_tensor == captum_tensor
+
+    @pytest.mark.parametrize("method", helpers.SUPPORTED_RIEMANN_METHODS)
+    @pytest.mark.parametrize("n_steps", (0, -1, 1))
+    def test_riemann_rejects_too_few_steps(self, method, n_steps):
+        step_sizes_func, alphas_func = helpers.approximation_parameters(method)
+
+        for parameter_func in (step_sizes_func, alphas_func):
+            with pytest.raises(ValueError, match=rf"n_steps must be at least 2 for {method}; got {n_steps}"):
+                parameter_func(n_steps)
+
+    @pytest.mark.parametrize("n_steps", (0, -1))
+    def test_gauss_legendre_rejects_too_few_steps(self, n_steps):
+        step_sizes_func, alphas_func = helpers.approximation_parameters("gausslegendre")
+
+        for parameter_func in (step_sizes_func, alphas_func):
+            with pytest.raises(ValueError, match=rf"n_steps must be at least 1 for gausslegendre; got {n_steps}"):
+                parameter_func(n_steps)
+
+    @pytest.mark.parametrize("method", helpers.SUPPORTED_METHODS)
+    @pytest.mark.parametrize("n_steps", (1.5, True))
+    def test_approximation_parameters_reject_non_integral_steps(self, method, n_steps):
+        step_sizes_func, alphas_func = helpers.approximation_parameters(method)
+
+        for parameter_func in (step_sizes_func, alphas_func):
+            with pytest.raises(TypeError, match=rf"n_steps must be an integer for {method}"):
+                parameter_func(n_steps)
+
+    @pytest.mark.parametrize(
+        ("method", "n_steps"),
+        [(method, 2) for method in helpers.SUPPORTED_RIEMANN_METHODS] + [("gausslegendre", 1)],
+    )
+    def test_integrated_gradients_accepts_boundary_step_count(self, method, n_steps):
+        IntegratedGradients(method=method, n_steps=n_steps)
+
+    @pytest.mark.parametrize(
+        ("method", "n_steps"),
+        [(method, n_steps) for method in helpers.SUPPORTED_RIEMANN_METHODS for n_steps in (0, -1, 1, 1.5)]
+        + [("gausslegendre", n_steps) for n_steps in (0, -1, 1.5)],
+    )
+    def test_integrated_gradients_rejects_invalid_step_count(self, method, n_steps):
+        if isinstance(n_steps, float):
+            exception = TypeError
+            message = f"n_steps must be an integer for {method}; got float"
+        else:
+            exception = ValueError
+            minimum = 2 if method in helpers.SUPPORTED_RIEMANN_METHODS else 1
+            message = f"n_steps must be at least {minimum} for {method}; got {n_steps}"
+
+        with pytest.raises(exception, match=message):
+            IntegratedGradients(method=method, n_steps=n_steps)
+
+    def test_integrated_gradients_rejects_unsupported_method(self):
+        with pytest.raises(ValueError, match="Invalid integral approximation method name: unsupported"):
+            IntegratedGradients(method="unsupported")
+
+    def test_riemann_builders_rejects_unsupported_method(self):
+        with pytest.raises(ValueError, match="Invalid Riemann approximation method: unsupported"):
+            helpers.riemann_builders("unsupported")
+
+    def test_validation_is_identical_with_python_optimization(self):
+        script = """
+import json
+from tdhook.attribution import IntegratedGradients
+
+outcomes = []
+for method, n_steps in (("riemann_left", 1), ("gausslegendre", 0), ("gausslegendre", 1.5)):
+    try:
+        IntegratedGradients(method=method, n_steps=n_steps)
+    except Exception as error:
+        outcomes.append([type(error).__name__, str(error)])
+print(json.dumps(outcomes))
+"""
+
+        outcomes = []
+        for options in ([], ["-O"]):
+            result = subprocess.run(
+                [sys.executable, *options, "-c", script],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            outcomes.append(json.loads(result.stdout))
+
+        assert outcomes[0] == outcomes[1]
 
 
 class TestInitAttrTargetsWithLabels:

@@ -7,6 +7,7 @@ Original source: https://github.com/pytorch/captum/blob/master/captum/attr/_util
 """
 
 from enum import Enum
+from numbers import Integral
 from typing import Callable, cast, List, Tuple
 
 import torch
@@ -29,6 +30,13 @@ SUPPORTED_RIEMANN_METHODS = [
 ]
 
 SUPPORTED_METHODS: List[str] = SUPPORTED_RIEMANN_METHODS + ["gausslegendre"]
+
+
+def _validate_n_steps(n: int, *, minimum: int, method: str) -> None:
+    if isinstance(n, bool) or not isinstance(n, Integral):
+        raise TypeError(f"n_steps must be an integer for {method}; got {type(n).__name__}")
+    if n < minimum:
+        raise ValueError(f"n_steps must be at least {minimum} for {method}; got {n}")
 
 
 def approximation_parameters(
@@ -70,8 +78,13 @@ def riemann_builders(
 
     """
 
+    if not isinstance(method, Riemann):
+        raise ValueError(f"Invalid Riemann approximation method: {method}")
+
+    method_name = f"riemann_{method.name}"
+
     def step_sizes(n: int) -> List[float]:
-        assert n > 1, "The number of steps has to be larger than one"
+        _validate_n_steps(n, minimum=2, method=method_name)
         deltas = [1 / n] * n
         if method == Riemann.trapezoid:
             deltas[0] /= 2
@@ -79,7 +92,7 @@ def riemann_builders(
         return deltas
 
     def alphas(n: int) -> List[float]:
-        assert n > 1, "The number of steps has to be larger than one"
+        _validate_n_steps(n, minimum=2, method=method_name)
         if method == Riemann.trapezoid:
             return torch.linspace(0, 1, n).tolist()
         elif method == Riemann.left:
@@ -88,8 +101,6 @@ def riemann_builders(
             return torch.linspace(1 / (2 * n), 1 - 1 / (2 * n), n).tolist()
         elif method == Riemann.right:
             return torch.linspace(1 / n, 1, n).tolist()
-        else:
-            raise AssertionError("Provided Reimann approximation method is not valid.")
         # This is not a standard riemann method but in many cases it
         # leades to faster approaximation. Test cases for small number of steps
         # do not make sense but for larger number of steps the approximation is
@@ -129,12 +140,12 @@ def gauss_legendre_builders() -> Tuple[Callable[[int], List[float]], Callable[[i
     from numpy.typing import NDArray
 
     def step_sizes(n: int) -> List[float]:
-        assert n > 0, "The number of steps has to be larger than zero"
+        _validate_n_steps(n, minimum=1, method="gausslegendre")
         # Scaling from 2 to 1
         return cast(NDArray[np.float64], 0.5 * np.polynomial.legendre.leggauss(n)[1]).tolist()
 
     def alphas(n: int) -> List[float]:
-        assert n > 0, "The number of steps has to be larger than zero"
+        _validate_n_steps(n, minimum=1, method="gausslegendre")
         # Scaling from [-1, 1] to [0, 1]
         return cast(NDArray[np.float64], 0.5 * (1 + np.polynomial.legendre.leggauss(n)[0])).tolist()
 
