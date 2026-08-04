@@ -9,6 +9,7 @@
     :hidden:
 
     start
+    architecture
     colab
     methods
     composition

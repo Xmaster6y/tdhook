@@ -8,6 +8,7 @@ except PackageNotFoundError:  # pragma: no cover
 __all__ = [
     # Core
     "contexts",
+    "contracts",
     "hooks",
     "targets",
     "metrics",
