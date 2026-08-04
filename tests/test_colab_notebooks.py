@@ -14,8 +14,6 @@ NOTEBOOKS = (
     "representation-similarity.ipynb",
     "steering-vectors.ipynb",
 )
-PINNED_SOURCE = "tdhook @ git+https://github.com/Xmaster6y/tdhook.git@66fa52ddb6cb25d593e182c3d21bc21dff83ec56"
-NOTEBOOK_REVISION = "29fdf9376cb14eb8c18b93e4e19d2bb65ae76c62"
 REPO_ROOT = Path(__file__).resolve().parents[1]
 NOTEBOOK_DIR = REPO_ROOT / "docs/source/notebooks/methods"
 
@@ -30,12 +28,13 @@ def colab_setup_cell(path: Path) -> str:
 
 
 @pytest.mark.parametrize("filename", NOTEBOOKS)
-def test_public_colab_notebook_pins_its_install_source(filename: str):
+def test_public_colab_notebook_installs_the_released_package(filename: str):
     code_cells = notebook_code_cells(NOTEBOOK_DIR / filename)
     setup = colab_setup_cell(NOTEBOOK_DIR / filename)
 
     assert any('IN_COLAB = importlib.util.find_spec("google.colab") is not None' in cell for cell in code_cells)
-    assert PINNED_SOURCE in setup
+    assert "%pip install -q tdhook" in setup
+    assert "git+https://github.com/Xmaster6y/tdhook" not in setup
     assert "git clone https://github.com/Xmaster6y/tdhook -b main" not in setup
 
 
@@ -43,8 +42,8 @@ def test_dimension_estimation_declares_its_extra_colab_dependency():
     assert "scikit-learn" in colab_setup_cell(NOTEBOOK_DIR / "dimension-estimation.ipynb")
 
 
-def test_readme_colab_badges_load_the_pinned_notebook_revision():
+def test_readme_colab_badges_load_notebooks_from_main():
     readme = (REPO_ROOT / "README.md").read_text()
 
     for filename in NOTEBOOKS:
-        assert f"blob/{NOTEBOOK_REVISION}/docs/source/notebooks/methods/{filename}" in readme
+        assert f"blob/main/docs/source/notebooks/methods/{filename}" in readme
