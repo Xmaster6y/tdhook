@@ -15,6 +15,7 @@ NOTEBOOKS = (
     "steering-vectors.ipynb",
 )
 PINNED_SOURCE = "tdhook @ git+https://github.com/Xmaster6y/tdhook.git@66fa52ddb6cb25d593e182c3d21bc21dff83ec56"
+NOTEBOOK_REVISION = "29fdf9376cb14eb8c18b93e4e19d2bb65ae76c62"
 NOTEBOOK_DIR = Path("docs/source/notebooks/methods")
 
 
@@ -34,3 +35,10 @@ def test_public_colab_notebook_pins_its_install_source(filename: str):
 
 def test_dimension_estimation_declares_its_extra_colab_dependency():
     assert "scikit-learn" in notebook_source(NOTEBOOK_DIR / "dimension-estimation.ipynb")
+
+
+def test_readme_colab_badges_load_the_pinned_notebook_revision():
+    readme = Path("README.md").read_text()
+
+    for filename in NOTEBOOKS:
+        assert f"blob/{NOTEBOOK_REVISION}/docs/source/notebooks/methods/{filename}" in readme
