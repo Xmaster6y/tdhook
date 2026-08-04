@@ -289,6 +289,25 @@ axes do not have to match the original model batch.  The compact CPU fixture
 in ``test_dimension_pipeline.py`` fixes the channel-conditioned TwoNN result
 and verifies both the one-pass plan and estimator interchangeability.
 
+Tutorial migration
+------------------
+
+The canonical tutorial paths are the offline :doc:`declared-pipelines`
+walkthrough and its executable notebook.  They use public stage classes and
+read all hand-offs from named artifacts: concept selection from
+``("metrics", "concept_selection")``; conditioned relevance from
+``("attributions", "conditioned")``; and dimension samples, estimates, and
+summaries from the ``("activations", ...)`` and ``("metrics", ...)``
+namespaces.  Natural-image and chess board rendering are presentation
+transforms that consume those artifacts; they are not a reason to retain
+notebook callbacks or cache-to-dictionary orchestration.
+
+The public API inventory covers 25+ exported method classes and documented
+method variants.  That count describes available operations, not a claim that
+every pair can share a model run.  The conformance matrix records the exact
+test identifier, preflight decision, and expected pass budget for every
+supported workflow; unsupported or unknown pairs split conservatively.
+
 .. csv-table:: Public capability inventory
    :file: _static/composition-capabilities.csv
    :header-rows: 1

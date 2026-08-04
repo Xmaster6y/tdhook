@@ -40,7 +40,10 @@ Most methods should work with minimal configuration. Here's a basic example of r
         }).unsqueeze(0)
         td = hooked_model(td)  # Access attribution with td.get(("attr", "input"))
 
-For more detailed examples, see the :doc:`methods` page.
+For a small, fully offline declared-workflow example, start with
+:doc:`declared-pipelines`.  It shows preflight planning, exact model-pass
+budgets, named TensorDict artifacts, provenance, and conservative stage
+splits.  For individual methods, see the :doc:`methods` page.
 
 Composition terminology
 -----------------------
