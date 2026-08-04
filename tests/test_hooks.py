@@ -583,6 +583,27 @@ class TestResolveSubmodulePath:
         with pytest.raises(ValueError):
             resolve_submodule_path(DummyRoot(), path)
 
+    @pytest.mark.parametrize(
+        ("path", "message"),
+        [
+            ("<", "missing closing"),
+            ("<<item>", "invalid escaped attribute"),
+            ("!", "expected an attribute"),
+            ("items.", "cannot end"),
+            ("items[0", "missing closing"),
+            ("items[a:]", "slices contain"),
+            (r"items['\']", "invalid string index"),
+        ],
+    )
+    def test_malformed_paths_have_actionable_errors(self, path, message):
+        with pytest.raises(ValueError, match=message):
+            resolve_submodule_path(object(), path)
+
+    def test_root_index_and_non_string_path_validation(self):
+        assert resolve_submodule_path(["item"], "[0]") == "item"
+        with pytest.raises(TypeError, match="must be strings"):
+            resolve_submodule_path(object(), 0)
+
     def test_invalid_paths_raise_value_error(self):
         """Test that invalid paths raise ValueError."""
 

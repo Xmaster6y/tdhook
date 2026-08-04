@@ -122,6 +122,8 @@ def test_invalid_targets_have_clear_errors(default_test_model):
         Target.from_json("[]")
     with pytest.raises(ValueError, match="does not resolve"):
         Target("missing", "activation", 0, (0,)).validate(default_test_model)
+    with pytest.raises(ValueError, match="does not resolve"):
+        Target("linear1.weight", "activation", 0, (0,)).validate(default_test_model)
 
     executed = False
 
