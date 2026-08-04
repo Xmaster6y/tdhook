@@ -592,7 +592,8 @@ class TestResolveSubmodulePath:
             ("items.", "cannot end"),
             ("items[0", "missing closing"),
             ("items[a:]", "slices contain"),
-            (r"items['\']", "invalid string index"),
+            (r"items['\']", "missing closing"),
+            (r"items['\x']", "invalid string index"),
         ],
     )
     def test_malformed_paths_have_actionable_errors(self, path, message):
@@ -603,6 +604,53 @@ class TestResolveSubmodulePath:
         assert resolve_submodule_path(["item"], "[0]") == "item"
         with pytest.raises(TypeError, match="must be strings"):
             resolve_submodule_path(object(), 0)
+
+    def test_descriptor_and_custom_indexing_are_not_invoked(self):
+        class UnsafeRoot:
+            def __init__(self):
+                self.property_called = False
+                self.item_called = False
+                self.items = self
+
+            @property
+            def dangerous_property(self):
+                self.property_called = True
+                return "value"
+
+            def __getitem__(self, _index):
+                self.item_called = True
+                return "value"
+
+        root = UnsafeRoot()
+        with pytest.raises(ValueError, match="descriptor"):
+            resolve_submodule_path(root, "dangerous_property")
+        with pytest.raises(ValueError, match="supported indexable"):
+            resolve_submodule_path(root, "items[0]")
+        assert not root.property_called
+        assert not root.item_called
+
+    def test_quoted_mapping_keys_can_contain_brackets_and_colons(self):
+        class DummyRoot:
+            def __init__(self):
+                self.data = {"part]name": "bracket", "a:b": "colon"}
+
+        root = DummyRoot()
+        assert resolve_submodule_path(root, "data['part]name']") == "bracket"
+        assert resolve_submodule_path(root, "data['a:b']") == "colon"
+
+    def test_module_dictionary_and_objects_without_instance_attributes(self):
+        modules = torch.nn.ModuleDict({"named": torch.nn.Identity()})
+        assert resolve_submodule_path(modules, "['named']") is modules["named"]
+        with pytest.raises(ValueError, match="missing"):
+            resolve_submodule_path(object(), "missing")
+
+    def test_dotted_index_is_rejected(self):
+        class DummyRoot:
+            def __init__(self):
+                self.items = ["item"]
+
+        with pytest.raises(ValueError, match="expected an attribute"):
+            resolve_submodule_path(DummyRoot(), "items.[0]")
 
     def test_invalid_paths_raise_value_error(self):
         """Test that invalid paths raise ValueError."""

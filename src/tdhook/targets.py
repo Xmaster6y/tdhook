@@ -78,7 +78,7 @@ class Target:
         """Validate this target against ``model`` and return its selected module."""
         try:
             module = resolve_submodule_path(model, self.module_path)
-        except ValueError as exc:
+        except (TypeError, ValueError) as exc:
             raise ValueError(f"Target path '{self.module_path}' does not resolve to a module") from exc
         if not isinstance(module, nn.Module):
             raise ValueError(f"Target path '{self.module_path}' does not resolve to a module")
