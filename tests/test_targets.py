@@ -46,6 +46,20 @@ def test_capture_cnn_channel_and_replace_gradient():
     assert torch.allclose(model.weight.grad[1], torch.zeros_like(model.weight.grad[1]))
 
 
+def test_capture_gradient_and_parameter_values():
+    model = nn.Linear(3, 2, bias=False)
+    x = torch.randn(4, 3, requires_grad=True)
+
+    with Target("", "gradient", -1, (0,)).capture(model) as gradient:
+        model(x).sum().backward()
+    assert gradient.value is not None
+    assert gradient.value.shape == (4, 1)
+
+    with Target("", "parameter", 0, (1,), parameter="weight").capture(model) as parameter:
+        assert parameter.value is not None
+        assert torch.equal(parameter.value, model.weight[1:2])
+
+
 @pytest.mark.parametrize("axis,indices", [(0, (0,)), (1, (1,))])
 def test_parameter_rows_and_columns_restore_after_failure(axis, indices):
     model = nn.Sequential(nn.Linear(3, 2, bias=False))
@@ -58,12 +72,39 @@ def test_parameter_rows_and_columns_restore_after_failure(axis, indices):
             raise RuntimeError("boom")
     assert torch.equal(model[0].weight, original)
 
+    with target.replace(model, -3):
+        assert not torch.equal(model[0].weight, original)
+    assert torch.equal(model[0].weight, original)
+
 
 def test_invalid_targets_have_clear_errors(default_test_model):
+    with pytest.raises(ValueError, match="Invalid target kind"):
+        Target("linear1", "other", 0, (0,))
+    with pytest.raises(ValueError, match="at least one"):
+        Target("linear1", "activation", 0, ())
+    with pytest.raises(TypeError, match="integers"):
+        Target("linear1", "activation", 0, ("unit",))
     with pytest.raises(ValueError, match="parameter targets require"):
         Target("linear1", "parameter", 0, (0,))
+    with pytest.raises(ValueError, match="only valid for parameter"):
+        Target("linear1", "activation", 0, (0,), parameter="weight")
+    with pytest.raises(ValueError, match="missing indices"):
+        Target.from_dict({"module_path": "linear1"})
+    with pytest.raises(ValueError, match="JSON is invalid"):
+        Target.from_json("not json")
+    with pytest.raises(ValueError, match="contain an object"):
+        Target.from_json("[]")
     with pytest.raises(ValueError, match="does not resolve"):
         Target("missing", "activation", 0, (0,)).validate(default_test_model)
+    default_test_model.not_a_module = 1
+    with pytest.raises(ValueError, match="does not resolve"):
+        Target("not_a_module", "activation", 0, (0,)).validate(default_test_model)
+    with pytest.raises(ValueError, match="has no parameter"):
+        Target("linear1", "parameter", 0, (0,), parameter="missing").validate(default_test_model)
     with pytest.raises(ValueError, match="out of bounds"):
         with Target("linear1", "activation", 1, (100,)).capture(default_test_model):
             default_test_model(torch.randn(1, 10))
+    with pytest.raises(ValueError, match="feature_axis"):
+        Target("linear1", "activation", 2, (0,))._selection(torch.randn(1, 2))
+    with pytest.raises(ValueError, match="exactly one tensor"):
+        Target._hook_tensor((torch.ones(1), torch.ones(1)))
