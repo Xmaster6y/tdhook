@@ -31,6 +31,20 @@ def test_capture_and_replace_mlp_unit(default_test_model):
     assert torch.allclose(default_test_model(x), baseline)
 
 
+def test_replace_preserves_single_tensor_tuple_output():
+    class TupleModule(nn.Module):
+        def forward(self, x):
+            return (x + 1,)
+
+    model = TupleModule()
+    x = torch.ones(2, 3)
+    with Target("", "activation", -1, (1,)).replace(model, 0):
+        output = model(x)
+
+    assert isinstance(output, tuple)
+    assert torch.equal(output[0][:, 1], torch.zeros(2))
+
+
 def test_capture_cnn_channel_and_replace_gradient():
     model = nn.Conv2d(2, 3, kernel_size=1, bias=False)
     target = Target("", "activation", 1, (1,))
@@ -96,9 +110,18 @@ def test_invalid_targets_have_clear_errors(default_test_model):
         Target.from_json("[]")
     with pytest.raises(ValueError, match="does not resolve"):
         Target("missing", "activation", 0, (0,)).validate(default_test_model)
-    default_test_model.not_a_module = 1
+
+    executed = False
+
+    def dangerous_path():
+        nonlocal executed
+        executed = True
+        return nn.Identity()
+
+    default_test_model.dangerous_path = dangerous_path
     with pytest.raises(ValueError, match="does not resolve"):
-        Target("not_a_module", "activation", 0, (0,)).validate(default_test_model)
+        Target("dangerous_path()", "activation", 0, (0,)).validate(default_test_model)
+    assert not executed
     with pytest.raises(ValueError, match="has no parameter"):
         Target("linear1", "parameter", 0, (0,), parameter="missing").validate(default_test_model)
     with pytest.raises(ValueError, match="out of bounds"):
