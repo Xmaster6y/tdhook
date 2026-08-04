@@ -4,7 +4,7 @@ Architecture
 .. note::
 
    This page defines the target architecture for TDHook 0.2. The refactor is
-   tracked in `issue 95 <https://github.com/Xmaster6y/tdhook/issues/95>`_.
+   developed in `pull request 96 <https://github.com/Xmaster6y/tdhook/pull/96>`_.
 
 TDHook is a TensorDict-native interpretability library. TensorDict is its data
 model and execution vocabulary; TDHook adds semantic model targets,
