@@ -1,8 +1,13 @@
-# Codebase Navigation
+# Contributor-only Source-tree Navigation
 
-Layout of the tdhook source tree.
+This page is for contributors working in a clone of the tdhook repository. It
+is not needed to install or use the skill: normal workflows use the importable
+`tdhook` package APIs described in [SKILL.md](../SKILL.md) and the other
+references bundled alongside it.
 
-## Top Level
+## Source Checkout Layout
+
+In a contributor checkout, the package source is under `src/tdhook/`:
 
 ```text
 src/tdhook/
