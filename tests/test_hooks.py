@@ -557,15 +557,31 @@ class TestResolveSubmodulePath:
         assert resolve_submodule_path(root, "layers[0].items[1]") == "b"
         assert resolve_submodule_path(root, "name") == "root"
 
-    def test_function_call(self):
-        """Test function call."""
+    def test_calls_are_rejected_without_execution(self):
+        """Path resolution never executes methods while parsing a path."""
 
         class DummyRoot:
             def __init__(self):
-                self.fn = lambda x: x + 1
+                self.called = False
+
+            def fn(self):
+                self.called = True
 
         root = DummyRoot()
-        assert resolve_submodule_path(root, "fn(0)") == 1
+        with pytest.raises(ValueError, match="unexpected character"):
+            resolve_submodule_path(root, "fn()")
+        assert not root.called
+
+    @pytest.mark.parametrize("path", ["items[0] + 1", "items[foo]", "[x for x in items]"])
+    def test_expressions_are_rejected_before_resolution(self, path):
+        class DummyRoot:
+            def __getattribute__(self, name):
+                if name == "items":
+                    raise AssertionError("the model must not be accessed for invalid paths")
+                return super().__getattribute__(name)
+
+        with pytest.raises(ValueError):
+            resolve_submodule_path(DummyRoot(), path)
 
     def test_invalid_paths_raise_value_error(self):
         """Test that invalid paths raise ValueError."""

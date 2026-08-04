@@ -10,7 +10,7 @@ from typing import Iterator, Literal
 import torch
 from torch import Tensor, nn
 
-from tdhook.hooks import register_hook_to_module
+from tdhook.hooks import register_hook_to_module, resolve_submodule_path
 
 
 TargetKind = Literal["activation", "gradient", "parameter"]
@@ -77,9 +77,11 @@ class Target:
     def validate(self, model: nn.Module) -> nn.Module:
         """Validate this target against ``model`` and return its selected module."""
         try:
-            module = dict(model.named_modules())[self.module_path]
-        except KeyError as exc:
+            module = resolve_submodule_path(model, self.module_path)
+        except ValueError as exc:
             raise ValueError(f"Target path '{self.module_path}' does not resolve to a module") from exc
+        if not isinstance(module, nn.Module):
+            raise ValueError(f"Target path '{self.module_path}' does not resolve to a module")
         if self.kind == "parameter":
             try:
                 parameter = module.get_parameter(self.parameter)  # type: ignore[arg-type]
