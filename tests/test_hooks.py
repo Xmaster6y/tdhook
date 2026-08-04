@@ -557,15 +557,100 @@ class TestResolveSubmodulePath:
         assert resolve_submodule_path(root, "layers[0].items[1]") == "b"
         assert resolve_submodule_path(root, "name") == "root"
 
-    def test_function_call(self):
-        """Test function call."""
+    def test_calls_are_rejected_without_execution(self):
+        """Path resolution never executes methods while parsing a path."""
 
         class DummyRoot:
             def __init__(self):
-                self.fn = lambda x: x + 1
+                self.called = False
+
+            def fn(self):
+                self.called = True
 
         root = DummyRoot()
-        assert resolve_submodule_path(root, "fn(0)") == 1
+        with pytest.raises(ValueError, match="unexpected character"):
+            resolve_submodule_path(root, "fn()")
+        assert not root.called
+
+    @pytest.mark.parametrize("path", ["items[0] + 1", "items[foo]", "[x for x in items]"])
+    def test_expressions_are_rejected_before_resolution(self, path):
+        class DummyRoot:
+            def __getattribute__(self, name):
+                if name == "items":
+                    raise AssertionError("the model must not be accessed for invalid paths")
+                return super().__getattribute__(name)
+
+        with pytest.raises(ValueError):
+            resolve_submodule_path(DummyRoot(), path)
+
+    @pytest.mark.parametrize(
+        ("path", "message"),
+        [
+            ("<", "missing closing"),
+            ("<<item>", "invalid escaped attribute"),
+            ("!", "expected an attribute"),
+            ("items.", "cannot end"),
+            ("items[0", "missing closing"),
+            ("items[a:]", "slices contain"),
+            (r"items['\']", "missing closing"),
+            (r"items['\x']", "invalid string index"),
+        ],
+    )
+    def test_malformed_paths_have_actionable_errors(self, path, message):
+        with pytest.raises(ValueError, match=message):
+            resolve_submodule_path(object(), path)
+
+    def test_root_index_and_non_string_path_validation(self):
+        assert resolve_submodule_path(["item"], "[0]") == "item"
+        with pytest.raises(TypeError, match="must be strings"):
+            resolve_submodule_path(object(), 0)
+
+    def test_descriptor_and_custom_indexing_are_not_invoked(self):
+        class UnsafeRoot:
+            def __init__(self):
+                self.property_called = False
+                self.item_called = False
+                self.items = self
+
+            @property
+            def dangerous_property(self):
+                self.property_called = True
+                return "value"
+
+            def __getitem__(self, _index):
+                self.item_called = True
+                return "value"
+
+        root = UnsafeRoot()
+        with pytest.raises(ValueError, match="descriptor"):
+            resolve_submodule_path(root, "dangerous_property")
+        with pytest.raises(ValueError, match="supported indexable"):
+            resolve_submodule_path(root, "items[0]")
+        assert not root.property_called
+        assert not root.item_called
+
+    def test_quoted_mapping_keys_can_contain_brackets_and_colons(self):
+        class DummyRoot:
+            def __init__(self):
+                self.data = {"part]name": "bracket", "a:b": "colon"}
+
+        root = DummyRoot()
+        assert resolve_submodule_path(root, "data['part]name']") == "bracket"
+        assert resolve_submodule_path(root, "data['a:b']") == "colon"
+
+    def test_module_dictionary_and_objects_without_instance_attributes(self):
+        modules = torch.nn.ModuleDict({"named": torch.nn.Identity()})
+        assert resolve_submodule_path(modules, "['named']") is modules["named"]
+        with pytest.raises(ValueError, match="missing"):
+            resolve_submodule_path(object(), "missing")
+
+    def test_dotted_index_is_rejected(self):
+        class DummyRoot:
+            def __init__(self):
+                self.items = ["item"]
+
+        with pytest.raises(ValueError, match="expected an attribute"):
+            resolve_submodule_path(DummyRoot(), "items.[0]")
 
     def test_invalid_paths_raise_value_error(self):
         """Test that invalid paths raise ValueError."""

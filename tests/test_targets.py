@@ -31,6 +31,35 @@ def test_capture_and_replace_mlp_unit(default_test_model):
     assert torch.allclose(default_test_model(x), baseline)
 
 
+def test_target_validation_uses_the_shared_path_grammar():
+    class Model(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.layers = nn.ModuleList([nn.Identity(), nn.ReLU()])
+            setattr(self, "custom/module", nn.Identity())
+
+    model = Model()
+    assert Target("layers[-1]", "activation", -1, (0,)).validate(model) is model.layers[-1]
+    assert Target("<custom/module>", "activation", -1, (0,)).validate(model) is getattr(model, "custom/module")
+
+
+def test_target_validation_does_not_invoke_descriptors():
+    class Model(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.property_called = False
+
+        @property
+        def dangerous_property(self):
+            self.property_called = True
+            return nn.Identity()
+
+    model = Model()
+    with pytest.raises(ValueError, match="does not resolve"):
+        Target("dangerous_property", "activation", -1, (0,)).validate(model)
+    assert not model.property_called
+
+
 def test_replace_preserves_single_tensor_tuple_output():
     class TupleModule(nn.Module):
         def forward(self, x):
@@ -110,6 +139,10 @@ def test_invalid_targets_have_clear_errors(default_test_model):
         Target.from_json("[]")
     with pytest.raises(ValueError, match="does not resolve"):
         Target("missing", "activation", 0, (0,)).validate(default_test_model)
+    with pytest.raises(ValueError, match="does not resolve"):
+        Target("linear1.weight", "activation", 0, (0,)).validate(default_test_model)
+    with pytest.raises(ValueError, match="does not resolve"):
+        Target(0, "activation", 0, (0,)).validate(default_test_model)
 
     executed = False
 
