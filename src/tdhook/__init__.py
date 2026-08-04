@@ -9,6 +9,7 @@ __all__ = [
     # Core
     "contexts",
     "hooks",
+    "targets",
     "metrics",
     "modules",
     # Methods
