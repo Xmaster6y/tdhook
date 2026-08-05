@@ -121,7 +121,7 @@ def test_supported_conformance_rows_name_a_real_workflow_test():
         for path in (
             Path(__file__),
             Path(__file__).with_name("test_concepts.py"),
-            Path(__file__).with_name("test_dimension_pipeline.py"),
+            Path(__file__).with_name("test_dimension_workflow.py"),
             Path(__file__).with_name("test_workflow.py"),
         )
     )

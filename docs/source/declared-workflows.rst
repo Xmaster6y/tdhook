@@ -4,7 +4,7 @@ Declared workflows: an offline walkthrough
 This compact tutorial is the canonical starting point for TDHook's declared
 workflow API.  It uses a deterministic local model and tensors only: no model
 download, checkpoint, or dataset is required.  The accompanying
-``declared-pipelines`` notebook contains the same executable examples.
+``declared-workflows`` notebook contains the same executable examples.
 
 Every workflow has two phases. :meth:`~tdhook.workflow.Workflow.plan` is a
 side-effect-free preflight that exposes model-pass cost, native key exchange,

@@ -41,7 +41,7 @@ Most methods should work with minimal configuration. Here's a basic example of r
         td = hooked_model(td)  # Access attribution with td.get(("attr", "input"))
 
 For a small, fully offline declared-workflow example, start with
-:doc:`declared-pipelines`.  It shows preflight planning, exact model-pass
+:doc:`declared-workflows`.  It shows preflight planning, exact model-pass
 budgets, named TensorDict values, and conservative execution splits. For
 individual methods, see the :doc:`methods` page.
 

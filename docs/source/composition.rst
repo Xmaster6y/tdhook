@@ -104,7 +104,7 @@ Conditioned intrinsic dimension has one model pass:
 #. ``DimensionEstimation`` runs a native TensorDict estimator.
 #. ``DimensionSummary`` publishes finite count, mean, and standard deviation.
 
-The offline :doc:`declared-pipelines` walkthrough contains complete executable
+The offline :doc:`declared-workflows` walkthrough contains complete executable
 examples for both cases.
 
 Conformance evidence

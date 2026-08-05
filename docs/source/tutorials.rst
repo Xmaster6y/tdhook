@@ -26,7 +26,7 @@ values and show their preflight model-pass budget before running.
    :gutter: 3
 
    .. grid-item-card::
-      :link: declared-pipelines
+      :link: declared-workflows
       :class-card: surface
       :class-body: surface
 
@@ -115,8 +115,8 @@ values and show their preflight model-pass budget before running.
    :maxdepth: 2
 
    notebooks/tutorials/torchrl-ppo.ipynb
-   declared-pipelines
-   notebooks/tutorials/declared-pipelines.ipynb
+   declared-workflows
+   notebooks/tutorials/declared-workflows.ipynb
    notebooks/tutorials/chess-value-saliency.ipynb
    notebooks/tutorials/concept-attribution.ipynb
    notebooks/tutorials/chess-dimension-estimation.ipynb

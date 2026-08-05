@@ -10,6 +10,7 @@
 
     start
     architecture
+    migration
     colab
     methods
     composition
