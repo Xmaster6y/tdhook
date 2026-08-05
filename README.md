@@ -58,3 +58,21 @@ An [agent skill](skills/tdhook/SKILL.md) is available for tdhook. It provides AI
 ## Config
 
 This project uses [`uv`](https://docs.astral.sh/uv/) to manage python dependencies and run scripts, as well as [`just`](https://github.com/casey/just) to run commands.
+
+## Citation
+
+If you're using `tdhook` in your research, please cite it using the following BibTeX entry:
+```
+@misc{poupart2025tdhooklightweightframeworkinterpretability,
+      title={TDHook: A Lightweight Framework for Interpretability},
+      author={Yoann Poupart},
+      year={2025},
+      eprint={2509.25475},
+      archivePrefix={arXiv},
+      primaryClass={cs.AI},
+      url={https://arxiv.org/abs/2509.25475},
+}
+```
+
+## License
+`tdhook` is licensed under the MIT License. See [LICENSE](./LICENSE) for details.
