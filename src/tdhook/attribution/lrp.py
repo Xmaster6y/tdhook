@@ -2,14 +2,30 @@ from typing import Callable, Optional, List, Dict
 
 from torch import nn
 from warnings import warn
-from tensordict.nn import TensorDictModule
-from tensordict import TensorDict
+from tensordict.nn import TensorDictModule, TensorDictModuleBase
+from tensordict import TensorDict, TensorDictBase
 
 from tdhook.attribution.gradient_helpers import GradientAttribution
-from tdhook._types import UnraveledKey
+from tdhook._types import UnraveledKey, join_keys
 from tdhook.attribution.lrp_helpers.rules import Rule
 from tdhook.modules import HookedModule
 from tdhook.runtime import BoundHookProgram, HookProgramBuilder, HookSpec
+
+
+class _LRPModule(TensorDictModuleBase):
+    """Expose LRP's public TensorDict contract without its temporary keys."""
+
+    def __init__(self, module: TensorDictModuleBase, in_keys, out_keys):
+        super().__init__()
+        self.module = module
+        self.in_keys = list(in_keys)
+        self.out_keys = list(out_keys)
+
+    def forward(self, data: TensorDictBase) -> TensorDictBase:
+        return self.module(data)
+
+    def __getitem__(self, index):
+        return self.module[index]
 
 
 class LRP(GradientAttribution):
@@ -54,6 +70,14 @@ class LRP(GradientAttribution):
         self._rule_mapper = rule_mapper or (lambda name, module: None)
         self._warn_on_missing_rule = warn_on_missing_rule
         self._skip_modules = skip_modules
+        self._hooked_module_kwargs["relative_path"] = "td_module.module.module[2]._td_module"
+
+    def _prepare_module(self, module, in_keys, out_keys, extra_relative_path):
+        prepared = super()._prepare_module(module, in_keys, out_keys, extra_relative_path)
+        public_in_keys = [*in_keys, *self._additional_init_keys]
+        attribution_sources = [*in_keys, *self._input_modules]
+        public_out_keys = [*out_keys, *(join_keys(self._attr_key, key) for key in attribution_sources)]
+        return _LRPModule(prepared, public_in_keys, public_out_keys)
 
     def _hook_module(self, module: HookedModule) -> BoundHookProgram:
         with HookProgramBuilder() as program:

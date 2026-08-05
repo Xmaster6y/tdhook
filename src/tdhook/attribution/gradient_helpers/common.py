@@ -7,7 +7,7 @@ from tensordict import TensorDict
 
 from tdhook.contexts import HookingContextFactory
 from tdhook.modules import FunctionModule, flatten_select_reshape_call, IntermediateKeysCleaner, ModuleCallWithCache
-from tdhook._types import UnraveledKey
+from tdhook._types import UnraveledKey, join_keys
 from tdhook.modules import HookedModule
 from tdhook.hooks import HookFactory, MutableWeakRef, TensorDictRef
 from tdhook.execution import ExecutionSpec, GradientMode
@@ -71,7 +71,7 @@ class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
         cache_in_keys = [("_cache_in", in_key) for in_key in self._input_modules]
         mod_out_keys = [("_mod_out", out_key) for out_key in out_keys]
         cache_out_keys = [("_cache_out", out_key) for out_key in self._target_modules]
-        attr_keys = [(self._attr_key, in_key) for in_key in in_keys]
+        attr_keys = [join_keys(self._attr_key, in_key) for in_key in in_keys]
 
         if set(self._additional_init_keys) & (set(in_keys) | set(out_keys)):
             raise ValueError("Additional init keys must not be in the in_keys or out_keys")
@@ -268,7 +268,7 @@ class GradientAttributionWithBaseline(GradientAttribution):
     ) -> TensorDictModuleBase:
         n_in_keys = len(in_keys)
         register_in_keys = [("_register_in", in_key) for in_key in in_keys]
-        attr_keys = [(self._attr_key, in_key) for in_key in in_keys]
+        attr_keys = [join_keys(self._attr_key, in_key) for in_key in in_keys]
         baseline_keys = [(self._baseline_key, in_key) for in_key in in_keys]
         (_, register_inputs, module_call, attributor, *_) = super()._prepare_module(
             module, in_keys, out_keys, extra_relative_path

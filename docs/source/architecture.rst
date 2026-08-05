@@ -121,6 +121,13 @@ operators. Condition axes that do not match the model batch remain owned by
 TensorDict as shape-neutral ``NonTensorData`` values; TDHook does not introduce
 an artifact adapter or result wrapper for them.
 
+Concept-conditioned attribution follows the same ownership rule. The first
+``LRP`` method publishes a TensorDict attribution subtree,
+``ConceptSelection`` derives a named selection with no model pass, and
+``ChannelConditionedLRP`` reads that selection from its declared ``in_keys``
+during the second pass. The selected channel is execution data: it is not
+stored in a stage, notebook callback, or method-level side cache.
+
 Shared hook runtime
 -------------------
 

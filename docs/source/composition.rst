@@ -208,35 +208,34 @@ runtime artifact keys or same-run opt-in.
 Declared concept attribution
 ----------------------------
 
-The concept-attribution demo is a three-stage pipeline: LRP collects labelled
-concept-example relevances, ``ConceptSelectionStage`` records the selected
+The concept-attribution demo is a three-step ``Workflow``: LRP collects
+labelled concept-example relevances, ``ConceptSelection`` records the selected
 channel and its positive or negative direction, and
-``ChannelConditionedLRPStage`` binds that explicit artifact to a second LRP
-pass.  This makes the two model passes and their artifact boundary visible to
-``Pipeline.plan()``; no notebook callback needs to retain hook context or a
+``ChannelConditionedLRP`` reads that explicit TensorDict value during a second
+LRP pass. This makes the two model passes and their data boundary visible to
+``Workflow.plan()``; no notebook callback or stage-owned cache retains a
 selected Python channel.
 
 .. code-block:: python
 
    from tdhook.attribution import LRP
-   from tdhook.concepts import ChannelConditionedLRPStage, ConceptSelectionStage
-   from tdhook.pipeline import Pipeline
-   from tdhook.stages import AttributionStage
+   from tdhook.concepts import ChannelConditionedLRP, ConceptSelection
+   from tdhook.workflow import Workflow
 
-   pipeline = Pipeline([
-       AttributionStage("concept-relevances", LRP(input_modules=["features.28"]),
-                        attribution_key=("attributions", "concept_examples"),
-                        legacy_attribution_key=("attr", "features.28")),
-       ConceptSelectionStage("select-concept"),
-       ChannelConditionedLRPStage("conditioned-relevance", LRP(),
-                                  condition_module="features.28", gradient_channel_axis=1),
-   ])
+   workflow = Workflow(
+       LRP(input_modules=["features.28"],
+           attribution_key=("attributions", "concept_examples")),
+       ConceptSelection(("attributions", "concept_examples", "features.28")),
+       ChannelConditionedLRP(LRP(), condition_module="features.28", gradient_channel_axis=1),
+   )
 
-The initial artifacts provide ``("inputs", "input")`` and the matching
-binary ``("inputs", "concept_labels")``.  The selection artifact is stored at
+The initial TensorDict provides ``"input"`` and the matching binary
+``"concept_labels"``. The selection value is stored at
 ``("metrics", "concept_selection")`` and contains the positive/negative
-means, scores, channel, direction, and selected score.  A different selection
-policy can produce that same schema without rewriting the conditioned stage.
+means, scores, channel, direction, and selected score. Per-input attribution
+values remain TensorDict subtrees, such as
+``("attributions", "conditioned", "input")``. A different selection operator
+can produce the same schema without rewriting the conditioned method.
 
 The current evidence anchors are:
 
@@ -293,12 +292,12 @@ Tutorial migration
 ------------------
 
 The canonical tutorial paths are the offline :doc:`declared-pipelines`
-walkthrough and its executable notebook.  They use public stage classes and
-read all hand-offs from named artifacts: concept selection from
-``("metrics", "concept_selection")``; conditioned relevance from
-``("attributions", "conditioned")``; and dimension samples, estimates, and
-summaries from the ``("activations", ...)`` and ``("metrics", ...)``
-namespaces.  Natural-image and chess board rendering are presentation
+walkthrough and its executable notebook. They use prepared methods and
+ordinary TensorDict operators and read every hand-off from named keys: concept
+selection from ``("metrics", "concept_selection")``; per-input conditioned
+relevance below ``("attributions", "conditioned")``; and dimension samples,
+estimates, and summaries from the ``("activations", ...)`` and
+``("metrics", ...)`` namespaces. Natural-image and chess board rendering are presentation
 transforms that consume those artifacts; they are not a reason to retain
 notebook callbacks or cache-to-dictionary orchestration.
 

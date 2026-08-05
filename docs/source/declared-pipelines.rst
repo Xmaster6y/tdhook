@@ -61,44 +61,44 @@ dimensional ``features`` activation for channel-conditioned sampling.
 Minimal concept-conditioned attribution
 ---------------------------------------
 
-The declared concept workflow has exactly two model passes.  The first LRP
-stage records relevance for labelled concept examples, the artifact-only
-selection stage chooses a channel, and the second LRP stage consumes that
-selection artifact.  No callback, prepared hook context, or activation cache
-is transferred by the notebook.
+The declared concept workflow has exactly two model passes. The first LRP
+method records relevance for labelled concept examples, the ordinary
+``ConceptSelection`` operator chooses a channel, and ``ChannelConditionedLRP``
+reads that selection from the execution TensorDict. No callback, prepared hook
+context, or activation cache is transferred between passes.
 
 .. code-block:: python
 
    from tensordict import TensorDict
    from tdhook.attribution import LRP
-   from tdhook.concepts import ChannelConditionedLRPStage, ConceptSelectionStage
-   from tdhook.pipeline import Pipeline
-   from tdhook.stages import AttributionStage
+   from tdhook.concepts import ChannelConditionedLRP, ConceptSelection
+   from tdhook.workflow import Workflow
 
-   concept_pipeline = Pipeline([
-       AttributionStage(
-           "concept-relevances", LRP(input_modules=["features"], warn_on_missing_rule=False),
+   concept_workflow = Workflow(
+       LRP(
+           input_modules=["features"],
            attribution_key=("attributions", "concept_examples"),
-           legacy_attribution_key=("attr", "features"),
+           warn_on_missing_rule=False,
        ),
-       ConceptSelectionStage("select-concept"),
-       ChannelConditionedLRPStage(
-           "conditioned-relevance", LRP(warn_on_missing_rule=False), condition_module="features",
+       ConceptSelection(("attributions", "concept_examples", "features")),
+       ChannelConditionedLRP(
+           LRP(warn_on_missing_rule=False), condition_module="features",
        ),
-   ])
-   artifacts = TensorDict(
-       {"inputs": {"input": examples, "concept_labels": labels}}, batch_size=[len(examples)]
    )
-   plan = concept_pipeline.plan(artifacts)
+   artifacts = TensorDict(
+       {"input": examples, "concept_labels": labels}, batch_size=[len(examples)]
+   )
+   plan = concept_workflow.plan(concept_model, artifacts)
    assert plan.model_passes == 2
-   print([(run.stages, run.model_passes) for run in plan.runs])
-   result = concept_pipeline.run(concept_model, artifacts, model_id="offline-tiny", seed=0)
+   print([(execution.steps, execution.model_passes) for execution in plan.executions])
+   result = concept_workflow(concept_model, artifacts)
 
 The selected concept is at ``("metrics", "concept_selection")`` and the
-conditioned input relevance is at ``("attributions", "conditioned")``.  The
-result's ``provenance`` records that the selection depends on the concept
-relevances and labels, while the conditioned attribution depends on the input
-and selection artifact.  This is the workflow exercised by
+conditioned input relevance is at
+``("attributions", "conditioned", "input")``. The native ``in_keys`` and
+``out_keys`` record that selection depends on concept relevances and labels,
+while conditioned attribution depends on both the model input and selection.
+This is the workflow exercised by
 ``test_concept_attribution_workflow_is_declared_inspectable_and_matches_frozen_fixture``
 in the conformance matrix.
 
