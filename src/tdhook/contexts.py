@@ -1,5 +1,6 @@
 from contextlib import contextmanager
 from contextlib import ExitStack
+import sys
 from typing import List, Optional, Generator, Dict, overload, Literal
 from weakref import WeakKeyDictionary
 from torch import nn
@@ -48,7 +49,7 @@ class HookingContext:
         self._out_keys = self._module.out_keys
         self._managed_by_context_manager = False
 
-    def _enter(self, managed_by_context_manager: bool = True):
+    def _enter(self, managed_by_context_manager: bool = True, *, for_inspection: bool = False):
         if self._in_context:
             raise RuntimeError("Cannot enter context twice")
         self._in_context = True
@@ -60,9 +61,8 @@ class HookingContext:
         try:
             with ExitStack() as stack:
                 for factory in self._pre_factories:
-                    working_module = stack.enter_context(
-                        factory.prepare(working_module, self._in_keys, self._out_keys)
-                    )
+                    child = factory.prepare(working_module, self._in_keys, self._out_keys)
+                    working_module = stack.enter_context(child.inspect() if for_inspection else child)
                 self._stack = stack.pop_all()
             prep_module = self._prepare(working_module, self._in_keys, self._out_keys, self._extra_relative_path)
             prepared = True
@@ -99,8 +99,26 @@ class HookingContext:
 
         return self._program
 
+    @property
+    def executes_model_directly(self) -> bool:
+        """Whether the bound wrapper executes the caller's TensorDict module unchanged."""
+
+        if not self._in_context or self._hooked_module is None:
+            raise RuntimeError("Direct-execution state is only available inside the prepared context")
+        return self._hooked_module.td_module is self._module
+
     def __enter__(self):
         return self._enter(managed_by_context_manager=True)
+
+    @contextmanager
+    def inspect(self) -> Generator[TensorDictModuleBase, None, None]:
+        """Bind temporarily for planning without consuming execution state."""
+
+        prepared = self._enter(managed_by_context_manager=True, for_inspection=True)
+        try:
+            yield prepared
+        finally:
+            self.__exit__(*sys.exc_info())
 
     def __exit__(self, exc_type, exc_value, traceback):
         cleanup_error = None
@@ -170,10 +188,13 @@ class HookingContextWithCache(HookingContext):
     def clear(self):
         self._cache.clear()
 
-    def _enter(self, managed_by_context_manager: bool = True):
-        if self._clear_cache:
+    def _enter(self, managed_by_context_manager: bool = True, *, for_inspection: bool = False):
+        if self._clear_cache and not for_inspection:
             self.clear()
-        return super()._enter(managed_by_context_manager=managed_by_context_manager)
+        return super()._enter(
+            managed_by_context_manager=managed_by_context_manager,
+            for_inspection=for_inspection,
+        )
 
     def __enter__(self):
         return self._enter(managed_by_context_manager=True)

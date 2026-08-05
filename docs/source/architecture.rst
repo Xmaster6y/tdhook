@@ -39,7 +39,25 @@ Interactive sessions
 Declared workflows
    A workflow composes methods and ordinary TensorDict modules by their
    ``in_keys`` and ``out_keys``. Planning validates dependencies, bound hook
-   programs, and safe co-execution before model execution.
+   programs, and safe co-execution before model execution::
+
+       from tensordict.nn import TensorDictModule
+       from tdhook.attribution import Saliency
+       from tdhook.workflow import Workflow
+
+       summarise = TensorDictModule(
+           lambda attribution: attribution.mean(-1),
+           in_keys=[("attr", "input")],
+           out_keys=[("summary", "mean")],
+       )
+       workflow = Workflow(Saliency(), summarise)
+
+       plan = workflow.plan(model, data)
+       result = workflow(model, data)
+
+   ``Workflow`` returns the final TensorDict directly. The immutable plan is
+   requested separately; it is report metadata, not a second artifact
+   container.
 
 TensorDict ownership
 --------------------
@@ -74,6 +92,19 @@ ordering, callbacks, model signatures, and temporary state determine whether
 one execution is safe. Unknown compatibility produces separate executions.
 Internal execution nodes are planner machinery, not a second user-facing
 workflow language.
+
+Planning uses an inspection binding: it installs and removes the same hooks as
+execution but makes no model call and does not consume execution state such as
+clearing an activation cache. Before an inspected plan is executed, the method
+is rebound and its signature, execution requirements, hook program, and direct
+wrapper status must still match. A changed fact fails before the model call.
+
+The initial same-run proof is intentionally narrow. Adjacent one-pass methods
+may share one model call only when their prepared TensorDict signatures and
+autograd modes match, both wrappers execute the caller's model directly, and
+every operation in every bound program is a read-only ``capture``. A
+transformed wrapper, intervention, missing program, or other unknown fact
+produces separate executions, and the plan records the reason.
 
 Shared hook runtime
 -------------------

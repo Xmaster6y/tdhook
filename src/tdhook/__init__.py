@@ -14,6 +14,7 @@ __all__ = [
     "runtime",
     "session",
     "targets",
+    "workflow",
     "metrics",
     "modules",
     # Methods
