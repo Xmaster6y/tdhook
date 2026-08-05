@@ -9,6 +9,7 @@ from tensordict import TensorDict, MemoryMappedTensor
 
 from tdhook.latent.activation_caching import ActivationCaching
 from tdhook.modules import get_best_device
+from tdhook.runtime import HookProgram, HookSpec
 
 
 class TestActivationCaching:
@@ -17,7 +18,7 @@ class TestActivationCaching:
     def test_activation_caching_context_creation(self, default_test_model):
         """Test creating a ActivationCaching."""
 
-        context = ActivationCaching("td_module\.module\.linear2", relative=False)
+        context = ActivationCaching(r"td_module\.module\.linear2", relative=False)
 
         inputs = torch.randn(2, 10)
         with context.prepare(default_test_model) as hooked_module:
@@ -33,6 +34,7 @@ class TestActivationCaching:
         with context.prepare(default_test_model) as hooked_module:
             hooked_module(inputs)
         assert "linear2" in hooked_module.hooking_context.cache
+        assert hooked_module.hooking_context.program == HookProgram((HookSpec("linear2", "capture", "fwd"),))
 
     def test_different_device_cache(self, default_test_model):
         """Test creating a ActivationCaching with cache on a different device."""

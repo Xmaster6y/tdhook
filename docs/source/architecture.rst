@@ -75,6 +75,22 @@ one execution is safe. Unknown compatibility produces separate executions.
 Internal execution nodes are planner machinery, not a second user-facing
 workflow language.
 
+Shared hook runtime
+-------------------
+
+``HookProgramBuilder`` is the single primitive that installs ordered hooks and
+owns their reverse-order cleanup. Both ``HookSession`` and migrated prepared
+methods use it. A successful binding exposes a model-free ``HookProgram`` for
+inspection, while the bound cleanup object retains the live hook handles only
+for the duration of execution. Callback state and model objects are never
+stored in the reportable program.
+Structural equality between programs is therefore not a coexecution claim;
+compatibility remains unknown until a binding supplies an explicit proof.
+
+Methods migrate onto this runtime incrementally. Until a method exposes a
+``HookProgram``, compatibility with another method is unknown and the planner
+must keep their executions separate.
+
 Dependency direction
 --------------------
 

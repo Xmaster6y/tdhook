@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from contextlib import ExitStack
 from dataclasses import dataclass
 from typing import Literal
 import weakref
@@ -10,28 +9,12 @@ import weakref
 import torch
 from torch import Tensor, nn
 
-from tdhook.hooks import HookDirection, register_hook_to_module
+from tdhook.hooks import HookDirection
+from tdhook.runtime import HookProgram, HookProgramBuilder, HookSpec
 from tdhook.targets import Target
 
 
 HookOperation = Literal["capture", "replace"]
-
-
-@dataclass(frozen=True)
-class HookSpec:
-    """One hook operation validated and installed by a :class:`HookSession`."""
-
-    target: Target
-    operation: HookOperation
-    direction: HookDirection | None
-    prepend: bool = False
-
-
-@dataclass(frozen=True)
-class HookProgram:
-    """The ordered, model-free description of a session's installed operations."""
-
-    hooks: tuple[HookSpec, ...] = ()
 
 
 @dataclass
@@ -53,41 +36,45 @@ class HookSession:
         if not isinstance(model, nn.Module):
             raise TypeError("HookSession requires a torch.nn.Module")
         self._model_ref = weakref.ref(model)
-        self._stack: ExitStack | None = None
-        self._specs: list[HookSpec] = []
+        self._builder: HookProgramBuilder | None = None
+        self._program = HookProgram()
 
     @property
     def program(self) -> HookProgram:
         """Return an immutable description of the operations installed this run."""
 
-        return HookProgram(tuple(self._specs))
+        return self._builder.program if self._builder is not None else self._program
 
     def __enter__(self) -> "HookSession":
-        if self._stack is not None:
+        if self._builder is not None:
             raise RuntimeError("Cannot enter a HookSession twice")
         self._model()
-        self._specs.clear()
-        self._stack = ExitStack()
+        self._program = HookProgram()
+        self._builder = HookProgramBuilder()
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        stack = self._stack
-        if stack is None:
+        builder = self._builder
+        if builder is None:
             raise RuntimeError("Cannot exit a HookSession that is not active")
-        self._stack = None
-        return stack.__exit__(exc_type, exc_value, traceback)
+        self._builder = None
+        bound = builder.build()
+        self._program = bound.program
+        bound.remove()
 
     def capture(self, target: Target, *, prepend: bool = False) -> CapturedTarget:
         """Capture ``target`` while this session is active."""
 
-        model, stack = self._active_state()
+        model, builder = self._active_state()
         module = target.validate(model)
         captured = CapturedTarget()
         direction = self._direction(target)
+        spec = HookSpec(target.module_path, "capture", direction, prepend, target)
 
         if target.kind == "parameter":
             parameter = module.get_parameter(target.parameter)  # type: ignore[arg-type]
             captured.value = target._select(parameter).detach().clone()
+            builder.record(spec)
         else:
 
             def forward_hook(_module: nn.Module, _args: tuple[object, ...], value: Tensor | tuple[Tensor, ...]):
@@ -96,30 +83,32 @@ class HookSession:
             def gradient_hook(_module: nn.Module, values: tuple[Tensor, ...]):
                 captured.value = target._select(self._hook_tensor(values)).detach().clone()
 
-            handle = register_hook_to_module(
+            builder.register(
                 module,
                 forward_hook if target.kind == "activation" else gradient_hook,
-                direction=direction,
-                prepend=prepend,
+                spec,
             )
-            stack.callback(handle.remove)
 
-        self._specs.append(HookSpec(target, "capture", direction, prepend))
         return captured
 
     def replace(self, target: Target, value: Tensor | float | int, *, prepend: bool = False) -> None:
         """Replace ``target`` until the session exits."""
 
-        model, stack = self._active_state()
+        model, builder = self._active_state()
         module = target.validate(model)
         direction = self._direction(target)
+        spec = HookSpec(target.module_path, "replace", direction, prepend, target)
 
         if target.kind == "parameter":
             parameter = module.get_parameter(target.parameter)  # type: ignore[arg-type]
             original = target._select(parameter).detach().clone()
-            stack.callback(self._restore_parameter, target, parameter, original)
-            with torch.no_grad():
-                target._assign(parameter, value)
+            try:
+                with torch.no_grad():
+                    target._assign(parameter, value)
+            except BaseException:
+                self._restore_parameter(target, parameter, original)
+                raise
+            builder.record(spec, lambda: self._restore_parameter(target, parameter, original))
         else:
 
             def forward_hook(_module: nn.Module, _args: tuple[object, ...], output: Tensor | tuple[Tensor, ...]):
@@ -132,20 +121,16 @@ class HookSession:
                 target._assign(replacement, value)
                 return (replacement,) + values[1:]
 
-            handle = register_hook_to_module(
+            builder.register(
                 module,
                 forward_hook if target.kind == "activation" else gradient_hook,
-                direction=direction,
-                prepend=prepend,
+                spec,
             )
-            stack.callback(handle.remove)
 
-        self._specs.append(HookSpec(target, "replace", direction, prepend))
-
-    def _active_state(self) -> tuple[nn.Module, ExitStack]:
-        if self._stack is None:
+    def _active_state(self) -> tuple[nn.Module, HookProgramBuilder]:
+        if self._builder is None:
             raise RuntimeError("HookSession operations require an active context")
-        return self._model(), self._stack
+        return self._model(), self._builder
 
     def _model(self) -> nn.Module:
         model = self._model_ref()

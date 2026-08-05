@@ -169,6 +169,17 @@ class MultiHookManager:
     ):
         """Register the hook to the module."""
         handles = []
+        for name, submodule in self.iter_modules(module, relative_path=relative_path):
+            handles.append(register_hook_to_module(submodule, hook_factory(name), direction, prepend))
+        return MultiHookHandle(handles)
+
+    def iter_modules(
+        self,
+        module: nn.Module,
+        *,
+        relative_path: Optional[str] = None,
+    ):
+        """Yield matching executable submodules in registration order."""
         root_module = resolve_submodule_path(module, relative_path) if relative_path else module
         for name, submodule in root_module.named_modules():
             if name == "":
@@ -176,8 +187,7 @@ class MultiHookManager:
             if not isinstance(submodule, self._classes_to_hook) or isinstance(submodule, self._classes_to_skip):
                 continue
             if self._reg_exp.match(name):
-                handles.append(register_hook_to_module(submodule, hook_factory(name), direction, prepend))
-        return MultiHookHandle(handles)
+                yield name, submodule
 
 
 class MutableWeakRef(Generic[T]):

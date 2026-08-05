@@ -25,8 +25,8 @@ def test_session_captures_and_replaces_an_activation(default_test_model):
     assert torch.allclose(default_test_model(x), baseline)
     assert program == HookProgram(
         (
-            HookSpec(target, "capture", "fwd"),
-            HookSpec(target, "replace", "fwd"),
+            HookSpec(target.module_path, "capture", "fwd", target=target),
+            HookSpec(target.module_path, "replace", "fwd", target=target),
         )
     )
 
@@ -88,7 +88,7 @@ def test_session_captures_parameter_values():
 
     assert captured.value is not None
     assert torch.equal(captured.value, model.weight[1:2])
-    assert session.program == HookProgram((HookSpec(target, "capture", None),))
+    assert session.program == HookProgram((HookSpec(target.module_path, "capture", None, target=target),))
 
 
 @pytest.mark.parametrize("axis,indices", [(0, (0,)), (1, (1,))])
@@ -108,6 +108,18 @@ def test_session_restores_parameters_after_success_and_failure(axis, indices):
         session.replace(target, -3)
         assert not torch.equal(model[0].weight, original)
     assert torch.equal(model[0].weight, original)
+
+
+def test_session_restores_parameter_when_replacement_assignment_fails():
+    model = nn.Linear(3, 2, bias=False)
+    target = Target("", "parameter", 0, (0,), parameter="weight")
+    original = model.weight.detach().clone()
+
+    with HookSession(model) as session:
+        with pytest.raises(RuntimeError):
+            session.replace(target, torch.ones(2, 2))
+        assert torch.equal(model.weight, original)
+        assert session.program == HookProgram()
 
 
 def test_session_requires_an_active_live_model(default_test_model):

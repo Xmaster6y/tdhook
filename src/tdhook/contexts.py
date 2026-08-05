@@ -10,6 +10,7 @@ from tdhook.modules import HookedModule
 from tdhook.hooks import MultiHookHandle, merge_paths
 from tdhook._types import UnraveledKey
 from tdhook.execution import ExecutionSpec
+from tdhook.runtime import HookProgram
 
 
 class HookingContext:
@@ -31,6 +32,7 @@ class HookingContext:
         self._hook = factory._hook_module
         self._in_context = False
         self._handle = None
+        self._program = None
         self._hooked_module = None
         self._pre_factories = pre_factories or []
         self._stack = None
@@ -51,6 +53,7 @@ class HookingContext:
             raise RuntimeError("Cannot enter context twice")
         self._in_context = True
         self._managed_by_context_manager = managed_by_context_manager
+        self._program = None
 
         working_module = self._module
         prepared = False
@@ -65,6 +68,7 @@ class HookingContext:
             prepared = True
             self._hooked_module = self._spawn(prep_module, self, self._extra_relative_path)
             self._handle = self._hook(self._hooked_module)
+            self._program = getattr(self._handle, "program", None)
             return self._hooked_module
         except BaseException:
             self._abort_enter(prepared)
@@ -88,6 +92,12 @@ class HookingContext:
                     self._hooked_module = None
                     self._handle = None
                     self._stack = None
+
+    @property
+    def program(self) -> HookProgram | None:
+        """Return the model-free hook program installed by this context."""
+
+        return self._program
 
     def __enter__(self):
         return self._enter(managed_by_context_manager=True)
@@ -126,6 +136,7 @@ class HookingContext:
             yield
         finally:
             self._handle = self._hook(self._hooked_module)
+            self._program = getattr(self._handle, "program", None)
 
     @contextmanager
     def disable(self) -> Generator[nn.Module, None, None]:

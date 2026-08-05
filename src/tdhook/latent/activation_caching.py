@@ -4,7 +4,8 @@ from tensordict import TensorDict
 
 from tdhook.modules import HookedModule
 from tdhook.contexts import HookingContextFactory, HookingContextWithCache
-from tdhook.hooks import MultiHookManager, HookFactory, HookDirection, MultiHookHandle
+from tdhook.hooks import MultiHookManager, HookFactory, HookDirection
+from tdhook.runtime import BoundHookProgram, HookProgramBuilder, HookSpec
 
 
 class ActivationCaching(HookingContextFactory):
@@ -44,7 +45,7 @@ class ActivationCaching(HookingContextFactory):
         self._key_pattern = key_pattern
         self._hook_manager.pattern = key_pattern
 
-    def _hook_module(self, module: HookedModule) -> MultiHookHandle:
+    def _hook_module(self, module: HookedModule) -> BoundHookProgram:
         cache = module.hooking_context.cache
 
         def hook_factory(name: str, direction: HookDirection) -> Callable:
@@ -52,15 +53,16 @@ class ActivationCaching(HookingContextFactory):
             key = (direction, name) if self._use_nested_keys else name
             return HookFactory.make_caching_hook(key, cache, direction=direction, callback=self._callback)
 
-        handles = []
-        for direction in self._directions:
-            handles.append(
-                self._hook_manager.register_hook(
+        with HookProgramBuilder() as program:
+            for direction in self._directions:
+                for name, submodule in self._hook_manager.iter_modules(
                     module,
-                    (lambda name: hook_factory(name, direction)),
-                    direction=direction,
                     relative_path=module.relative_path if self._relative else None,
-                )
-            )
+                ):
+                    program.register(
+                        submodule,
+                        hook_factory(name, direction),
+                        HookSpec(name, "capture", direction),
+                    )
 
-        return MultiHookHandle(handles)
+            return program.build()
