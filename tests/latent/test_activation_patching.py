@@ -9,6 +9,7 @@ from tensordict import TensorDict
 
 from tdhook.latent.activation_patching import ActivationPatching
 from tdhook.runtime import HookProgram, HookSpec
+from tdhook.targets import Target
 
 
 class TestActivationPatching:
@@ -51,3 +52,23 @@ class TestActivationPatching:
             )
         )
         assert all(not submodule._forward_hooks for submodule in default_test_model.modules())
+
+    def test_target_selection_is_executed_and_reported(self, default_test_model):
+        target = Target("linear2", "activation", -1, (0,))
+        context = ActivationPatching([target])
+        data = TensorDict(
+            {"input": torch.randn(2, 10), ("patched", "input"): torch.randn(2, 10)},
+            batch_size=2,
+        )
+
+        with context.prepare(default_test_model) as hooked_module:
+            result = hooked_module(data)
+
+        assert hooked_module.hooking_context.program == HookProgram(
+            (
+                HookSpec("linear2", "capture", "fwd", target=target),
+                HookSpec("linear2", "replace", "fwd", prepend=True, target=target),
+            )
+        )
+        assert result["output"].shape == result["patched", "output"].shape
+        assert context.execution_spec.model_passes == 2

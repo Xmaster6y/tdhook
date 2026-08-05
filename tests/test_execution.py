@@ -3,6 +3,7 @@ import pytest
 from tdhook.attribution import ActivationMaximisation, IntegratedGradients, Saliency
 from tdhook.contexts import HookingContextFactory
 from tdhook.execution import ExecutionSpec, GradientMode
+from tdhook.latent import ActivationAddition, ActivationPatching
 
 
 def test_base_method_declares_one_optional_gradient_model_pass():
@@ -20,6 +21,8 @@ def test_gradient_methods_own_their_execution_requirements():
         model_passes=4,
         gradient_mode=GradientMode.REQUIRED,
     )
+    assert ActivationPatching(["linear"]).execution_spec == ExecutionSpec(model_passes=2)
+    assert ActivationAddition(["linear"]).execution_spec == ExecutionSpec(model_passes=2)
 
 
 @pytest.mark.parametrize(

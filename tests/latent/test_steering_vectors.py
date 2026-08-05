@@ -9,6 +9,7 @@ from tensordict import TensorDict
 
 from tdhook.latent.steering_vectors import SteeringVectors, ActivationAddition
 from tdhook.runtime import HookProgram, HookSpec
+from tdhook.targets import Target
 
 
 class TestSteeringVectors:
@@ -44,6 +45,17 @@ class TestSteeringVectors:
         )
         assert all(not submodule._forward_hooks for submodule in default_test_model.modules())
 
+    def test_target_selection_is_steered_and_reported(self, default_test_model):
+        target = Target("linear2", "activation", -1, (0,))
+        context = SteeringVectors([target], steer_fn=lambda module_key, output: torch.zeros_like(output))
+
+        with context.prepare(default_test_model) as hooked_module:
+            hooked_module(TensorDict({"input": torch.randn(2, 10)}, batch_size=2))
+
+        assert hooked_module.hooking_context.program == HookProgram(
+            (HookSpec("linear2", "replace", "fwd", target=target),)
+        )
+
 
 class TestActivationAddition:
     """Test the ActivationAddition class."""
@@ -72,3 +84,4 @@ class TestActivationAddition:
             tuple(HookSpec(module_key, "capture", "fwd") for module_key in modules_to_steer)
         )
         assert all(not submodule._forward_hooks for submodule in default_test_model.modules())
+        assert context.execution_spec.model_passes == 2

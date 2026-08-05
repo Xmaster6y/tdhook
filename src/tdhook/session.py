@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, MutableMapping
+import copy
 from dataclasses import dataclass
 from typing import Literal
 import weakref
 
 import torch
+from tensordict import TensorDictBase
 from torch import Tensor, nn
 
 from tdhook.hooks import HookDirection
@@ -175,7 +178,7 @@ class HookSession:
                     selected = selected[component]
                 except IndexError as exc:
                     raise ValueError(f"output_path slot {component} is out of range") from exc
-            elif isinstance(component, str) and isinstance(selected, dict):
+            elif isinstance(component, str) and isinstance(selected, Mapping):
                 try:
                     selected = selected[component]
                 except KeyError as exc:
@@ -205,9 +208,21 @@ class HookSession:
             items = list(value)
             items[component] = cls._replace_hook_tensor(items[component], tuple(remainder), replacement)
             return items
-        if isinstance(component, str) and isinstance(value, dict):
-            items = dict(value)
-            items[component] = cls._replace_hook_tensor(items[component], tuple(remainder), replacement)
+        if isinstance(component, str) and isinstance(value, TensorDictBase):
+            items = value.clone(recurse=False)
+            items.set(component, cls._replace_hook_tensor(value.get(component), tuple(remainder), replacement))
+            return items
+        if isinstance(component, str) and isinstance(value, Mapping):
+            try:
+                current = value[component]
+            except KeyError as exc:
+                raise ValueError(f"output_path key {component!r} is missing") from exc
+            items = copy.copy(value)
+            if not isinstance(items, MutableMapping):
+                raise ValueError(
+                    f"mapping type {type(value).__name__} does not support structure-preserving replacement"
+                )
+            items[component] = cls._replace_hook_tensor(current, tuple(remainder), replacement)
             return items
         raise ValueError(f"output_path component {component!r} does not match the hook value structure")
 

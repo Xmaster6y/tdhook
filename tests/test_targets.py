@@ -56,6 +56,12 @@ def test_invalid_targets_have_clear_errors(default_test_model):
         Target("linear1", "activation", 0, ())
     with pytest.raises(TypeError, match="integers"):
         Target("linear1", "activation", 0, ("unit",))
+    with pytest.raises(TypeError, match="feature_axis"):
+        Target("linear1", "activation", True, (0,))
+    with pytest.raises(TypeError, match="feature_axis"):
+        Target("linear1", "activation", 1.0, (0,))
+    with pytest.raises(TypeError, match="indices"):
+        Target("linear1", "activation", 0, (True,))
     with pytest.raises(ValueError, match="parameter targets require"):
         Target("linear1", "parameter", 0, (0,))
     with pytest.raises(ValueError, match="only valid for parameter"):

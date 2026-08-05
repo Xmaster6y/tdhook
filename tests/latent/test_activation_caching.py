@@ -12,6 +12,7 @@ from tensordict.nn import TensorDictModule
 from tdhook.latent.activation_caching import ActivationCaching, ActivationCachingModule
 from tdhook.modules import get_best_device
 from tdhook.runtime import HookProgram, HookSpec
+from tdhook.targets import Target
 
 
 class TestActivationCaching:
@@ -48,6 +49,17 @@ class TestActivationCaching:
         assert hooked_module.in_keys == ["input"]
         assert hooked_module.out_keys == ["output", ("activations", "cache")]
         assert result["activations", "cache"]["linear2"].shape == (2, 20)
+
+    def test_target_selection_is_cached_and_reported(self, default_test_model):
+        target = Target("linear2", "activation", -1, (0, 2))
+
+        with ActivationCaching(target).prepare(default_test_model) as hooked_module:
+            result = hooked_module(TensorDict({"input": torch.randn(2, 10)}, batch_size=[2]))
+
+        assert result["cache", "linear2"].shape == (2, 2)
+        assert hooked_module.hooking_context.program == HookProgram(
+            (HookSpec("linear2", "capture", "fwd", target=target),)
+        )
 
     def test_published_cache_is_not_cleared_by_a_later_execution(self, default_test_model):
         context = ActivationCaching("linear2")

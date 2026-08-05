@@ -34,9 +34,11 @@ class Target:
     def __post_init__(self) -> None:
         if self.kind not in {"activation", "gradient", "parameter"}:
             raise ValueError(f"Invalid target kind: {self.kind!r}")
+        if type(self.feature_axis) is not int:
+            raise TypeError("feature_axis must be an integer")
         if not self.indices:
             raise ValueError("indices must contain at least one selection")
-        if any(not isinstance(index, int) for index in self.indices):
+        if any(type(index) is not int for index in self.indices):
             raise TypeError("indices must be integers")
         if self.kind == "parameter" and not self.parameter:
             raise ValueError("parameter targets require a parameter name")

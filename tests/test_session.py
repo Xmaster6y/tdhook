@@ -1,7 +1,9 @@
 import gc
+from collections import UserDict
 
 import pytest
 import torch
+from tensordict import TensorDict
 from torch import nn
 
 from tdhook.session import HookProgram, HookSession, HookSpec
@@ -64,6 +66,34 @@ def test_session_selects_and_replaces_one_leaf_of_a_structured_output():
     assert torch.equal(captured.value, torch.full((2, 1), 3.0))
     assert torch.equal(output["predictions"][0], x + 1)
     assert torch.equal(output["predictions"][1][:, 1], torch.zeros(2))
+    assert output["metadata"] == "kept"
+
+
+@pytest.mark.parametrize(
+    "container_factory",
+    [
+        lambda value: UserDict({"predictions": value, "metadata": "kept"}),
+        lambda value: TensorDict({"predictions": value, "metadata": "kept"}, batch_size=[]),
+    ],
+)
+def test_session_preserves_mapping_output_types(container_factory):
+    class StructuredModule(nn.Module):
+        def forward(self, x):
+            return container_factory(x + 1)
+
+    model = StructuredModule()
+    x = torch.ones(2, 3)
+    target = Target("", "activation", -1, (1,), output_path=("predictions",))
+
+    with HookSession(model) as session:
+        captured = session.capture(target)
+        session.replace(target, 0)
+        output = model(x)
+
+    assert isinstance(output, type(container_factory(x)))
+    assert captured.value is not None
+    assert torch.equal(captured.value, torch.full((2, 1), 2.0))
+    assert torch.equal(output["predictions"][:, 1], torch.zeros(2))
     assert output["metadata"] == "kept"
 
 
