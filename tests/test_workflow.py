@@ -6,7 +6,7 @@ from torch import nn
 
 from tests.composition_conformance import assert_conformance
 from tdhook.contexts import HookingContext, HookingContextFactory
-from tdhook.execution import ExecutionSpec, GradientMode
+from tdhook.execution import AutogradLifetime, ExecutionSpec, GradientMode
 from tdhook.latent import ActivationCaching, Probing
 from tdhook.modules import HookedModule
 from tdhook.runtime import BoundHookProgram, HookProgramBuilder, HookSpec
@@ -54,6 +54,32 @@ class ReplaceOutput(HookingContextFactory):
                 module,
                 replace,
                 HookSpec("", "replace", "fwd"),
+                relative_path=module.relative_path,
+            )
+            return builder.build()
+
+
+class BackwardCapture(HookingContextFactory):
+    def __init__(self, *, fail=False):
+        super().__init__()
+        self.values = []
+        self.fail = fail
+
+    @property
+    def execution_spec(self):
+        return ExecutionSpec(gradient_mode=GradientMode.REQUIRED, autograd_lifetime=AutogradLifetime.BACKWARD)
+
+    def _hook_module(self, module: HookedModule) -> BoundHookProgram:
+        def capture(_module, _grad_input, grad_output):
+            self.values.append(grad_output[0].detach())
+            if self.fail:
+                raise RuntimeError("backward hook failed")
+
+        with HookProgramBuilder() as builder:
+            builder.register_path(
+                module,
+                capture,
+                HookSpec("", "capture", "bwd"),
                 relative_path=module.relative_path,
             )
             return builder.build()
@@ -197,12 +223,33 @@ def test_workflow_rejects_ancestor_output_collisions_before_execution(default_te
         Workflow(first, second).plan(default_test_model, data)
 
 
-def test_workflow_rejects_externally_driven_backward_capture(default_test_model):
+def test_workflow_rejects_undeclared_externally_driven_backward_capture(default_test_model):
     workflow = Workflow(ActivationCaching("linear1", directions=["bwd"]))
     data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
 
     with pytest.raises(ValueError, match="backward hooks"):
         workflow.plan(default_test_model, data)
+
+
+def test_workflow_keeps_deferred_backward_hooks_until_backward_completes(default_test_model):
+    method = BackwardCapture()
+    result = Workflow(method)(default_test_model, TensorDict({"input": torch.ones(2, 10)}, batch_size=[2]))
+
+    assert any(module._backward_hooks for module in default_test_model.modules())
+    result["output"].sum().backward()
+
+    assert method.values
+    assert all(not module._backward_hooks for module in default_test_model.modules())
+
+
+def test_workflow_cleans_deferred_backward_hooks_when_backward_fails(default_test_model):
+    method = BackwardCapture(fail=True)
+    result = Workflow(method)(default_test_model, TensorDict({"input": torch.ones(2, 10)}, batch_size=[2]))
+
+    with pytest.raises(RuntimeError, match="backward hook failed"):
+        result["output"].sum().backward()
+
+    assert all(not module._backward_hooks for module in default_test_model.modules())
 
 
 def test_probing_inspection_is_inert_and_declares_additional_keys(default_test_model):
@@ -393,6 +440,11 @@ def test_workflow_explains_each_unproven_coexecution_case(default_test_model):
         def execution_spec(self):
             return ExecutionSpec(gradient_mode=GradientMode.REQUIRED)
 
+    class DeferredGradientCapture(GradientCapture):
+        @property
+        def execution_spec(self):
+            return ExecutionSpec(gradient_mode=GradientMode.REQUIRED, autograd_lifetime=AutogradLifetime.BACKWARD)
+
     class IndirectContext(HookingContext):
         @property
         def executes_model_directly(self):
@@ -405,6 +457,7 @@ def test_workflow_explains_each_unproven_coexecution_case(default_test_model):
     cases = (
         ((CaptureOutput(), TwoPassCapture()), "exactly one model pass"),
         ((CaptureOutput(), GradientCapture()), "different autograd modes"),
+        ((GradientCapture(), DeferredGradientCapture()), "different autograd lifetimes"),
         ((CaptureOutput(), HookingContextFactory()), "did not expose"),
         ((CaptureOutput(), EmptyProgram()), "empty hook program"),
         ((CaptureOutput(), IndirectCapture()), "transforms model execution"),

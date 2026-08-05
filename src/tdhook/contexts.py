@@ -10,7 +10,7 @@ from tdhook.modules import HookedModule
 from tdhook.hooks import MultiHookHandle, merge_paths
 from tdhook._types import UnraveledKey, is_nested_key
 from tdhook.execution import ExecutionSpec
-from tdhook.runtime import HookProgram
+from tdhook.runtime import BoundHookProgram, HookProgram
 
 
 class HookingContext:
@@ -98,6 +98,15 @@ class HookingContext:
         """Return the model-free hook program installed by this context."""
 
         return self._program
+
+    def on_hook_failure(self, callback) -> None:
+        """Register cleanup to run if a bound hook raises during execution."""
+
+        if self._handle is None:
+            raise RuntimeError("Hook failure cleanup is only available inside the prepared context")
+        if not isinstance(self._handle, BoundHookProgram):
+            raise TypeError("Hook failure cleanup requires a BoundHookProgram")
+        self._handle.on_hook_failure(callback)
 
     @property
     def for_inspection(self) -> bool:
