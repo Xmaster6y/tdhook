@@ -10,7 +10,7 @@ from tdhook.execution import ExecutionSpec, GradientMode
 from tdhook.latent import ActivationCaching, Probing
 from tdhook.modules import HookedModule
 from tdhook.runtime import BoundHookProgram, HookProgramBuilder, HookSpec
-from tdhook.workflow import Workflow
+from tdhook.workflow import Workflow, WorkflowUpdate
 
 
 class CountingModel(nn.Module):
@@ -150,19 +150,37 @@ def test_method_publication_contract_applies_to_standalone_and_workflow_executio
     assert torch.equal(workflow_result["published"], torch.ones(2))
 
 
-def test_workflow_splits_overlapping_method_owned_outputs_in_declared_order(default_test_model):
+def test_workflow_rejects_overlapping_method_owned_outputs_without_explicit_update(default_test_model):
     first = ActivationCaching("linear1", cache_key=("activations", "shared"))
     second = ActivationCaching("linear2", cache_key=("activations", "shared"))
     workflow = Workflow(first, second)
     data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
 
+    with pytest.raises(ValueError, match="WorkflowUpdate"):
+        workflow.plan(default_test_model, data)
+
+
+def test_workflow_update_explicitly_allows_owned_output_replacement(default_test_model):
+    first = ActivationCaching("linear1", cache_key=("activations", "shared"))
+    second = ActivationCaching("linear2", cache_key=("activations", "shared"))
+    workflow = Workflow(first, WorkflowUpdate(second))
+    data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
+
     plan = workflow.plan(default_test_model, data)
     result = workflow(default_test_model, data)
-
     assert plan.model_passes == 2
     assert "output namespaces overlap" in plan.compatibility[0].reason
     assert "linear2" in result["activations", "shared"]
     assert "linear1" not in result["activations", "shared"]
+
+
+def test_workflow_rejects_ancestor_output_collisions_before_execution(default_test_model):
+    first = TensorDictModule(lambda value: value, in_keys=["input"], out_keys=[("results", "first")])
+    second = TensorDictModule(lambda value: value, in_keys=["input"], out_keys=["results"])
+    data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
+
+    with pytest.raises(ValueError, match="overlaps earlier workflow-owned outputs"):
+        Workflow(first, second).plan(default_test_model, data)
 
 
 def test_workflow_rejects_externally_driven_backward_capture(default_test_model):

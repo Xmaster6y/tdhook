@@ -34,7 +34,9 @@ Interactive sessions
        program = session.program
 
    ``Target`` only describes and validates the selection; it never installs a
-   hook or mutates the model itself.
+   hook or mutates the model itself. For tuple, list, or mapping outputs,
+   ``Target.output_path`` selects an output slot or nested mapping key before
+   ``feature_axis`` and ``indices`` are applied.
 
 Declared workflows
    A workflow composes methods and ordinary TensorDict modules by their
@@ -191,8 +193,10 @@ Dependency direction
 Pure targets, model paths, and execution requirements sit at the bottom of
 TDHook. The shared runtime depends on those descriptions and on PyTorch and
 TensorDict. Methods depend on the runtime. Workflow planning depends on method
-protocols rather than concrete method families. Reporting depends on immutable
-plans and provenance records.
+protocols rather than concrete method families. A ``WorkflowPlan`` is immutable
+preflight metadata; ``Workflow.run`` returns only the resulting TensorDict and
+does not claim to preserve an execution receipt or provenance association in
+v0.2.
 
 The runtime must not import concrete methods or workflow code. Methods must not
 import the workflow planner. Targets describe selections; the runtime performs

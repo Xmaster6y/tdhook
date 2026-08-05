@@ -26,7 +26,14 @@ class WorkflowMethod(Protocol):
     def prepare(self, module: nn.Module) -> HookingContext: ...
 
 
-WorkflowStep = WorkflowMethod | TensorDictModuleBase
+@dataclass(frozen=True)
+class WorkflowUpdate:
+    """Explicitly permit one step to replace an earlier workflow-owned output."""
+
+    step: WorkflowMethod | TensorDictModuleBase
+
+
+WorkflowStep = WorkflowMethod | TensorDictModuleBase | WorkflowUpdate
 
 
 class MethodBinding(Protocol):
@@ -92,6 +99,7 @@ class _BoundMethodNode:
     execution_spec: ExecutionSpec
     program: HookProgram | None
     direct_execution: bool
+    allow_output_overwrite: bool = False
 
 
 @dataclass(frozen=True)
@@ -101,6 +109,7 @@ class _OperatorNode:
     operator: TensorDictModuleBase
     in_keys: tuple[UnraveledKey, ...]
     out_keys: tuple[UnraveledKey, ...]
+    allow_output_overwrite: bool = False
 
 
 _ExecutionNode = _BoundMethodNode | _OperatorNode
@@ -128,6 +137,7 @@ def _bind_method(
     model: nn.Module,
     *,
     for_inspection: bool = False,
+    allow_output_overwrite: bool = False,
 ) -> Generator[tuple[_BoundMethodNode, MethodBinding], None, None]:
     context = method.prepare(model)
     if not isinstance(context, HookingContext):
@@ -159,6 +169,7 @@ def _bind_method(
             execution_spec=_method_spec(method),
             program=context.program,
             direct_execution=context.executes_model_directly,
+            allow_output_overwrite=allow_output_overwrite,
         )
         yield node, prepared
 
@@ -210,6 +221,7 @@ def _same_bound_facts(planned: _BoundMethodNode, rebound: _BoundMethodNode) -> b
         planned.execution_spec,
         planned.program,
         planned.direct_execution,
+        planned.allow_output_overwrite,
     ) == (
         rebound.in_keys,
         rebound.out_keys,
@@ -218,6 +230,7 @@ def _same_bound_facts(planned: _BoundMethodNode, rebound: _BoundMethodNode) -> b
         rebound.execution_spec,
         rebound.program,
         rebound.direct_execution,
+        rebound.allow_output_overwrite,
     )
 
 
@@ -256,6 +269,7 @@ def _provided_namespace_covers(provided: UnraveledKey, required: UnraveledKey) -
 def _validate_dependencies(nodes: Sequence[_ExecutionNode], data: TensorDictBase) -> None:
     available = _available_keys(data)
     provided_namespaces: set[UnraveledKey] = set()
+    owned_outputs: set[UnraveledKey] = set()
     for node in nodes:
         missing = tuple(
             key
@@ -265,8 +279,22 @@ def _validate_dependencies(nodes: Sequence[_ExecutionNode], data: TensorDictBase
         )
         if missing:
             raise ValueError(f"Workflow step {node.name!r} requires missing TensorDict keys: {missing!r}")
+        owned = (
+            node.out_keys
+            if isinstance(node, _OperatorNode)
+            else tuple(key for key in node.out_keys if key not in node.model_out_keys)
+        )
+        collisions = tuple(
+            (key, previous) for key in owned for previous in owned_outputs if _key_paths_overlap(key, previous)
+        )
+        if collisions and not node.allow_output_overwrite:
+            raise ValueError(
+                f"Workflow step {node.name!r} overlaps earlier workflow-owned outputs: {collisions!r}; "
+                "wrap an intentional replacement in WorkflowUpdate"
+            )
         available.update(node.out_keys)
         provided_namespaces.update(node.out_keys)
+        owned_outputs.update(owned)
 
 
 def _validate_runtime_dependencies(nodes: Sequence[_ExecutionNode], data: TensorDictBase) -> None:
@@ -287,7 +315,8 @@ class Workflow:
     def __init__(self, *steps: WorkflowStep):
         self.steps = tuple(steps)
         for index, step in enumerate(self.steps):
-            if not isinstance(step, TensorDictModuleBase) and not _method_step(step):
+            actual = step.step if isinstance(step, WorkflowUpdate) else step
+            if not isinstance(actual, TensorDictModuleBase) and not _method_step(actual):
                 raise TypeError(
                     f"Workflow step {index} must be a configured method or TensorDictModuleBase, "
                     f"got {type(step).__name__}"
@@ -298,18 +327,27 @@ class Workflow:
             raise TypeError(f"Workflow model must be a torch.nn.Module, got {type(model).__name__}")
         nodes: list[_ExecutionNode] = []
         for index, step in enumerate(self.steps):
-            if isinstance(step, TensorDictModuleBase):
+            allow_output_overwrite = isinstance(step, WorkflowUpdate)
+            actual = step.step if allow_output_overwrite else step
+            if isinstance(actual, TensorDictModuleBase):
                 nodes.append(
                     _OperatorNode(
                         index=index,
                         name=_step_name(index, step),
-                        operator=step,
-                        in_keys=tuple(step.in_keys),
-                        out_keys=tuple(step.out_keys),
+                        operator=actual,
+                        in_keys=tuple(actual.in_keys),
+                        out_keys=tuple(actual.out_keys),
+                        allow_output_overwrite=allow_output_overwrite,
                     )
                 )
             else:
-                with _bind_method(index, step, model, for_inspection=True) as (node, _):
+                with _bind_method(
+                    index,
+                    actual,
+                    model,
+                    for_inspection=True,
+                    allow_output_overwrite=allow_output_overwrite,
+                ) as (node, _):
                     nodes.append(node)
         return tuple(nodes)
 
@@ -403,7 +441,14 @@ class Workflow:
                 bound = []
                 for node in execution_nodes:
                     assert isinstance(node, _BoundMethodNode)
-                    rebound, prepared = stack.enter_context(_bind_method(node.index, node.method, model))
+                    rebound, prepared = stack.enter_context(
+                        _bind_method(
+                            node.index,
+                            node.method,
+                            model,
+                            allow_output_overwrite=node.allow_output_overwrite,
+                        )
+                    )
                     if not _same_bound_facts(node, rebound):
                         raise RuntimeError(f"Bound facts for workflow method {node.name!r} changed after planning")
                     bound.append(prepared)
@@ -432,4 +477,5 @@ __all__ = [
     "Workflow",
     "WorkflowMethod",
     "WorkflowPlan",
+    "WorkflowUpdate",
 ]

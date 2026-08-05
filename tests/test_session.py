@@ -46,6 +46,63 @@ def test_session_preserves_single_tensor_tuple_output():
     assert torch.equal(output[0][:, 1], torch.zeros(2))
 
 
+def test_session_selects_and_replaces_one_leaf_of_a_structured_output():
+    class StructuredModule(nn.Module):
+        def forward(self, x):
+            return {"predictions": (x + 1, x + 2), "metadata": "kept"}
+
+    model = StructuredModule()
+    x = torch.ones(2, 3)
+    target = Target("", "activation", -1, (1,), output_path=("predictions", 1))
+
+    with HookSession(model) as session:
+        captured = session.capture(target)
+        session.replace(target, 0)
+        output = model(x)
+
+    assert captured.value is not None
+    assert torch.equal(captured.value, torch.full((2, 1), 3.0))
+    assert torch.equal(output["predictions"][0], x + 1)
+    assert torch.equal(output["predictions"][1][:, 1], torch.zeros(2))
+    assert output["metadata"] == "kept"
+
+
+def test_session_selects_one_gradient_from_multiple_module_outputs():
+    class MultiOutputModule(nn.Module):
+        def forward(self, x):
+            return x * 2, x * 3
+
+    model = MultiOutputModule()
+    x = torch.ones(2, 3, requires_grad=True)
+    target = Target("", "gradient", -1, (0,), output_path=(1,))
+
+    with HookSession(model) as session:
+        captured = session.capture(target)
+        first, second = model(x)
+        (first.sum() + second.sum()).backward()
+
+    assert captured.value is not None
+    assert torch.equal(captured.value, torch.ones(2, 1))
+
+
+def test_session_structured_output_path_errors_are_specific():
+    value = {"items": [torch.ones(1)]}
+    replacement = torch.zeros(1)
+
+    assert HookSession._hook_tensor(value, ("items", 0)).shape == (1,)
+    assert HookSession._replace_hook_tensor(value["items"], (0,), replacement) == [replacement]
+    with pytest.raises(ValueError, match="out of range"):
+        HookSession._hook_tensor(value, ("items", 1))
+    with pytest.raises(ValueError, match="is missing"):
+        HookSession._hook_tensor(value, ("missing",))
+    with pytest.raises(ValueError, match="does not match"):
+        HookSession._hook_tensor(value, (0,))
+    with pytest.raises(ValueError, match="does not match"):
+        HookSession._replace_hook_tensor(value, (0,), replacement)
+    with pytest.raises(ValueError, match="tensor leaf"):
+        HookSession._hook_tensor({"metadata": "text"}, ("metadata",))
+
+
 def test_session_removes_activation_hooks_after_failure(default_test_model):
     target = Target("linear1", "activation", -1, (0,))
     x = torch.randn(2, 10)
@@ -162,5 +219,5 @@ def test_session_validates_model_type_and_exit_state():
     with pytest.raises(RuntimeError, match="not active"):
         session.__exit__(None, None, None)
 
-    with pytest.raises(ValueError, match="exactly one tensor"):
+    with pytest.raises(ValueError, match="output_path"):
         HookSession._hook_tensor((torch.ones(1), torch.ones(1)))

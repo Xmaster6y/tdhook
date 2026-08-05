@@ -45,6 +45,11 @@ workflow step exposes native ``in_keys`` and ``out_keys``. TDHook does not add
 an artifact registry, adapter schema, stage contract, or parallel result
 container.
 
+Two steps cannot own the same output key, or ancestor and descendant output
+keys, by accident. Planning rejects that overlap before execution. Wrap a step
+in ``WorkflowUpdate(step)`` only when replacing the earlier value is an
+intentional part of the declared computation.
+
 Nested keys, batch dimensions, devices, TensorDict parameter containers, and
 persistence retain their TensorDict meaning. A zero-pass analysis or reshape
 is an ordinary TensorDict operator. Values whose condition axes do not match

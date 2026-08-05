@@ -12,6 +12,7 @@ from tdhook.paths import resolve_submodule_path
 
 
 TargetKind = Literal["activation", "gradient", "parameter"]
+OutputPathComponent = int | str
 
 
 @dataclass(frozen=True)
@@ -28,6 +29,7 @@ class Target:
     feature_axis: int
     indices: tuple[int, ...]
     parameter: str | None = None
+    output_path: tuple[OutputPathComponent, ...] = ()
 
     def __post_init__(self) -> None:
         if self.kind not in {"activation", "gradient", "parameter"}:
@@ -40,11 +42,16 @@ class Target:
             raise ValueError("parameter targets require a parameter name")
         if self.kind != "parameter" and self.parameter is not None:
             raise ValueError("parameter is only valid for parameter targets")
+        if any(not isinstance(component, (int, str)) or isinstance(component, bool) for component in self.output_path):
+            raise TypeError("output_path components must be integer slots or string mapping keys")
+        if self.kind == "parameter" and self.output_path:
+            raise ValueError("output_path is only valid for activation and gradient targets")
 
     def to_dict(self) -> dict[str, object]:
         """Return a JSON-compatible representation of this target."""
         data = asdict(self)
         data["indices"] = list(self.indices)
+        data["output_path"] = list(self.output_path)
         return data
 
     @classmethod
@@ -55,6 +62,7 @@ class Target:
             values["indices"] = tuple(values["indices"])  # type: ignore[arg-type]
         except KeyError as exc:
             raise ValueError("Target data is missing indices") from exc
+        values["output_path"] = tuple(values.get("output_path", ()))  # type: ignore[arg-type]
         return cls(**values)  # type: ignore[arg-type]
 
     def to_json(self) -> str:
@@ -106,4 +114,4 @@ class Target:
         tensor[self._selection(tensor)] = value
 
 
-__all__ = ["Target", "TargetKind"]
+__all__ = ["OutputPathComponent", "Target", "TargetKind"]

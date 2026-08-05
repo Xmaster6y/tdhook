@@ -11,7 +11,7 @@ from torch import Tensor, nn
 
 from tdhook.hooks import HookDirection
 from tdhook.runtime import HookProgram, HookProgramBuilder, HookSpec
-from tdhook.targets import Target
+from tdhook.targets import OutputPathComponent, Target
 
 
 HookOperation = Literal["capture", "replace"]
@@ -77,11 +77,11 @@ class HookSession:
             builder.record(spec)
         else:
 
-            def forward_hook(_module: nn.Module, _args: tuple[object, ...], value: Tensor | tuple[Tensor, ...]):
-                captured.value = target._select(self._hook_tensor(value)).detach().clone()
+            def forward_hook(_module: nn.Module, _args: tuple[object, ...], value: object):
+                captured.value = target._select(self._hook_tensor(value, target.output_path)).detach().clone()
 
-            def gradient_hook(_module: nn.Module, values: tuple[Tensor, ...]):
-                captured.value = target._select(self._hook_tensor(values)).detach().clone()
+            def gradient_hook(_module: nn.Module, values: tuple[Tensor | None, ...]):
+                captured.value = target._select(self._hook_tensor(values, target.output_path)).detach().clone()
 
             builder.register(
                 module,
@@ -111,15 +111,17 @@ class HookSession:
             builder.record(spec, lambda: self._restore_live_parameter(target, original))
         else:
 
-            def forward_hook(_module: nn.Module, _args: tuple[object, ...], output: Tensor | tuple[Tensor, ...]):
-                replacement = self._hook_tensor(output).clone()
+            def forward_hook(_module: nn.Module, _args: tuple[object, ...], output: object):
+                path = self._resolved_output_path(output, target.output_path)
+                replacement = self._hook_tensor(output, path).clone()
                 target._assign(replacement, value)
-                return (replacement,) if isinstance(output, tuple) else replacement
+                return self._replace_hook_tensor(output, path, replacement)
 
-            def gradient_hook(_module: nn.Module, values: tuple[Tensor, ...]):
-                replacement = self._hook_tensor(values).clone()
+            def gradient_hook(_module: nn.Module, values: tuple[Tensor | None, ...]):
+                path = self._resolved_output_path(values, target.output_path)
+                replacement = self._hook_tensor(values, path).clone()
                 target._assign(replacement, value)
-                return (replacement,) + values[1:]
+                return self._replace_hook_tensor(values, path, replacement)
 
             builder.register(
                 module,
@@ -157,12 +159,57 @@ class HookSession:
         self._restore_parameter(target, parameter, original)
 
     @staticmethod
-    def _hook_tensor(value: Tensor | tuple[Tensor, ...]) -> Tensor:
-        if isinstance(value, Tensor):
-            return value
-        if len(value) != 1 or not isinstance(value[0], Tensor):
-            raise ValueError("HookSession targets require a hook value containing exactly one tensor")
-        return value[0]
+    def _resolved_output_path(value: object, path: tuple[OutputPathComponent, ...]) -> tuple[OutputPathComponent, ...]:
+        if path or isinstance(value, Tensor):
+            return path
+        if isinstance(value, (tuple, list)) and len(value) == 1:
+            return (0,)
+        raise ValueError("Structured hook values require Target.output_path to select a tensor leaf")
+
+    @classmethod
+    def _hook_tensor(cls, value: object, path: tuple[OutputPathComponent, ...] = ()) -> Tensor:
+        selected = value
+        for component in cls._resolved_output_path(value, path):
+            if isinstance(component, int) and isinstance(selected, (tuple, list)):
+                try:
+                    selected = selected[component]
+                except IndexError as exc:
+                    raise ValueError(f"output_path slot {component} is out of range") from exc
+            elif isinstance(component, str) and isinstance(selected, dict):
+                try:
+                    selected = selected[component]
+                except KeyError as exc:
+                    raise ValueError(f"output_path key {component!r} is missing") from exc
+            else:
+                raise ValueError(f"output_path component {component!r} does not match the hook value structure")
+        if not isinstance(selected, Tensor):
+            raise ValueError("Target.output_path must select a tensor leaf")
+        return selected
+
+    @classmethod
+    def _replace_hook_tensor(
+        cls,
+        value: object,
+        path: tuple[OutputPathComponent, ...],
+        replacement: Tensor,
+    ) -> object:
+        resolved = cls._resolved_output_path(value, path)
+        if not resolved:
+            return replacement
+        component, *remainder = resolved
+        if isinstance(component, int) and isinstance(value, tuple):
+            items = list(value)
+            items[component] = cls._replace_hook_tensor(items[component], tuple(remainder), replacement)
+            return tuple(items)
+        if isinstance(component, int) and isinstance(value, list):
+            items = list(value)
+            items[component] = cls._replace_hook_tensor(items[component], tuple(remainder), replacement)
+            return items
+        if isinstance(component, str) and isinstance(value, dict):
+            items = dict(value)
+            items[component] = cls._replace_hook_tensor(items[component], tuple(remainder), replacement)
+            return items
+        raise ValueError(f"output_path component {component!r} does not match the hook value structure")
 
 
 __all__ = ["CapturedTarget", "HookOperation", "HookProgram", "HookSession", "HookSpec"]
