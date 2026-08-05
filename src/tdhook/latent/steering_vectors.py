@@ -4,10 +4,10 @@ from tensordict import TensorDict
 from tensordict.nn import TensorDictModuleBase, TensorDictSequential
 
 from tdhook.contexts import HookingContextFactory
-from tdhook.hooks import MultiHookHandle
+from tdhook.hooks import HookFactory, MutableWeakRef
 from tdhook.modules import HookedModule, IntermediateKeysCleaner, ModuleCallWithCache, FunctionModule
+from tdhook.runtime import BoundHookProgram, HookProgramBuilder, HookSpec
 from tdhook._types import UnraveledKey
-from tdhook.hooks import MutableWeakRef
 
 
 class SteeringVectors(HookingContextFactory):
@@ -25,23 +25,20 @@ class SteeringVectors(HookingContextFactory):
         self._modules_to_steer = modules_to_steer
         self._steer_fn = steer_fn
 
-    def _hook_module(self, module: HookedModule) -> MultiHookHandle:
-        handles = []
-        for module_key in self._modules_to_steer:
+    def _hook_module(self, module: HookedModule) -> BoundHookProgram:
+        with HookProgramBuilder() as program:
+            for module_key in self._modules_to_steer:
 
-            def callback(**kwargs):
-                nonlocal module_key, self
-                output = kwargs["output"]
-                return self._steer_fn(module_key=module_key, output=output)
+                def callback(*, _module_key=module_key, **kwargs):
+                    return self._steer_fn(module_key=_module_key, output=kwargs["output"])
 
-            handle = module.set(
-                module_key=module_key,
-                value=None,
-                callback=callback,
-                direction="fwd",
-            )
-            handles.append(handle)
-        return MultiHookHandle(handles)
+                program.register_path(
+                    module,
+                    HookFactory.make_setting_hook(None, callback=callback),
+                    HookSpec(module_key, "replace", "fwd"),
+                    relative_path=module.relative_path,
+                )
+            return program.build()
 
 
 class ActivationAddition(HookingContextFactory):
@@ -109,19 +106,21 @@ class ActivationAddition(HookingContextFactory):
             )
         return TensorDictSequential(*modules)
 
-    def _hook_module(self, module: HookedModule) -> MultiHookHandle:
+    def _hook_module(self, module: HookedModule) -> BoundHookProgram:
         cache_ref = module.td_module[0].cache_ref
-        handles = []
-        for module_key in self._modules_to_steer:
-            handle, _ = module.get(
-                cache=cache_ref,
-                cache_key=module_key,
-                module_key=module_key,
-                callback=self._cache_callback,
-            )
-            handles.append(handle)
-
-        return MultiHookHandle(handles)
+        with HookProgramBuilder() as program:
+            for module_key in self._modules_to_steer:
+                program.register_path(
+                    module,
+                    HookFactory.make_caching_hook(
+                        module_key,
+                        cache_ref,
+                        callback=self._cache_callback,
+                    ),
+                    HookSpec(module_key, "capture", "fwd"),
+                    relative_path=module.relative_path,
+                )
+            return program.build()
 
     def _compute_steering_vectors(self, td: TensorDict) -> TensorDict:
         positive_outputs = td["_positive_cache"]

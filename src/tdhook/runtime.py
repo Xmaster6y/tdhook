@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -9,6 +10,7 @@ from typing import Any
 from torch import nn
 
 from tdhook.hooks import HookDirection, register_hook_to_module
+from tdhook.paths import resolve_submodule_path
 from tdhook.targets import Target
 
 
@@ -91,6 +93,28 @@ class HookProgramBuilder:
         handle = register_hook_to_module(module, hook, spec.direction, spec.prepend)
         self._cleanups.append(handle.remove)
         self._specs.append(spec)
+
+    def register_path(
+        self,
+        root: nn.Module,
+        hook: Callable,
+        spec: HookSpec,
+        *,
+        relative_path: str = "",
+    ) -> None:
+        """Resolve ``spec.module_path`` below ``root`` and install its hook."""
+
+        self._ensure_open()
+        relative_root = resolve_submodule_path(root, relative_path)
+        module = resolve_submodule_path(relative_root, spec.module_path)
+        if not isinstance(module, nn.Module):
+            raise TypeError(f"hook path must resolve to a torch.nn.Module, got {type(module).__name__}")
+        if isinstance(module, nn.ModuleList):
+            warnings.warn(
+                f"You are hooking a ModuleList ({spec.module_path}), which will never be executed.",
+                stacklevel=2,
+            )
+        self.register(module, hook, spec)
 
     def record(self, spec: HookSpec, cleanup: Callable[[], Any] | None = None) -> None:
         """Record a non-hook operation, optionally with lifecycle cleanup."""

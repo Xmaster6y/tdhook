@@ -118,3 +118,46 @@ def test_program_builder_context_rolls_back_when_registration_fails():
             raise RuntimeError("boom")
 
     assert len(module._forward_hooks) == 0
+
+
+def test_program_builder_registers_exact_paths_and_rolls_back_resolution_failure():
+    root = nn.Module()
+    root.layers = nn.Sequential(nn.Identity())
+
+    with pytest.raises(ValueError, match="missing"):
+        with HookProgramBuilder() as builder:
+            builder.register_path(
+                root,
+                lambda _module, _args, output: output,
+                HookSpec("[0]", "capture", "fwd"),
+                relative_path="layers",
+            )
+            builder.register_path(
+                root,
+                lambda _module, _args, output: output,
+                HookSpec("missing", "capture", "fwd"),
+            )
+
+    assert len(root.layers[0]._forward_hooks) == 0
+
+
+def test_program_builder_rejects_nonmodules_and_warns_for_module_lists():
+    root = nn.Module()
+    root.value = object()
+    root.layers = nn.ModuleList([nn.Identity()])
+    builder = HookProgramBuilder()
+
+    with pytest.raises(TypeError, match="torch.nn.Module"):
+        builder.register_path(
+            root,
+            lambda _module, _args, output: output,
+            HookSpec("value", "capture", "fwd"),
+        )
+    with pytest.warns(UserWarning, match="ModuleList"):
+        builder.register_path(
+            root,
+            lambda _module, _args, output: output,
+            HookSpec("layers", "capture", "fwd"),
+        )
+
+    builder.remove()

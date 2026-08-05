@@ -8,6 +8,7 @@ import torch
 from tensordict import TensorDict
 
 from tdhook.latent.activation_patching import ActivationPatching
+from tdhook.runtime import HookProgram, HookSpec
 
 
 class TestActivationPatching:
@@ -23,7 +24,10 @@ class TestActivationPatching:
     def test_simple_activation_patching(self, default_test_model, modules_to_patch):
         """Test creating a ActivationPatching."""
 
-        def patch_fn(output, output_to_patch, **_):
+        patched_modules = []
+
+        def patch_fn(module_key, output, output_to_patch):
+            patched_modules.append(module_key)
             output[:, 0] = output_to_patch[:, 0]
             return output
 
@@ -34,3 +38,16 @@ class TestActivationPatching:
             data = hooked_module(data)
             assert data.get(("patched", "output")).shape == (2, 5)
             assert not torch.allclose(data.get("output"), data.get(("patched", "output")))
+
+        assert patched_modules == list(modules_to_patch)
+        assert hooked_module.hooking_context.program == HookProgram(
+            tuple(
+                spec
+                for module_key in modules_to_patch
+                for spec in (
+                    HookSpec(module_key, "capture", "fwd"),
+                    HookSpec(module_key, "replace", "fwd", prepend=True),
+                )
+            )
+        )
+        assert all(not submodule._forward_hooks for submodule in default_test_model.modules())

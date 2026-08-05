@@ -3,8 +3,9 @@ from typing import Callable, Optional, List
 from tensordict.nn import TensorDictModuleBase, TensorDictSequential
 
 from tdhook.contexts import HookingContextFactory
-from tdhook.hooks import MultiHookHandle
+from tdhook.hooks import CacheProxy, HookFactory
 from tdhook.modules import HookedModule, ModuleCallWithCache, IntermediateKeysCleaner, ModuleCall
+from tdhook.runtime import BoundHookProgram, HookProgramBuilder, HookSpec
 from tdhook._types import UnraveledKey
 
 
@@ -57,36 +58,40 @@ class ActivationPatching(HookingContextFactory):
             modules.append(IntermediateKeysCleaner(intermediate_keys=["_cache"]))
         return TensorDictSequential(*modules)
 
-    def _hook_module(self, module: HookedModule) -> MultiHookHandle:
+    def _hook_module(self, module: HookedModule) -> BoundHookProgram:
         cache_ref = module.td_module[0].cache_ref
-        handles = []
-        for module_key in self._modules_to_patch:
-            handle, proxy = module.get(
-                cache=cache_ref,
-                cache_key=module_key,
-                module_key=module_key,
-                callback=self._cache_callback,
-            )
-            handles.append(handle)
+        with HookProgramBuilder() as program:
+            for module_key in self._modules_to_patch:
+                proxy = CacheProxy(module_key, cache_ref)
+                program.register_path(
+                    module,
+                    HookFactory.make_caching_hook(
+                        module_key,
+                        cache_ref,
+                        callback=self._cache_callback,
+                    ),
+                    HookSpec(module_key, "capture", "fwd"),
+                    relative_path=module.relative_path,
+                )
 
-            def callback(**kwargs):
-                nonlocal module_key, self
-                value = kwargs["value"]
-                output = kwargs["output"]
-                if value is None:  # clean run
-                    return output
-                elif self._patch_fn is not None:
-                    patched_output = self._patch_fn(module_key=module_key, output=output, output_to_patch=value)
-                    return value if patched_output is None else patched_output
-                else:
+                def callback(*, _module_key=module_key, **kwargs):
+                    value = kwargs["value"]
+                    output = kwargs["output"]
+                    if value is None:  # clean run
+                        return output
+                    if self._patch_fn is not None:
+                        patched_output = self._patch_fn(
+                            module_key=_module_key,
+                            output=output,
+                            output_to_patch=value,
+                        )
+                        return value if patched_output is None else patched_output
                     return value
 
-            handle = module.set(
-                module_key=module_key,
-                value=proxy,
-                callback=callback,
-                direction="fwd",
-                prepend=True,
-            )
-            handles.append(handle)
-        return MultiHookHandle(handles)
+                program.register_path(
+                    module,
+                    HookFactory.make_setting_hook(proxy, callback=callback),
+                    HookSpec(module_key, "replace", "fwd", prepend=True),
+                    relative_path=module.relative_path,
+                )
+            return program.build()

@@ -87,6 +87,11 @@ stored in the reportable program.
 Structural equality between programs is therefore not a coexecution claim;
 compatibility remains unknown until a binding supplies an explicit proof.
 
+Activation capture, patching, direct steering, and steering-vector extraction
+all bind through this runtime. Their programs distinguish observation
+(``capture``) from intervention (``replace``), including hook direction and
+prepend ordering.
+
 Methods migrate onto this runtime incrementally. Until a method exposes a
 ``HookProgram``, compatibility with another method is unknown and the planner
 must keep their executions separate.
