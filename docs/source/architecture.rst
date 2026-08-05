@@ -153,7 +153,11 @@ compatibility remains unknown until a binding supplies an explicit proof.
 Activation capture, patching, direct steering, and steering-vector extraction
 all bind through this runtime. Their programs distinguish observation
 (``capture``) from intervention (``replace``), including hook direction and
-prepend ordering.
+prepend ordering. These prepared activation methods accept either string
+module paths for whole-output operations or serializable ``Target`` values for
+unit/channel selections. A ``Target`` path uses the same model-relative path
+grammar in standalone methods and ``HookSession``; it is not interpreted as a
+regular expression.
 
 Gradient attribution uses the same operations for activation and backward-hook
 state. LRP rule installation is also a bound program operation

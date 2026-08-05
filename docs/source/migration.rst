@@ -61,6 +61,19 @@ Use ``cache_key=None`` when execution should remain context-only.  The cache
 key becomes part of the prepared module's native ``out_keys`` and therefore
 must not collide with a model output.
 
+String ``ActivationCaching`` selectors retain their v0.1 regular-expression
+matching behavior. Pass a ``Target`` when one exact model-relative module path
+and a unit or channel selection should be captured and reported in the bound
+``HookProgram``::
+
+   from tdhook.targets import Target
+
+   target = Target("encoder.layers[-1]", "activation", -1, (3,))
+   capture = ActivationCaching(target)
+
+Targeted prepared caching is forward-only. Use ``HookSession`` for targeted
+gradient capture or other caller-driven backward-hook lifecycles.
+
 Probing state and results
 -------------------------
 

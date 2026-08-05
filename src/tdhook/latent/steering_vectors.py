@@ -6,35 +6,23 @@ from tensordict.nn import TensorDictModuleBase, TensorDictSequential
 from tdhook.contexts import HookingContextFactory
 from tdhook.execution import ExecutionSpec
 from tdhook.hooks import HookFactory, MutableWeakRef
+from tdhook.latent._targets import activation_target
 from tdhook.modules import HookedModule, IntermediateKeysCleaner, ModuleCallWithCache, FunctionModule
 from tdhook.runtime import BoundHookProgram, HookProgramBuilder, HookSpec
-from tdhook.session import HookSession
 from tdhook.targets import Target
 from tdhook._types import UnraveledKey
-
-
-def _activation_target(value: str | Target) -> tuple[str, Target | None]:
-    if isinstance(value, str):
-        return value, None
-    if not isinstance(value, Target):
-        raise TypeError("activation target entries must be module paths or Targets")
-    if value.kind != "activation":
-        raise ValueError("prepared activation methods require activation Targets")
-    return value.module_path, value
 
 
 def _selected_output(value: object, target: Target | None):
     if target is None:
         return value
-    return target._select(HookSession._hook_tensor(value, target.output_path))
+    return target.select_output(value)
 
 
 def _replace_selected_output(value: object, replacement: object, target: Target | None):
     if target is None:
         return replacement
-    selected = HookSession._hook_tensor(value, target.output_path).clone()
-    target._assign(selected, replacement)
-    return HookSession._replace_hook_tensor(value, target.output_path, selected)
+    return target.replace_output(value, replacement)
 
 
 class SteeringVectors(HookingContextFactory):
@@ -49,7 +37,7 @@ class SteeringVectors(HookingContextFactory):
     ):
         super().__init__()
 
-        self._targets_to_steer = [_activation_target(value) for value in modules_to_steer]
+        self._targets_to_steer = [activation_target(value, argument="modules_to_steer") for value in modules_to_steer]
         self._modules_to_steer = [path for path, _target in self._targets_to_steer]
         self._steer_fn = steer_fn
 
@@ -83,7 +71,7 @@ class ActivationAddition(HookingContextFactory):
     ):
         super().__init__()
 
-        self._targets_to_steer = [_activation_target(value) for value in modules_to_steer]
+        self._targets_to_steer = [activation_target(value, argument="modules_to_steer") for value in modules_to_steer]
         self._modules_to_steer = [path for path, _target in self._targets_to_steer]
         self._positive_key = positive_key
         self._negative_key = negative_key
@@ -104,7 +92,7 @@ class ActivationAddition(HookingContextFactory):
         out_keys: List[UnraveledKey],
         extra_relative_path: str,
     ) -> TensorDictModuleBase:
-        stored_keys = [f"{m}_output" for m in self._modules_to_steer]
+        stored_keys = list(self._modules_to_steer)
         positive_keys = [(self._positive_key, key) for key in stored_keys]
         negative_keys = [(self._negative_key, key) for key in stored_keys]
         steer_keys = [(self._steer_key, key) for key in stored_keys]

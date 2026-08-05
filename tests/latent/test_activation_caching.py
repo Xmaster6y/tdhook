@@ -61,6 +61,37 @@ class TestActivationCaching:
             (HookSpec("linear2", "capture", "fwd", target=target),)
         )
 
+    def test_target_uses_the_shared_module_path_grammar(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layers = torch.nn.ModuleList([torch.nn.Linear(3, 3), torch.nn.ReLU()])
+
+            def forward(self, value):
+                for layer in self.layers:
+                    value = layer(value)
+                return value
+
+        target = Target("layers[-1]", "activation", -1, (0,))
+        with ActivationCaching(target).prepare(Model()) as hooked_module:
+            result = hooked_module(TensorDict({"input": torch.randn(2, 3)}, batch_size=[2]))
+
+        assert result["cache", "layers[-1]"].shape == (2, 1)
+        assert hooked_module.hooking_context.program == HookProgram(
+            (HookSpec("layers[-1]", "capture", "fwd", target=target),)
+        )
+
+    def test_target_caching_rejects_ambiguous_direction_and_path_modes(self):
+        activation = Target("linear", "activation", -1, (0,))
+        gradient = Target("linear", "gradient", -1, (0,))
+
+        with pytest.raises(ValueError, match="activation Target"):
+            ActivationCaching(gradient)
+        with pytest.raises(ValueError, match="relative to the caller-owned model"):
+            ActivationCaching(activation, relative=False)
+        with pytest.raises(ValueError, match="forward direction"):
+            ActivationCaching(activation, directions=["bwd"])
+
     def test_published_cache_is_not_cleared_by_a_later_execution(self, default_test_model):
         context = ActivationCaching("linear2")
         first = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])

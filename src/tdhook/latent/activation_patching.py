@@ -5,35 +5,23 @@ from tensordict.nn import TensorDictModuleBase, TensorDictSequential
 from tdhook.contexts import HookingContextFactory
 from tdhook.execution import ExecutionSpec
 from tdhook.hooks import CacheProxy, HookFactory
+from tdhook.latent._targets import activation_target
 from tdhook.modules import HookedModule, ModuleCallWithCache, IntermediateKeysCleaner, ModuleCall
 from tdhook.runtime import BoundHookProgram, HookProgramBuilder, HookSpec
-from tdhook.session import HookSession
 from tdhook.targets import Target
 from tdhook._types import UnraveledKey
-
-
-def _activation_target(value: str | Target) -> tuple[str, Target | None]:
-    if isinstance(value, str):
-        return value, None
-    if not isinstance(value, Target):
-        raise TypeError("modules_to_patch entries must be module paths or Targets")
-    if value.kind != "activation":
-        raise ValueError("prepared activation patching requires activation Targets")
-    return value.module_path, value
 
 
 def _selected_output(value: object, target: Target | None):
     if target is None:
         return value
-    return target._select(HookSession._hook_tensor(value, target.output_path))
+    return target.select_output(value)
 
 
 def _replace_selected_output(value: object, replacement: object, target: Target | None):
     if target is None:
         return replacement
-    selected = HookSession._hook_tensor(value, target.output_path).clone()
-    target._assign(selected, replacement)
-    return HookSession._replace_hook_tensor(value, target.output_path, selected)
+    return target.replace_output(value, replacement)
 
 
 class ActivationPatching(HookingContextFactory):
@@ -51,7 +39,7 @@ class ActivationPatching(HookingContextFactory):
     ):
         super().__init__()
 
-        self._targets_to_patch = [_activation_target(value) for value in modules_to_patch]
+        self._targets_to_patch = [activation_target(value, argument="modules_to_patch") for value in modules_to_patch]
         self._modules_to_patch = [path for path, _target in self._targets_to_patch]
         self._patch_key = patch_key
         self._clean_intermediate_keys = clean_intermediate_keys
@@ -71,7 +59,7 @@ class ActivationPatching(HookingContextFactory):
         out_keys: List[UnraveledKey],
         extra_relative_path: str,
     ) -> TensorDictModuleBase:
-        stored_keys = [f"{m}_output" for m in self._modules_to_patch]
+        stored_keys = list(self._modules_to_patch)
 
         modules = [
             ModuleCallWithCache(

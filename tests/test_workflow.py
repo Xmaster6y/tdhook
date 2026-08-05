@@ -10,6 +10,7 @@ from tdhook.execution import ExecutionSpec, GradientMode
 from tdhook.latent import ActivationCaching, Probing
 from tdhook.modules import HookedModule
 from tdhook.runtime import BoundHookProgram, HookProgramBuilder, HookSpec
+from tdhook.targets import Target
 from tdhook.workflow import Workflow, WorkflowUpdate
 
 
@@ -136,6 +137,19 @@ def test_workflow_coexecutes_real_activation_methods_and_publishes_each_cache(de
     )
     assert result["activations", "first"]["model.linear1"].shape == (2, 20)
     assert result["activations", "second"]["model.linear2"].shape == (2, 20)
+
+
+def test_workflow_plans_and_executes_a_targeted_activation_capture(default_test_model):
+    target = Target("linear2", "activation", -1, (0, 2))
+    workflow = Workflow(ActivationCaching(target, cache_key=("activations", "selected")))
+    data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
+
+    plan = workflow.plan(default_test_model, data)
+    result = workflow(default_test_model, data)
+
+    assert plan.model_passes == 1
+    assert plan.executions[0].out_keys == ("output", ("activations", "selected"))
+    assert result["activations", "selected", "linear2"].shape == (2, 2)
 
 
 def test_method_publication_contract_applies_to_standalone_and_workflow_execution(default_test_model):

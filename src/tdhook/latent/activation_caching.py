@@ -1,5 +1,4 @@
 from typing import Callable, Optional, List
-import re
 
 from tensordict import TensorDict, TensorDictBase
 
@@ -7,7 +6,6 @@ from tdhook.modules import HookedModule
 from tdhook.contexts import HookingContextFactory, HookingContextWithCache
 from tdhook.hooks import MultiHookManager, HookFactory, HookDirection
 from tdhook.runtime import BoundHookProgram, HookProgramBuilder, HookSpec
-from tdhook.session import HookSession
 from tdhook.targets import Target
 from tdhook._types import UnraveledKey, is_nested_key
 
@@ -65,8 +63,10 @@ class ActivationCaching(HookingContextFactory):
         if isinstance(key_pattern, Target):
             if key_pattern.kind != "activation":
                 raise ValueError("prepared activation caching requires an activation Target")
+            if relative is not True:
+                raise ValueError("Target module paths are always relative to the caller-owned model")
             self._target = key_pattern
-            resolved_pattern = rf"{re.escape(key_pattern.module_path)}$"
+            resolved_pattern = None
         elif isinstance(key_pattern, str):
             self._target = None
             resolved_pattern = key_pattern
@@ -83,6 +83,8 @@ class ActivationCaching(HookingContextFactory):
         self._hook_manager = MultiHookManager(resolved_pattern)
         self._callback = callback
         self._directions = directions or ["fwd"]
+        if self._target is not None and self._directions != ["fwd"]:
+            raise ValueError("Target activation caching currently supports only the forward direction")
         self._use_nested_keys = use_nested_keys or len(self._directions) > 1
 
     @property
@@ -112,7 +114,7 @@ class ActivationCaching(HookingContextFactory):
                 value = kwargs["output"]
                 if self._callback is not None:
                     value = self._callback(**kwargs)
-                return self._target._select(HookSession._hook_tensor(value, self._target.output_path))
+                return self._target.select_output(value)
 
             return HookFactory.make_caching_hook(
                 key,
@@ -122,6 +124,14 @@ class ActivationCaching(HookingContextFactory):
             )
 
         with HookProgramBuilder() as program:
+            if self._target is not None:
+                program.register_path(
+                    module,
+                    hook_factory(self._target.module_path, "fwd"),
+                    HookSpec(self._target.module_path, "capture", "fwd", target=self._target),
+                    relative_path=module.relative_path,
+                )
+                return program.build()
             for direction in self._directions:
                 for name, submodule in self._hook_manager.iter_modules(
                     module,

@@ -72,3 +72,33 @@ class TestActivationPatching:
         )
         assert result["output"].shape == result["patched", "output"].shape
         assert context.execution_spec.model_passes == 2
+
+    def test_target_patching_changes_only_selected_units(self):
+        model = torch.nn.Linear(3, 3, bias=False)
+        with torch.no_grad():
+            model.weight.copy_(torch.eye(3))
+        target = Target("", "activation", -1, (0,))
+        data = TensorDict(
+            {
+                "input": torch.tensor([[1.0, 2.0, 3.0]]),
+                ("patched", "input"): torch.tensor([[10.0, 20.0, 30.0]]),
+            },
+            batch_size=[1],
+        )
+
+        with ActivationPatching([target]).prepare(model) as prepared:
+            result = prepared(data)
+
+        torch.testing.assert_close(result["output"], torch.tensor([[1.0, 2.0, 3.0]]))
+        torch.testing.assert_close(result["patched", "output"], torch.tensor([[1.0, 20.0, 30.0]]))
+
+    @pytest.mark.parametrize(
+        "value,exception",
+        [
+            (object(), TypeError),
+            (Target("", "gradient", -1, (0,)), ValueError),
+        ],
+    )
+    def test_prepared_activation_targets_are_validated(self, value, exception):
+        with pytest.raises(exception, match="activation|module paths"):
+            ActivationPatching([value])
