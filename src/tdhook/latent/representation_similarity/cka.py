@@ -1,8 +1,9 @@
 from textwrap import indent
 
 import torch
-from tensordict import TensorDict
+from tensordict import TensorDictBase
 from tensordict.nn import TensorDictModuleBase
+from tensordict.utils import NestedKey
 
 
 class CkaEstimator(TensorDictModuleBase):
@@ -16,9 +17,9 @@ class CkaEstimator(TensorDictModuleBase):
 
     def __init__(
         self,
-        in_key_a: str = "data_a",
-        in_key_b: str = "data_b",
-        out_key: str = "cka",
+        in_key_a: NestedKey = "data_a",
+        in_key_b: NestedKey = "data_b",
+        out_key: NestedKey = "cka",
         kernel: str = "linear",
         eps: float = 1e-12,
     ):
@@ -33,7 +34,7 @@ class CkaEstimator(TensorDictModuleBase):
         self.in_keys = [in_key_a, in_key_b]
         self.out_keys = [out_key]
 
-    def forward(self, td: TensorDict) -> TensorDict:
+    def forward(self, td: TensorDictBase) -> TensorDictBase:
         x = td[self.in_key_a]
         y = td[self.in_key_b]
         _validate_inputs(x, y)

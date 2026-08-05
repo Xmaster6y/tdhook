@@ -13,5 +13,3 @@ def test_star_import_exposes_the_documented_core_modules() -> None:
     exec("from tdhook import *", namespace)
 
     assert namespace["modules"] is tdhook.modules
-    assert namespace["pipeline"] is tdhook.pipeline
-    assert namespace["stages"] is tdhook.stages

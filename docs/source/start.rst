@@ -1,15 +1,13 @@
 Getting Started
 ===============
 
-**tdhook** is a package for explaining ``torch`` deep neural networks based on ``tensordict`` and ``torch`` hooks.
-It is designed to be easy to use and to work with the most common interpretability methods.
+**tdhook** applies interpretability methods to ``torch`` models with hooks and
+``TensorDict``.
 
 .. _installation:
 
 Installation
 ------------
-
-To get started with ``tdhook``, install it with ``pip``.
 
 .. code-block:: console
 
@@ -19,7 +17,7 @@ To get started with ``tdhook``, install it with ``pip``.
 Basic Example
 -------------
 
-Most methods should work with minimal configuration. Here's a basic example of running Integrated Gradients on a VGG16 model:
+Run Integrated Gradients on a VGG16 model:
 
 .. code-block:: python
 
@@ -40,17 +38,11 @@ Most methods should work with minimal configuration. Here's a basic example of r
         }).unsqueeze(0)
         td = hooked_model(td)  # Access attribution with td.get(("attr", "input"))
 
-For a small, fully offline declared-workflow example, start with
-:doc:`declared-pipelines`.  It shows preflight planning, exact model-pass
-budgets, named TensorDict artifacts, provenance, and conservative stage
-splits.  For individual methods, see the :doc:`methods` page.
+Start with the offline :doc:`notebooks/tutorials/declared-workflows` notebook.
+For individual methods, see :doc:`methods`.
 
 Composition terminology
 -----------------------
 
-TDHook's goal is to make every public method available to a declared
-**multi-stage pipeline**, coalescing compatible hooks into the fewest safe model
-executions.  The contract distinguishes a **composed model** (a model with
-multiple inputs, outputs, or submodules), **same-run hook composition**, and
-pipeline stages exchanging named TensorDict artifacts.  See the
-:doc:`composition` contract for the planner target and capability matrix.
+Use a declared **workflow** to run several methods or TensorDict operators.
+See :doc:`composition` for execution rules and tested combinations.

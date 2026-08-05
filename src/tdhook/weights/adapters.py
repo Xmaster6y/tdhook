@@ -1,10 +1,13 @@
+import inspect
 from typing import Callable, Optional, List, Dict, Tuple
+
 from torch import nn
 from tensordict import TensorDict
 
 from tdhook.contexts import HookingContextFactory, HookingContextWithCache
 from tdhook.modules import HookedModule
-from tdhook.hooks import DIRECTION_TO_RETURN, MultiHookHandle, HookDirection
+from tdhook.hooks import CacheProxy, DIRECTION_TO_RETURN, DIRECTION_TO_TYPE, HookDirection, HookFactory
+from tdhook.runtime import BoundHookProgram, HookProgramBuilder, HookSpec
 
 
 class HookedModuleWithAdapters(HookedModule):
@@ -40,14 +43,12 @@ class Adapters(HookingContextFactory):
         self._relative = relative
         self._directions = directions or ["fwd"]
 
-    def _hook_module(self, module: HookedModule) -> MultiHookHandle:
+    def _hook_module(self, module: HookedModule) -> BoundHookProgram:
         cache = module.hooking_context.cache
+        relative_path = module.relative_path if self._relative else ""
 
         def callback_factory(adapter, cache_proxy=None):
-            import inspect
-
             def callback(**kwargs):
-                nonlocal adapter, cache_proxy
                 if cache_proxy is not None:
                     adapter_input = cache_proxy.resolve()
                 else:
@@ -65,27 +66,34 @@ class Adapters(HookingContextFactory):
 
             return callback
 
-        handles = []
-        for direction in self._directions:
-            for adapter, in_module_key, out_module_key in self._adapters.values():
-                if in_module_key == out_module_key:
-                    cache_proxy = None
-                else:
-                    handle, cache_proxy = module.get(
-                        cache=cache,
-                        module_key=in_module_key,
-                        callback=self._cache_callback,
-                        direction=direction,
-                        relative=self._relative,
-                    )
-                    handles.append(handle)
+        with HookProgramBuilder() as program:
+            for direction in self._directions:
+                for adapter, in_module_key, out_module_key in self._adapters.values():
+                    if in_module_key == out_module_key:
+                        cache_proxy = None
+                    else:
+                        cache_key = f"{in_module_key}_{DIRECTION_TO_TYPE[direction]}"
+                        cache_proxy = CacheProxy(cache_key, cache)
+                        program.register_path(
+                            module,
+                            HookFactory.make_caching_hook(
+                                cache_key,
+                                cache,
+                                callback=self._cache_callback,
+                                direction=direction,
+                            ),
+                            HookSpec(in_module_key, "capture", direction),
+                            relative_path=relative_path,
+                        )
 
-                handle = module.set(
-                    module_key=out_module_key,
-                    value=None,
-                    callback=callback_factory(adapter, cache_proxy),
-                    direction=direction,
-                    relative=self._relative,
-                )
-                handles.append(handle)
-        return MultiHookHandle(handles)
+                    program.register_path(
+                        module,
+                        HookFactory.make_setting_hook(
+                            None,
+                            callback=callback_factory(adapter, cache_proxy),
+                            direction=direction,
+                        ),
+                        HookSpec(out_module_key, "replace", direction),
+                        relative_path=relative_path,
+                    )
+            return program.build()

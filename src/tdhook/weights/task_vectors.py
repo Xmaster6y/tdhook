@@ -6,6 +6,7 @@ from contextlib import contextmanager
 
 from tdhook.contexts import HookingContextFactory, HookingContext
 from tdhook.modules import HookedModule
+from tdhook.runtime import HookProgram, HookSpec, temporary_module_state
 
 
 class TaskVectorsContext(HookingContext):
@@ -45,6 +46,13 @@ class TaskVectorsModule(HookedModule):
     ):
         super().__init__(*args, **kwargs)
         self._weights = TensorDict.from_module(self.module)
+        self._applied_program = HookProgram()
+
+    @property
+    def applied_program(self) -> HookProgram:
+        """Return the most recent temporary parameter-state program."""
+
+        return self._applied_program
 
     @torch.no_grad()
     def get_task_vector(self, finetuned_module: nn.Module) -> TensorDict:
@@ -70,7 +78,12 @@ class TaskVectorsModule(HookedModule):
         self, *vectors: TensorDict, alpha: Optional[float] = None
     ) -> Generator[nn.Module, None, None]:
         """Apply vectors to model"""
-        with self.get_weights(*vectors, alpha=alpha).to_module(self.module):
+        with temporary_module_state(
+            self.module,
+            self.get_weights(*vectors, alpha=alpha),
+            HookSpec("", "replace_parameters", None),
+        ) as program:
+            self._applied_program = program
             yield self
 
 

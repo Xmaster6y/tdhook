@@ -8,8 +8,13 @@ except PackageNotFoundError:  # pragma: no cover
 __all__ = [
     # Core
     "contexts",
+    "execution",
     "hooks",
+    "paths",
+    "runtime",
+    "session",
     "targets",
+    "workflow",
     "metrics",
     "modules",
     # Methods
@@ -17,9 +22,6 @@ __all__ = [
     "attribution",
     "auto",
     "weights",
-    "pipeline",
-    "artifacts",
-    "stages",
     "concepts",
     "dimension",
 ]

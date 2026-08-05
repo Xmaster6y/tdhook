@@ -1,5 +1,7 @@
 import torch
+import pytest
 from tensordict import TensorDict
+from tensordict.nn import TensorDictModuleBase
 
 from tdhook.metrics import SensitivityMetric, InfidelityMetric
 from tdhook.attribution import Saliency
@@ -33,3 +35,105 @@ class TestInfidelityMetric:
             assert "input" in result
             assert result["input"].shape == (2,)
             assert torch.all(result["input"] >= 0)  # MSE should be non-negative
+
+
+class _NestedAttributionModule(TensorDictModuleBase):
+    in_keys = [("inputs", "value")]
+    out_keys = [("_mod_out", "output"), ("attr", "inputs", "value")]
+
+    def __init__(self):
+        super().__init__()
+        self.calls = 0
+
+    def forward(self, data):
+        self.calls += 1
+        value = data.get(("inputs", "value"))
+        data.set(("_mod_out", "output"), value.square().sum(dim=-1))
+        data.set(("attr", "inputs", "value"), 2 * value)
+        return data
+
+
+def test_metrics_preserve_nested_keys_and_report_exact_additional_calls():
+    original = TensorDict({"inputs": {"value": torch.randn(2, 4)}}, batch_size=[2])
+    module = _NestedAttributionModule()
+    module(original)
+    baseline = original.clone()
+    module.calls = 0
+
+    sensitivity = SensitivityMetric(perturb_radius=0.01)
+    sensitivity_result = sensitivity(module, original)
+
+    assert sensitivity.additional_model_passes(module) == 1
+    assert module.calls == 1
+    sensitivity_values = sensitivity_result.get(("inputs", "value"))
+    assert sensitivity_values.shape == (2,)
+    assert torch.isfinite(sensitivity_values).all()
+    assert (sensitivity_values > 0).all()
+
+    module.calls = 0
+    infidelity = InfidelityMetric(n_perturb_samples=3)
+    infidelity_result = infidelity(module, original)
+
+    assert infidelity.additional_model_passes(module) == 3
+    assert module.calls == 3
+    assert infidelity_result.get(("inputs", "value")).shape == (2,)
+    assert (infidelity_result.get(("inputs", "value")) >= 0).all()
+    assert set(original.keys(True, True)) == set(baseline.keys(True, True))
+    for key, value in original.items(True, True):
+        torch.testing.assert_close(value, baseline.get(key))
+
+
+@pytest.mark.parametrize("samples", [0, -1])
+def test_infidelity_rejects_non_positive_sample_counts(samples):
+    with pytest.raises(ValueError, match="positive"):
+        InfidelityMetric(samples)
+
+
+@pytest.mark.parametrize("samples", [True, 1.5])
+def test_infidelity_rejects_non_integer_sample_counts(samples):
+    with pytest.raises(TypeError, match="int"):
+        InfidelityMetric(samples)
+
+
+def test_sensitivity_rejects_negative_radius():
+    with pytest.raises(ValueError, match="non-negative"):
+        SensitivityMetric(-0.1)
+
+
+def test_metrics_reject_missing_and_non_floating_inputs():
+    module = _NestedAttributionModule()
+    missing = TensorDict({"inputs": {"value": torch.ones(2, 4)}}, batch_size=[2])
+    with pytest.raises(KeyError, match="Model output"):
+        InfidelityMetric(1)(module, missing)
+
+    integer = TensorDict(
+        {
+            "inputs": {"value": torch.ones(2, 4, dtype=torch.long)},
+            "_mod_out": {"output": torch.ones(2)},
+            "attr": {"inputs": {"value": torch.ones(2, 4)}},
+        },
+        batch_size=[2],
+    )
+    with pytest.raises(TypeError, match="floating point"):
+        InfidelityMetric(1)(module, integer)
+    with pytest.raises(TypeError, match="floating point"):
+        SensitivityMetric()(module, integer)
+
+
+def test_infidelity_accepts_modules_that_return_only_declared_outputs():
+    class OutputOnly(TensorDictModuleBase):
+        in_keys = ["input"]
+        out_keys = ["output"]
+
+        def forward(self, data):
+            return TensorDict({"output": data["input"].sum(-1)}, batch_size=data.batch_size)
+
+    original = TensorDict(
+        {"input": torch.ones(2, 3), "output": torch.full((2,), 3.0), "attr": {"input": torch.ones(2, 3)}},
+        batch_size=[2],
+    )
+
+    result = InfidelityMetric(n_perturb_samples=1, output_key="output")(OutputOnly(), original)
+
+    assert result["input"].shape == (2,)
+    assert torch.isfinite(result["input"]).all()

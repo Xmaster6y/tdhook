@@ -1,10 +1,6 @@
 # How to Contribute?
 
-## Guidelines
-
-The project dependencies are managed using `uv`, see their installation [guide](https://docs.astral.sh/uv/).
-
-Additionally, to make your life easier, install `just` to use the shortcut commands.
+TDHook uses [`uv`](https://docs.astral.sh/uv/) and [`just`](https://just.systems/).
 
 ## Dev Install
 
@@ -14,19 +10,22 @@ Install the dependencies and the pre-commit hooks:
 just install
 ```
 
-## Ensuring CI Passes
-
-To ensure CI passes, run the checks and tests. To run the checks (`pre-commit` checks):
+## Checks
 
 ```bash
 just checks
-```
-
-To run the tests (using `pytest`):
-
-```bash
 just tests
 ```
+
+Run only the executable demo notebooks with:
+
+```bash
+just notebook-tests
+```
+
+CI notebooks must be deterministic, CPU-friendly, complete in under two
+minutes, and avoid network access. Mark them with
+`metadata.tdhook.ci = true`.
 
 ## Branches
 

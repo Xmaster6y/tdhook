@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager
+from collections.abc import Mapping, MutableMapping
+import copy
 from dataclasses import asdict, dataclass
 import json
-from typing import Iterator, Literal
+from typing import Literal
 
-import torch
+from tensordict import TensorDictBase
 from torch import Tensor, nn
 
-from tdhook.hooks import register_hook_to_module, resolve_submodule_path
+from tdhook.paths import resolve_submodule_path
 
 
 TargetKind = Literal["activation", "gradient", "parameter"]
+OutputPathComponent = int | str
 
 
 @dataclass(frozen=True)
@@ -30,23 +32,31 @@ class Target:
     feature_axis: int
     indices: tuple[int, ...]
     parameter: str | None = None
+    output_path: tuple[OutputPathComponent, ...] = ()
 
     def __post_init__(self) -> None:
         if self.kind not in {"activation", "gradient", "parameter"}:
             raise ValueError(f"Invalid target kind: {self.kind!r}")
+        if type(self.feature_axis) is not int:
+            raise TypeError("feature_axis must be an integer")
         if not self.indices:
             raise ValueError("indices must contain at least one selection")
-        if any(not isinstance(index, int) for index in self.indices):
+        if any(type(index) is not int for index in self.indices):
             raise TypeError("indices must be integers")
         if self.kind == "parameter" and not self.parameter:
             raise ValueError("parameter targets require a parameter name")
         if self.kind != "parameter" and self.parameter is not None:
             raise ValueError("parameter is only valid for parameter targets")
+        if any(not isinstance(component, (int, str)) or isinstance(component, bool) for component in self.output_path):
+            raise TypeError("output_path components must be integer slots or string mapping keys")
+        if self.kind == "parameter" and self.output_path:
+            raise ValueError("output_path is only valid for activation and gradient targets")
 
     def to_dict(self) -> dict[str, object]:
         """Return a JSON-compatible representation of this target."""
         data = asdict(self)
         data["indices"] = list(self.indices)
+        data["output_path"] = list(self.output_path)
         return data
 
     @classmethod
@@ -57,6 +67,7 @@ class Target:
             values["indices"] = tuple(values["indices"])  # type: ignore[arg-type]
         except KeyError as exc:
             raise ValueError("Target data is missing indices") from exc
+        values["output_path"] = tuple(values.get("output_path", ()))  # type: ignore[arg-type]
         return cls(**values)  # type: ignore[arg-type]
 
     def to_json(self) -> str:
@@ -90,73 +101,6 @@ class Target:
             self._selection(parameter)
         return module
 
-    @contextmanager
-    def capture(self, model: nn.Module) -> Iterator["CapturedTarget"]:
-        """Capture selected values while the context is active.
-
-        For activation and gradient targets, run the relevant forward/backward
-        pass inside the context. Parameter targets are captured on entry.
-        """
-        module = self.validate(model)
-        captured = CapturedTarget()
-        if self.kind == "parameter":
-            captured.value = self._select(module.get_parameter(self.parameter)).detach().clone()  # type: ignore[arg-type]
-            yield captured
-            return
-
-        def forward_hook(_module: nn.Module, _args: tuple[object, ...], value: Tensor | tuple[Tensor, ...]):
-            tensor = self._hook_tensor(value)
-            captured.value = self._select(tensor).detach().clone()
-
-        def gradient_hook(_module: nn.Module, values: tuple[Tensor, ...]):
-            tensor = self._hook_tensor(values)
-            captured.value = self._select(tensor).detach().clone()
-
-        direction = "fwd" if self.kind == "activation" else "bwd_pre"
-        handle = register_hook_to_module(
-            module, forward_hook if self.kind == "activation" else gradient_hook, direction=direction
-        )
-        try:
-            yield captured
-        finally:
-            handle.remove()
-
-    @contextmanager
-    def replace(self, model: nn.Module, value: Tensor | float | int) -> Iterator[None]:
-        """Temporarily replace selected values, restoring the model on exit."""
-        module = self.validate(model)
-        if self.kind == "parameter":
-            parameter = module.get_parameter(self.parameter)  # type: ignore[arg-type]
-            original = self._select(parameter).detach().clone()
-            with torch.no_grad():
-                self._assign(parameter, value)
-            try:
-                yield
-            finally:
-                with torch.no_grad():
-                    self._assign(parameter, original)
-            return
-
-        def forward_hook(_module: nn.Module, _args: tuple[object, ...], output: Tensor | tuple[Tensor, ...]):
-            replacement = self._hook_tensor(output).clone()
-            self._assign(replacement, value)
-            return (replacement,) if isinstance(output, tuple) else replacement
-
-        def gradient_hook(_module: nn.Module, values: tuple[Tensor, ...]):
-            tensor = self._hook_tensor(values)
-            replacement = tensor.clone()
-            self._assign(replacement, value)
-            return (replacement,) + values[1:]
-
-        direction = "fwd" if self.kind == "activation" else "bwd_pre"
-        handle = register_hook_to_module(
-            module, forward_hook if self.kind == "activation" else gradient_hook, direction=direction
-        )
-        try:
-            yield
-        finally:
-            handle.remove()
-
     def _selection(self, tensor: Tensor) -> tuple[object, ...]:
         axis = self.feature_axis if self.feature_axis >= 0 else tensor.ndim + self.feature_axis
         if axis < 0 or axis >= tensor.ndim:
@@ -174,17 +118,89 @@ class Target:
     def _assign(self, tensor: Tensor, value: Tensor | float | int) -> None:
         tensor[self._selection(tensor)] = value
 
+    def select_output(self, value: object) -> Tensor:
+        """Select this target from a structured activation or gradient value."""
+
+        return self._select(self._output_tensor(value, self.output_path))
+
+    def replace_output(self, value: object, replacement: Tensor | float | int) -> object:
+        """Return ``value`` with only this target replaced, preserving its structure."""
+
+        tensor = self._output_tensor(value, self.output_path).clone()
+        self._assign(tensor, replacement)
+        return self._replace_output_tensor(value, self.output_path, tensor)
+
     @staticmethod
-    def _hook_tensor(value: Tensor | tuple[Tensor, ...]) -> Tensor:
-        if isinstance(value, Tensor):
-            return value
-        if len(value) != 1 or not isinstance(value[0], Tensor):
-            raise ValueError("Targets currently require a hook value containing exactly one tensor")
-        return value[0]
+    def _resolved_output_path(
+        value: object,
+        path: tuple[OutputPathComponent, ...],
+    ) -> tuple[OutputPathComponent, ...]:
+        if path or isinstance(value, Tensor):
+            return path
+        if isinstance(value, (tuple, list)) and len(value) == 1:
+            return (0,)
+        raise ValueError("Structured hook values require Target.output_path to select a tensor leaf")
+
+    @classmethod
+    def _output_tensor(
+        cls,
+        value: object,
+        path: tuple[OutputPathComponent, ...] = (),
+    ) -> Tensor:
+        selected = value
+        for component in cls._resolved_output_path(value, path):
+            if isinstance(component, int) and isinstance(selected, (tuple, list)):
+                try:
+                    selected = selected[component]
+                except IndexError as exc:
+                    raise ValueError(f"output_path slot {component} is out of range") from exc
+            elif isinstance(component, str) and isinstance(selected, Mapping):
+                try:
+                    selected = selected[component]
+                except KeyError as exc:
+                    raise ValueError(f"output_path key {component!r} is missing") from exc
+            else:
+                raise ValueError(f"output_path component {component!r} does not match the hook value structure")
+        if not isinstance(selected, Tensor):
+            raise ValueError("Target.output_path must select a tensor leaf")
+        return selected
+
+    @classmethod
+    def _replace_output_tensor(
+        cls,
+        value: object,
+        path: tuple[OutputPathComponent, ...],
+        replacement: Tensor,
+    ) -> object:
+        resolved = cls._resolved_output_path(value, path)
+        if not resolved:
+            return replacement
+        component, *remainder = resolved
+        if isinstance(component, int) and isinstance(value, tuple):
+            items = list(value)
+            items[component] = cls._replace_output_tensor(items[component], tuple(remainder), replacement)
+            return tuple(items)
+        if isinstance(component, int) and isinstance(value, list):
+            items = list(value)
+            items[component] = cls._replace_output_tensor(items[component], tuple(remainder), replacement)
+            return items
+        if isinstance(component, str) and isinstance(value, TensorDictBase):
+            items = value.clone(recurse=False)
+            items.set(component, cls._replace_output_tensor(value.get(component), tuple(remainder), replacement))
+            return items
+        if isinstance(component, str) and isinstance(value, Mapping):
+            try:
+                current = value[component]
+            except KeyError as exc:
+                raise ValueError(f"output_path key {component!r} is missing") from exc
+            items = copy.copy(value)
+            if not isinstance(items, MutableMapping):
+                raise ValueError(
+                    f"mapping type {type(value).__name__} does not support structure-preserving replacement"
+                )
+            items[component] = cls._replace_output_tensor(current, tuple(remainder), replacement)
+            return items
+        raise ValueError(f"output_path component {component!r} does not match the hook value structure")
 
 
-@dataclass
-class CapturedTarget:
-    """The selected tensor captured by :meth:`Target.capture`."""
-
-    value: Tensor | None = None
+__all__ = ["OutputPathComponent", "Target", "TargetKind"]

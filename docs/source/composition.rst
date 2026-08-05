@@ -1,466 +1,135 @@
-Composition contract
-====================
+Composition
+===========
 
-Sequential pipelines
---------------------
+``Workflow`` is TDHook's only declared-composition interface. It combines
+configured interpretability methods with ordinary ``TensorDictModuleBase``
+operators and returns the final TensorDict directly.
 
-For workflows that need more than one model execution, use
-``tdhook.pipeline.Pipeline``.  A pipeline is an ordered list of stages with
-explicit TensorDict input and output keys; it is intentionally not a DAG
-scheduler and never converts artifacts implicitly.  ``MethodStage`` adapts an
-existing ``HookingContextFactory`` and runs the model once, while
-``TransformStage`` applies a TensorDict-to-TensorDict function.  Pipeline
-preflight checks dependencies and output collisions before it runs a model.
-
-.. code-block:: python
-
-   from tdhook.contexts import HookingContextFactory
-   from tdhook.pipeline import MethodStage, Pipeline, TransformStage
-
-   pipeline = Pipeline([
-       MethodStage("method", HookingContextFactory(),
-                   required_keys=["input"], provided_keys=["output"]),
-       TransformStage("summary", lambda td: td.set("mean", td["output"].mean(-1)),
-                      required_keys=["output"], provided_keys=["mean"]),
-   ])
-   result = pipeline.run(model, artifacts)
-   final_artifacts = result.artifacts
-
-Every method stage uses the same ``with factory.prepare(model)`` lifecycle as
-standalone code.  Context cleanup is therefore guaranteed if setup or a later
-stage raises.
-
-Preflight planning
+Natural interfaces
 ------------------
 
-``Pipeline.plan()`` returns an :class:`~tdhook.pipeline.ExecutionPlan` before
-the first hook is registered or model call is made.  Each planned run names
-its stages, artifact inputs and outputs, effects, gradient mode,
-device/batch constraints, and model-pass budget.  This makes demo pass budgets
-inspectable without executing them:
+A configured TDHook method remains useful on its own::
 
-.. code-block:: python
+   with method.prepare(model) as prepared:
+       result = prepared(data)
 
-   plan = pipeline.plan(artifacts)
-   print(plan.model_passes)
-   for run in plan.runs:
-       print(run.stages, run.model_passes, run.coalesced)
+Use ``Workflow`` only when several methods or TensorDict operators form one
+declared computation::
 
-The planner is deliberately conservative.  Unknown pairs and stages separated
-by an artifact dependency receive separate runs.  Adjacent stages co-execute
-only when both expose the shared-execution protocol, opt into the same
-non-empty ``coexecution_key``, and agree on runtime storage, model keys, pass
-count, effects, context specialisation, and device/batch requirements.  A
-shared run uses ``HookGroup`` and retains its rollback and cleanup guarantees.
-This is a linear execution plan, not a general DAG scheduler.
+   from tensordict.nn import TensorDictModule
+   from tdhook.latent import ActivationCaching
+   from tdhook.workflow import Workflow
 
-The contract originated in `issue 57
-<https://github.com/Xmaster6y/tdhook/issues/57>`_.  The sequential runtime,
-artifact adapters, executable built-in stages, and conservative planner are now
-implemented; the evidence states below identify the public methods that have
-completed conformance coverage.
+   summarise = TensorDictModule(
+       lambda activation: activation.mean(-1),
+       in_keys=[("activations", "cache", "features")],
+       out_keys=[("summary", "features")],
+   )
+   workflow = Workflow(
+       ActivationCaching("features", cache_key=("activations", "cache")),
+       summarise,
+   )
 
-Decision
+   plan = workflow.plan(model, data)
+   result = workflow(model, data)
+
+For exploratory capture or intervention, use :class:`tdhook.session.HookSession`
+instead. A session is intentionally imperative; a workflow is intentionally
+declared and inspectable.
+
+Data ownership
+--------------
+
+TensorDict owns scientific inputs, outputs, and intermediate values. Every
+workflow step exposes native ``in_keys`` and ``out_keys``. TDHook does not add
+an artifact registry, adapter schema, stage contract, or parallel result
+container.
+
+Two steps cannot own the same output key, or ancestor and descendant output
+keys, by accident. Planning rejects that overlap before execution. Wrap a step
+in ``WorkflowUpdate(step)`` only when replacing the earlier value is an
+intentional part of the declared computation.
+
+Nested keys, batch dimensions, devices, TensorDict parameter containers, and
+persistence retain their TensorDict meaning. A zero-pass analysis or reshape
+is an ordinary TensorDict operator. Values whose condition axes do not match
+the model batch can remain shape-neutral ``NonTensorData`` inside the same
+TensorDict.
+
+Planning
 --------
 
-TDHook uses three distinct composition terms:
+``Workflow.plan(model, data)`` binds each method for inspection, validates its
+native dependencies, and returns immutable execution metadata without calling
+the model. A plan reports:
 
-**Composed model**
-   A PyTorch or TensorDict model whose execution may have multiple inputs,
-   outputs, or nested submodules.  Preparing one TDHook method around such a
-   model is *model support*, not evidence that two interpretability methods can
-   share a run.
+* the ordered steps in each execution;
+* whether a step is a model method or zero-pass operator;
+* native input and output keys;
+* model-pass and gradient requirements;
+* every accepted or rejected co-execution decision.
 
-**Same-run hook composition**
-   Two or more compatible hook operations installed on one prepared model for
-   one forward/backward execution.  Compatibility depends on hook direction,
-   read/write effects, registration order, path resolution, context type, and
-   cleanup.  Shared inheritance from :class:`HookingContextFactory
-   <tdhook.contexts.HookingContextFactory>` is not evidence of compatibility.
+Execution rebinds each method and verifies that its model signature,
+requirements, hook program, and wrapper behavior still match the inspected
+facts. Dependency keys are checked again immediately before each consumer
+runs, so a producer cannot satisfy a nested dependency merely by declaring a
+parent namespace it did not actually populate.
 
-**Multi-stage pipeline**
-   An ordered sequence of model methods and/or TensorDict transforms that
-   exchanges named artifacts across zero or more model executions.  A stage
-   boundary is an artifact boundary: required keys must exist before the stage
-   starts and produced keys become available only after it succeeds.
+Safe co-execution
+-----------------
 
-The terms above are canonical for source documentation, tutorials, and the ECML
-demo.  A workflow may use more than one term: for example, a multi-stage
-pipeline may run a same-run hook composition inside one stage on a composed
-model.
+Unknown compatibility means separate executions. The initial proof permits
+adjacent one-pass methods to share a model call only when:
 
-Design goal
------------
+* their prepared model signatures and gradient modes match;
+* their wrappers execute the caller's TensorDict model directly;
+* every bound operation is a read-only activation ``capture``.
 
-TDHook is designed to make every public method usable in a declared
-multi-stage pipeline.  Within that pipeline, the planner should coalesce
-compatible hooks into the fewest safe model executions.  A method that cannot
-share one execution is not outside the composability goal: the planner places
-it at an explicit stage boundary and carries its named TensorDict artifacts
-forward.
+Interventions, backward replacements, transformed wrappers, temporary model
+state, missing hook programs, and other unknown behavior split conservatively.
+This is a safety decision, not a claim that the methods can never be optimized
+together in a future implementation.
 
-The target contract is therefore:
-
-* every public method is representable as a model stage, TensorDict transform,
-  weight-mutation stage, or owned support component;
-* every stage declares the complete capability record below;
-* compatible reads and writes can share a run with deterministic ordering;
-* incompatible hook paths, context classes, mutations, devices, or gradient
-  requirements cause a planned stage split rather than implicit behavior;
-* the planner minimizes model executions subject to those constraints; and
-* preflight returns an executable stage plan or an actionable incompatibility,
-  before the first model call.
-
-This is a strong workflow-level composability promise, not a promise that every
-pair of methods must occupy the same forward/backward execution.
-
-Capability model
-----------------
-
-Pipeline preflight evaluates the executable subset of these fields.  The
-inventory records the complete target contract for current public methods and
-operators; rows remain ``untested`` until their executable metadata and a real
-method test agree.
-
-``execution``
-   Whether the stage executes a model, transforms existing TensorDict
-   artifacts, or only supports another stage.
-
-``hooks``
-   Every forward/backward and pre/post direction used by the stage.
-
-``effects_and_ordering``
-   Reads, writes, state changes, and the order they require.  On the same
-   module and direction, hooks execute in registration order unless a hook is
-   explicitly prepended.  A later reader observes the value returned by an
-   earlier writer.
-
-``model_passes``
-   The number of model calls, including conditional or user-controlled calls.
-   An expanded batch is recorded separately from repeated calls.
-
-``required_keys`` and ``produced_keys``
-   TensorDict artifact contracts.  Configurable key names are represented by
-   their constructor parameter; context caches and manager state are not
-   silently treated as TensorDict artifacts.
-
-``model_mutation`` and ``specialisation``
-   Temporary module/weight changes and any specialised context or
-   HookedModule class.  Both affect same-run compatibility and cleanup.
-
-``device_batch_gradient``
-   Device, shape/batch, and autograd requirements that preflight must check or
-   explicitly delegate to a callback.
-
-Current evidence states
------------------------
-
-The capability inventory uses the following states to track implementation
-progress toward the design goal.  They describe the current release, not the
-roadmap ceiling.
-
-``supported``
-   The current public contract has enough information to validate the
-   operation.  This is not a blanket claim about every callback or key choice.
-
-``unsupported``
-   The current implementation has a known incompatibility in that composition
-   mode.  The planner target is to repair it or isolate the method at an
-   explicit stage boundary; the reason is stated below or in the capability
-   inventory.
-
-``untested``
-   The implementation may be mechanically eligible, but TDHook does not yet
-   promise the combination.  Users must not infer support from inheritance or
-   from an example that passes Python values manually.
-
-``not-applicable``
-   The composition mode does not describe that component.
-
-Method and operator inventory
------------------------------
-
-The inventory scope is every user-facing symbol exported by ``__all__`` from
-``tdhook.attribution``, ``tdhook.latent``,
-``tdhook.latent.dimension_estimation``, and ``tdhook.weights``.  Supporting
-probing objects are included so the public surface is complete, but are marked
-``probing support`` rather than executable stages.  Implementation helpers that
-are not exported by those modules are not stable public methods.
-
-Executable built-in stages
---------------------------
-
-For the method families used by the ECML demonstrations, use the factories in
-``tdhook.stages`` rather than writing an ``AdapterStage`` callback. They run
-the existing public method unchanged and translate its legacy storage into
-stable artifact paths. For example, ``activation_caching_stage`` publishes the
-real context cache at ``("activations", "cache")``; it never labels that cache
-as weights. ``attribution_stage``, ``probing_stage``, and
-``weight_intervention_stage`` respectively publish attribution values, probe
-manager results, and an intervention pass's model output.
-
-Each factory has an executable ``StageCapability`` record. The composition
-contract tests check that the documented rows for ``ActivationCaching``,
-``IntegratedGradients``, ``LRP``, ``Probing``, and ``Adapters`` agree with real
-stage contracts, so a supported matrix row cannot quietly drift from its
-runtime artifact keys or same-run opt-in.
-
-Declared concept attribution
-----------------------------
-
-The concept-attribution demo is a three-stage pipeline: LRP collects labelled
-concept-example relevances, ``ConceptSelectionStage`` records the selected
-channel and its positive or negative direction, and
-``ChannelConditionedLRPStage`` binds that explicit artifact to a second LRP
-pass.  This makes the two model passes and their artifact boundary visible to
-``Pipeline.plan()``; no notebook callback needs to retain hook context or a
-selected Python channel.
-
-.. code-block:: python
-
-   from tdhook.attribution import LRP
-   from tdhook.concepts import ChannelConditionedLRPStage, ConceptSelectionStage
-   from tdhook.pipeline import Pipeline
-   from tdhook.stages import AttributionStage
-
-   pipeline = Pipeline([
-       AttributionStage("concept-relevances", LRP(input_modules=["features.28"]),
-                        attribution_key=("attributions", "concept_examples"),
-                        legacy_attribution_key=("attr", "features.28")),
-       ConceptSelectionStage("select-concept"),
-       ChannelConditionedLRPStage("conditioned-relevance", LRP(),
-                                  condition_module="features.28", gradient_channel_axis=1),
-   ])
-
-The initial artifacts provide ``("inputs", "input")`` and the matching
-binary ``("inputs", "concept_labels")``.  The selection artifact is stored at
-``("metrics", "concept_selection")`` and contains the positive/negative
-means, scores, channel, direction, and selected score.  A different selection
-policy can produce that same schema without rewriting the conditioned stage.
-
-The current evidence anchors are:
-
-.. list-table:: Built-in composition evidence
-   :header-rows: 1
-
-   * - Public method
-     - Evidence
-   * - ``ActivationCaching``
-     - ``test_activation_caching_stage_executes_a_real_method_and_publishes_its_cache``
-   * - ``IntegratedGradients``
-     - ``test_attribution_stage_maps_baseline_and_additional_inputs_and_reports_passes``
-   * - ``LRP``
-     - ``test_lrp_artifact_drives_a_second_conditioned_attribution_stage``
-   * - ``Probing``
-     - ``test_real_probing_stages_coexecute_and_publish_independent_results``
-   * - ``Adapters``
-     - ``test_weight_intervention_stage_executes_real_adapters``
-
-Cross-family conformance
-------------------------
-
-The release conformance matrix names the exact test and preflight decision for
-each supported workflow or method pairing.  A supported multi-stage row does
-not imply same-run support: activation capture with probing, and intervention
-with an activation read, are deliberately split into two model passes.  Unknown
-pairs remain unsupported and are split conservatively.
-
-.. csv-table:: Cross-family composition evidence
-   :file: _static/composition-conformance.csv
-   :header-rows: 1
-
-Declared intrinsic dimension
-----------------------------
-
-``tdhook.dimension.conditioned_dimension_pipeline`` is the canonical
-activation-to-dimension workflow.  It contains one
-``ActivationCachingStage`` model pass followed by explicit artifact-only
-selection, estimator, and summary stages.  ``channel_conditioned_samples``
-and ``spatial_conditioned_samples`` provide generic reshapes for
-``(samples, channels, ...)`` and ``(samples, channels, height, width)``
-activations; application-specific layer selection and plotting remain outside
-the pipeline.
-
-The estimator stage accepts the existing ``TwoNnDimensionEstimator``,
-``LocalKnnDimensionEstimator``, ``LocalPcaDimensionEstimator``, and
-``CaPcaDimensionEstimator`` without changing their public APIs.  Its samples,
-dimensions, and summary are shape-neutral TensorDict artifacts so condition
-axes do not have to match the original model batch.  The compact CPU fixture
-in ``test_dimension_pipeline.py`` fixes the channel-conditioned TwoNN result
-and verifies both the one-pass plan and estimator interchangeability.
-
-Tutorial migration
+Concrete workflows
 ------------------
 
-The canonical tutorial paths are the offline :doc:`declared-pipelines`
-walkthrough and its executable notebook.  They use public stage classes and
-read all hand-offs from named artifacts: concept selection from
-``("metrics", "concept_selection")``; conditioned relevance from
-``("attributions", "conditioned")``; and dimension samples, estimates, and
-summaries from the ``("activations", ...)`` and ``("metrics", ...)``
-namespaces.  Natural-image and chess board rendering are presentation
-transforms that consume those artifacts; they are not a reason to retain
-notebook callbacks or cache-to-dictionary orchestration.
+Concept-conditioned attribution has two model passes:
 
-The public API inventory covers 25+ exported method classes and documented
-method variants.  That count describes available operations, not a claim that
-every pair can share a model run.  The conformance matrix records the exact
-test identifier, preflight decision, and expected pass budget for every
-supported workflow; unsupported or unknown pairs split conservatively.
+#. ``LRP`` publishes per-input and per-feature relevance below a configured
+   attribution root.
+#. ``ConceptSelection`` derives ``("metrics", "concept_selection")`` with no
+   model call.
+#. ``ChannelConditionedLRP`` reads the selected channel and direction through
+   declared nested keys during the second pass.
 
-.. csv-table:: Public capability inventory
-   :file: _static/composition-capabilities.csv
+Conditioned intrinsic dimension has one model pass:
+
+#. ``ActivationCaching`` publishes its native cache.
+#. ``ActivationSamples`` reshapes one cached activation.
+#. ``DimensionEstimation`` runs a native TensorDict estimator.
+#. ``DimensionSummary`` publishes finite count, mean, and standard deviation.
+
+The offline :doc:`notebooks/tutorials/declared-workflows` notebook runs both
+examples.
+
+Conformance evidence
+--------------------
+
+The following table is generated from the same expected plans asserted by the
+tests. ``supported`` means that the exact built-in combination, lifecycle, key
+exchange, and model-pass budget are exercised; it is not a universal claim
+about every possible method pair.
+
+.. csv-table:: Workflow conformance
+   :file: _static/composition-conformance.csv
    :header-rows: 1
-   :class: longtable
+   :widths: 26, 10, 30, 54, 10
 
-Same-run compatibility
-----------------------
+Scope
+-----
 
-Same-run composition is an optimization inside the broader pipeline contract.
-The matrix records today's implementation blockers and the intended resolution.
-It groups methods by the property that determines whether they can currently
-share one execution:
-
-``simple hooks``
-   :class:`Probing <tdhook.latent.probing.Probing>` and
-   :class:`SteeringVectors <tdhook.latent.SteeringVectors>`.  They use the
-   standard context/module classes and do not wrap the model.
-
-   ``HookGroup`` (also available as ``CompositeHookingContextFactory``) installs
-   children in the order supplied. Reads observe preceding writes in the same
-   direction, and writes are applied in that same deterministic order.
-
-``wrapped methods``
-   Attribution methods, :class:`ActivationAddition
-   <tdhook.latent.ActivationAddition>`, and :class:`ActivationPatching
-   <tdhook.latent.ActivationPatching>`.  Each installs a child-specific relative
-   path into a generated TensorDict wrapper.
-
-``specialised methods``
-   :class:`ActivationCaching <tdhook.latent.ActivationCaching>`,
-   :class:`Adapters <tdhook.weights.Adapters>`,
-   :class:`Pruning <tdhook.weights.Pruning>`, and
-   :class:`TaskVectors <tdhook.weights.TaskVectors>`.  They require a
-   specialised context and/or HookedModule class.
-
-``TensorDict operators``
-   Dimension and representation-similarity estimators.  They are pipeline
-   transforms, not hook compositions.
-
-.. list-table:: Initial same-run compatibility matrix
-   :header-rows: 1
-   :stub-columns: 1
-
-   * - First / second group
-     - Simple hooks
-     - Wrapped methods
-     - Specialised methods
-     - TensorDict operators
-   * - Simple hooks
-     - Supported for compatible ``ProbingStage`` pairs with the same runtime
-       bindings. Other simple-hook pairs remain untested until they acquire an
-       executable stage contract and conformance coverage.
-     - Supported for standard-context children: each child resolves paths
-       against the original module after any ordered wrapper rewrites. Setup
-       rolls back prepared children and already-installed hooks on failure.
-     - Unsupported before mutation with a capability diagnostic: specialised
-       context/module requirements need an explicit merge strategy. Use a
-       separate pipeline stage meanwhile.
-     - Not applicable: place the operator at a pipeline boundary.
-   * - Wrapped methods
-     - Supported for standard-context children; relative paths are rebased to
-       the original module after wrapper rewrites.
-     - Supported when both wrappers retain the original module and use the
-       standard shared context/module. Otherwise fail before mutation and
-       split into stages.
-     - Unsupported before mutation with a capability diagnostic; an explicit
-       merge strategy is required.
-     - Not applicable: place the operator at a pipeline boundary.
-   * - Specialised methods
-     - Current blocker: the generic composite rejects the specialised
-       context/module requirement.  Target: stage isolation by default.
-     - Current blocker: specialised classes and wrappers are not merged.
-       Target: an explicit merge strategy or stage isolation.
-     - Current blocker: there is no rule for selecting or merging competing
-       specialised classes.  Target: stage isolation unless both declare the
-       same compatible owner.
-     - Not applicable: place the operator at a pipeline boundary.
-   * - TensorDict operators
-     - Not applicable: place the operator at a pipeline boundary.
-     - Not applicable: place the operator at a pipeline boundary.
-     - Not applicable: place the operator at a pipeline boundary.
-     - Not applicable to same-run hooks; supported as a multi-stage transform
-       when required and produced keys match.
-
-Low-level same-run operators
-----------------------------
-
-The low-level :class:`HookedModule <tdhook.modules.HookedModule>` API remains
-the supported way to compose operations inside a single run:
-
-.. list-table::
-   :header-rows: 1
-
-   * - Operator
-     - Effect
-     - Directions
-     - Ordering contract
-   * - ``get`` / ``save``
-     - Read an activation into a cache.
-     - ``fwd`` by default; input, gradient, and gradient-output aliases select
-       ``fwd_pre``, ``bwd``, and ``bwd_pre``.
-     - A reader observes the value returned by earlier writers in the same
-       direction.
-   * - ``set``
-     - Replace an activation or gradient.
-     - The same forward/backward directions as reads.
-     - Writers run in registration order; ``prepend=True`` moves that writer
-       before existing hooks for the same module/direction.
-   * - ``stop``
-     - Stop execution after the selected module using the partial cache.
-     - Forward output only.
-     - Must be registered after any same-module reads/writes whose results are
-       required before stopping.
-
-Aliases such as ``get_input``, ``set_grad``, and ``save_grad_output`` inherit
-the capability of their base read/write operator with the direction shown
-above.  Hook handles are removed when the run exits, including exceptional
-exit.
-
-Multi-stage planner contract
-----------------------------
-
-The pipeline runtime must make all of the following decisions before the first
-model execution:
-
-#. Every stage names one row in the capability inventory or declares an
-   equivalent custom capability record.
-#. Its required TensorDict keys are present initially or are produced by an
-   earlier stage.  A context cache, Python local, manager field, or closure is
-   not an artifact unless an explicit adapter stage names and owns it.
-#. Produced keys have a single owner, unless a stage explicitly declares a
-   write/update policy.
-#. Device, batch/shape, and gradient requirements agree at each boundary.
-#. The requested model-pass budget includes expanded batches, optional endpoint
-   evaluations, and callback-controlled evaluation loops.
-#. Temporary model mutation has a scoped owner and restoration occurs before a
-   later incompatible stage starts.
-#. ``incompatible_effects`` describe shared-run conflicts, not a ban on placing
-   both stages in one workflow. A same-run incompatibility produces a stage split when the required artifact
-   boundary is available.  It fails preflight only when no valid split or
-   adapter exists.
-#. Any remaining ``unsupported`` combination fails preflight with the reason
-   in this document.  Any ``untested`` same-run combination remains split by
-   default; it must never be promoted to ``supported`` from shared inheritance
-   alone.
-
-Consequences
-------------
-
-This decision makes composability the organizing architecture of TDHook.  The
-pipeline is the public abstraction; same-run hook composition is its
-execution-minimizing optimization, and TensorDict artifacts are its stable
-boundaries.  Current wrapper, path, and specialised-context limitations become
-concrete runtime and conformance work rather than permanent API exclusions.
-Later roadmap issues promote matrix cells as implementation and evidence land,
-while preserving a usable pipeline through explicit stage splits.
+``Workflow`` is a deterministic ordered composition, not a generic DAG,
+distributed scheduler, experiment tracker, or artifact database. TensorDict
+already supplies the data and module composition model; TDHook adds only the
+interpretability lifecycle and execution planning facts TensorDict cannot
+express.

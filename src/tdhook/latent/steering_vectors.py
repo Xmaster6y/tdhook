@@ -4,10 +4,25 @@ from tensordict import TensorDict
 from tensordict.nn import TensorDictModuleBase, TensorDictSequential
 
 from tdhook.contexts import HookingContextFactory
-from tdhook.hooks import MultiHookHandle
+from tdhook.execution import ExecutionSpec
+from tdhook.hooks import HookFactory, MutableWeakRef
+from tdhook.latent._targets import activation_target
 from tdhook.modules import HookedModule, IntermediateKeysCleaner, ModuleCallWithCache, FunctionModule
+from tdhook.runtime import BoundHookProgram, HookProgramBuilder, HookSpec
+from tdhook.targets import Target
 from tdhook._types import UnraveledKey
-from tdhook.hooks import MutableWeakRef
+
+
+def _selected_output(value: object, target: Target | None):
+    if target is None:
+        return value
+    return target.select_output(value)
+
+
+def _replace_selected_output(value: object, replacement: object, target: Target | None):
+    if target is None:
+        return replacement
+    return target.replace_output(value, replacement)
 
 
 class SteeringVectors(HookingContextFactory):
@@ -17,37 +32,37 @@ class SteeringVectors(HookingContextFactory):
 
     def __init__(
         self,
-        modules_to_steer: List[str],
+        modules_to_steer: List[str | Target],
         steer_fn: Callable,
     ):
         super().__init__()
 
-        self._modules_to_steer = modules_to_steer
+        self._targets_to_steer = [activation_target(value, argument="modules_to_steer") for value in modules_to_steer]
+        self._modules_to_steer = [path for path, _target in self._targets_to_steer]
         self._steer_fn = steer_fn
 
-    def _hook_module(self, module: HookedModule) -> MultiHookHandle:
-        handles = []
-        for module_key in self._modules_to_steer:
+    def _hook_module(self, module: HookedModule) -> BoundHookProgram:
+        with HookProgramBuilder() as program:
+            for module_key, target in self._targets_to_steer:
 
-            def callback(**kwargs):
-                nonlocal module_key, self
-                output = kwargs["output"]
-                return self._steer_fn(module_key=module_key, output=output)
+                def callback(*, _module_key=module_key, _target=target, **kwargs):
+                    output = kwargs["output"]
+                    replacement = self._steer_fn(module_key=_module_key, output=_selected_output(output, _target))
+                    return _replace_selected_output(output, replacement, _target)
 
-            handle = module.set(
-                module_key=module_key,
-                value=None,
-                callback=callback,
-                direction="fwd",
-            )
-            handles.append(handle)
-        return MultiHookHandle(handles)
+                program.register_path(
+                    module,
+                    HookFactory.make_setting_hook(None, callback=callback),
+                    HookSpec(module_key, "replace", "fwd", target=target),
+                    relative_path=module.relative_path,
+                )
+            return program.build()
 
 
 class ActivationAddition(HookingContextFactory):
     def __init__(
         self,
-        modules_to_steer: List[str],
+        modules_to_steer: List[str | Target],
         positive_key: UnraveledKey = "positive",
         negative_key: UnraveledKey = "negative",
         steer_key: UnraveledKey = "steer",
@@ -56,7 +71,8 @@ class ActivationAddition(HookingContextFactory):
     ):
         super().__init__()
 
-        self._modules_to_steer = modules_to_steer
+        self._targets_to_steer = [activation_target(value, argument="modules_to_steer") for value in modules_to_steer]
+        self._modules_to_steer = [path for path, _target in self._targets_to_steer]
         self._positive_key = positive_key
         self._negative_key = negative_key
         self._steer_key = steer_key
@@ -65,6 +81,10 @@ class ActivationAddition(HookingContextFactory):
 
         self._hooked_module_kwargs["relative_path"] = "td_module.module[0]._td_module"
 
+    @property
+    def execution_spec(self) -> ExecutionSpec:
+        return ExecutionSpec(model_passes=2)
+
     def _prepare_module(
         self,
         module: TensorDictModuleBase,
@@ -72,7 +92,7 @@ class ActivationAddition(HookingContextFactory):
         out_keys: List[UnraveledKey],
         extra_relative_path: str,
     ) -> TensorDictModuleBase:
-        stored_keys = [f"{m}_output" for m in self._modules_to_steer]
+        stored_keys = list(self._modules_to_steer)
         positive_keys = [(self._positive_key, key) for key in stored_keys]
         negative_keys = [(self._negative_key, key) for key in stored_keys]
         steer_keys = [(self._steer_key, key) for key in stored_keys]
@@ -109,19 +129,28 @@ class ActivationAddition(HookingContextFactory):
             )
         return TensorDictSequential(*modules)
 
-    def _hook_module(self, module: HookedModule) -> MultiHookHandle:
+    def _hook_module(self, module: HookedModule) -> BoundHookProgram:
         cache_ref = module.td_module[0].cache_ref
-        handles = []
-        for module_key in self._modules_to_steer:
-            handle, _ = module.get(
-                cache=cache_ref,
-                cache_key=module_key,
-                module_key=module_key,
-                callback=self._cache_callback,
-            )
-            handles.append(handle)
+        with HookProgramBuilder() as program:
+            for module_key, target in self._targets_to_steer:
 
-        return MultiHookHandle(handles)
+                def capture_callback(*, _target=target, **kwargs):
+                    output = kwargs["output"]
+                    if self._cache_callback is not None:
+                        output = self._cache_callback(**kwargs)
+                    return _selected_output(output, _target)
+
+                program.register_path(
+                    module,
+                    HookFactory.make_caching_hook(
+                        module_key,
+                        cache_ref,
+                        callback=capture_callback if target is not None else self._cache_callback,
+                    ),
+                    HookSpec(module_key, "capture", "fwd", target=target),
+                    relative_path=module.relative_path,
+                )
+            return program.build()
 
     def _compute_steering_vectors(self, td: TensorDict) -> TensorDict:
         positive_outputs = td["_positive_cache"]

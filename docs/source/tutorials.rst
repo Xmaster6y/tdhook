@@ -1,10 +1,7 @@
 Tutorials
 =========
 
-Tutorials may demonstrate a method on a **composed model**, a **same-run hook
-composition**, or a **multi-stage pipeline**.  These terms follow the
-:doc:`composition` contract.  Canonical declared workflows exchange named
-TensorDict artifacts and show their preflight model-pass budget before running.
+Complete examples for common TDHook workflows and domain integrations.
 
 .. raw:: html
 
@@ -26,7 +23,7 @@ TensorDict artifacts and show their preflight model-pass budget before running.
    :gutter: 3
 
    .. grid-item-card::
-      :link: declared-pipelines
+      :link: notebooks/tutorials/declared-workflows.ipynb
       :class-card: surface
       :class-body: surface
 
@@ -37,8 +34,8 @@ TensorDict artifacts and show their preflight model-pass budget before running.
                <i class="fa-solid fa-diagram-project fa-2x"></i>
             </div>
             <div>
-               <h5 class="card-title">Declared Pipelines (Offline)</h5>
-               <p class="card-text">Plan and run deterministic concept-attribution and conditioned-dimension workflows with named artifacts.</p>
+               <h5 class="card-title">Declared Workflows</h5>
+               <p class="card-text">Run two offline workflows with named TensorDict values.</p>
             </div>
          </div>
 
@@ -88,8 +85,8 @@ TensorDict artifacts and show their preflight model-pass budget before running.
                <i class="fa-solid fa-map fa-2x"></i>
             </div>
             <div>
-               <h5 class="card-title">Concept Attribution Visualisation (Extended)</h5>
-               <p class="card-text">Optional natural-image visualisation that builds on the declared concept-attribution workflow.</p>
+               <h5 class="card-title">Concept Attribution</h5>
+               <p class="card-text">Visualise concept attribution on natural images.</p>
             </div>
          </div>
 
@@ -105,8 +102,8 @@ TensorDict artifacts and show their preflight model-pass budget before running.
                <i class="fa-solid fa-chess-board fa-2x"></i>
             </div>
             <div>
-               <h5 class="card-title">Chess Dimension Visualisation (Extended)</h5>
-               <p class="card-text">Optional chess rendering and plots downstream of declared conditioned-dimension artifacts.</p>
+               <h5 class="card-title">Chess Dimension Estimation</h5>
+               <p class="card-text">Estimate and plot dimensions for chess activations.</p>
             </div>
          </div>
 
@@ -115,8 +112,7 @@ TensorDict artifacts and show their preflight model-pass budget before running.
    :maxdepth: 2
 
    notebooks/tutorials/torchrl-ppo.ipynb
-   declared-pipelines
-   notebooks/tutorials/declared-pipelines.ipynb
+   notebooks/tutorials/declared-workflows.ipynb
    notebooks/tutorials/chess-value-saliency.ipynb
    notebooks/tutorials/concept-attribution.ipynb
    notebooks/tutorials/chess-dimension-estimation.ipynb

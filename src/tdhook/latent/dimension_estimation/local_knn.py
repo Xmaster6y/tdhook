@@ -2,8 +2,9 @@ from textwrap import indent
 from typing import Literal, Union
 
 import torch
-from tensordict import TensorDict
+from tensordict import TensorDictBase
 from tensordict.nn import TensorDictModuleBase
+from tensordict.utils import NestedKey
 
 from ._utils import sorted_neighbors
 
@@ -29,8 +30,8 @@ class LocalKnnDimensionEstimator(TensorDictModuleBase):
     def __init__(
         self,
         k: Union[int, Literal["auto"]] = "auto",
-        in_key: str = "data",
-        out_key: str = "dimension",
+        in_key: NestedKey = "data",
+        out_key: NestedKey = "dimension",
         eps: float = 1e-5,
     ):
         super().__init__()
@@ -46,7 +47,7 @@ class LocalKnnDimensionEstimator(TensorDictModuleBase):
         self.in_keys = [in_key]
         self.out_keys = [out_key]
 
-    def forward(self, td: TensorDict) -> TensorDict:
+    def forward(self, td: TensorDictBase) -> TensorDictBase:
         data = td[self.in_key]
         N = data.shape[-2]
         k = _resolve_k(self.k, N)

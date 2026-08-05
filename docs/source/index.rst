@@ -9,10 +9,12 @@
     :hidden:
 
     start
+    architecture
+    migration
     colab
+    demos
     methods
     composition
-    artifacts
     tutorials
     api/index
     references
@@ -53,6 +55,12 @@
             :outline:
 
                 Tutorials
+
+          .. button-ref:: demos
+            :color: primary
+            :outline:
+
+                Executable Demos
 
           .. button-ref:: api/index
             :color: primary

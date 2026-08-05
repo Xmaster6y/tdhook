@@ -1,8 +1,9 @@
 from textwrap import indent
 
 import torch
-from tensordict import TensorDict
+from tensordict import TensorDictBase
 from tensordict.nn import TensorDictModuleBase
+from tensordict.utils import NestedKey
 
 
 class InformationImbalanceEstimator(TensorDictModuleBase):
@@ -21,10 +22,10 @@ class InformationImbalanceEstimator(TensorDictModuleBase):
 
     def __init__(
         self,
-        in_key_a: str = "data_a",
-        in_key_b: str = "data_b",
-        out_key_a_to_b: str = "information_imbalance_a_to_b",
-        out_key_b_to_a: str = "information_imbalance_b_to_a",
+        in_key_a: NestedKey = "data_a",
+        in_key_b: NestedKey = "data_b",
+        out_key_a_to_b: NestedKey = "information_imbalance_a_to_b",
+        out_key_b_to_a: NestedKey = "information_imbalance_b_to_a",
         p: float = 2.0,
     ):
         super().__init__()
@@ -37,7 +38,7 @@ class InformationImbalanceEstimator(TensorDictModuleBase):
         self.in_keys = [in_key_a, in_key_b]
         self.out_keys = [out_key_a_to_b, out_key_b_to_a]
 
-    def forward(self, td: TensorDict) -> TensorDict:
+    def forward(self, td: TensorDictBase) -> TensorDictBase:
         x = td[self.in_key_a]
         y = td[self.in_key_b]
         _validate_inputs(x, y)
