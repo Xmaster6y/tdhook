@@ -9,8 +9,9 @@ from tdhook.contexts import HookingContextFactory
 from tdhook.modules import FunctionModule, flatten_select_reshape_call, IntermediateKeysCleaner, ModuleCallWithCache
 from tdhook._types import UnraveledKey
 from tdhook.modules import HookedModule
-from tdhook.hooks import MultiHookHandle, MutableWeakRef, TensorDictRef
+from tdhook.hooks import HookFactory, MutableWeakRef, TensorDictRef
 from tdhook.execution import ExecutionSpec, GradientMode
+from tdhook.runtime import BoundHookProgram, HookProgramBuilder, HookSpec
 
 
 class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
@@ -111,38 +112,52 @@ class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
             )
         return TensorDictSequential(*modules)
 
-    def _hook_module(self, module: HookedModule) -> MultiHookHandle:
+    def _hook_module(self, module: HookedModule) -> BoundHookProgram:
+        with HookProgramBuilder() as program:
+            self._register_hook_program(module, program)
+            return program.build()
+
+    def _register_hook_program(self, module: HookedModule, program: HookProgramBuilder) -> None:
+        """Add this attribution's hooks to an open program builder."""
+
         cache_ref = module.td_module[2].cache_ref
-        handles = []
         for module_key in self._input_modules:
 
             def callback(**kwargs):
-                nonlocal module_key, self
                 if self._cache_callback is not None:
                     output = self._cache_callback(**kwargs)
                 else:
                     output = kwargs["output"]
                 return output.requires_grad_(True)
 
-            handle, _ = module.get(  # TODO: replace by a read
-                cache=cache_ref,
-                cache_key=("_cache_in", module_key),
-                module_key=module_key,
-                callback=callback,
+            program.register_path(
+                module,
+                HookFactory.make_caching_hook(
+                    ("_cache_in", module_key),
+                    cache_ref,
+                    callback=callback,
+                ),
+                HookSpec(module_key, "capture", "fwd"),
+                relative_path=module.relative_path,
             )
-            handles.append(handle)
         for module_key in self._target_modules:
-            handle, _ = module.get(
-                cache=cache_ref,
-                cache_key=("_cache_out", module_key),
-                module_key=module_key,
-                callback=self._cache_callback,
+            program.register_path(
+                module,
+                HookFactory.make_caching_hook(
+                    ("_cache_out", module_key),
+                    cache_ref,
+                    callback=self._cache_callback,
+                ),
+                HookSpec(module_key, "capture", "fwd"),
+                relative_path=module.relative_path,
             )
-            handles.append(handle)
         for module_key, callback in self._output_grad_callbacks.items():
-            handle = module.set_grad_output(module_key, value=None, callback=callback)
-            handles.append(handle)
-        return MultiHookHandle(handles)
+            program.register_path(
+                module,
+                HookFactory.make_setting_hook(None, callback=callback, direction="bwd_pre"),
+                HookSpec(module_key, "replace", "bwd_pre"),
+                relative_path=module.relative_path,
+            )
 
     def _register_inputs_fn(self, td: TensorDict) -> TensorDict:
         inputs = td["_register_in"]

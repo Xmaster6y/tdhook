@@ -104,17 +104,23 @@ class HookProgramBuilder:
     ) -> None:
         """Resolve ``spec.module_path`` below ``root`` and install its hook."""
 
-        self._ensure_open()
-        relative_root = resolve_submodule_path(root, relative_path)
-        module = resolve_submodule_path(relative_root, spec.module_path)
-        if not isinstance(module, nn.Module):
-            raise TypeError(f"hook path must resolve to a torch.nn.Module, got {type(module).__name__}")
+        module = self.resolve_path(root, spec.module_path, relative_path=relative_path)
         if isinstance(module, nn.ModuleList):
             warnings.warn(
                 f"You are hooking a ModuleList ({spec.module_path}), which will never be executed.",
                 stacklevel=2,
             )
         self.register(module, hook, spec)
+
+    def resolve_path(self, root: nn.Module, module_path: str, *, relative_path: str = "") -> nn.Module:
+        """Resolve one executable module path without installing a hook."""
+
+        self._ensure_open()
+        relative_root = resolve_submodule_path(root, relative_path)
+        module = resolve_submodule_path(relative_root, module_path)
+        if not isinstance(module, nn.Module):
+            raise TypeError(f"runtime path must resolve to a torch.nn.Module, got {type(module).__name__}")
+        return module
 
     def record(self, spec: HookSpec, cleanup: Callable[[], Any] | None = None) -> None:
         """Record a non-hook operation, optionally with lifecycle cleanup."""

@@ -92,6 +92,11 @@ all bind through this runtime. Their programs distinguish observation
 (``capture``) from intervention (``replace``), including hook direction and
 prepend ordering.
 
+Gradient attribution uses the same operations for activation and backward-hook
+state. LRP rule installation is also a bound program operation
+(``apply_rule``), so temporary ``forward`` rewrites have the same failure-safe
+ownership and reporting as hooks.
+
 Methods migrate onto this runtime incrementally. Until a method exposes a
 ``HookProgram``, compatibility with another method is unknown and the planner
 must keep their executions separate.

@@ -20,6 +20,7 @@ from captum.attr._utils import approximation_methods
 from tdhook.attribution.gradient_helpers import helpers
 from tdhook.attribution import Saliency, IntegratedGradients, GuidedBackpropagation, ActivationMaximisation
 from tdhook.attribution.grad_cam import GradCAM, DimsConfig
+from tdhook.runtime import HookProgram, HookSpec
 
 
 def get_sequential_linear_module(seed: int):
@@ -387,6 +388,13 @@ class TestGuidedBackpropagation:
         assert gradients.shape == (3, 20)
         assert torch.all(gradients >= 0)
 
+        expected_modules = [name for name, _ in default_test_model.named_modules() if name]
+        assert hooked_module.hooking_context.program == HookProgram(
+            tuple(HookSpec(name, "replace", "bwd") for name in expected_modules)
+            + (HookSpec("linear1", "capture", "fwd"),)
+        )
+        assert all(not submodule._backward_hooks for submodule in default_test_model.modules())
+
 
 class TestLatentAttribution:
     def test_latent_target_attribution(self, default_test_model):
@@ -454,6 +462,30 @@ class TestLatentAttribution:
 
         assert output.get(("attr", "linear1")).shape == (3, 20)
         torch.testing.assert_close(output.get(("attr", "linear1")), grad)
+
+    def test_gradient_hook_program_reports_capture_and_intervention(self, default_test_model):
+        def grad_callback(grad_output, **_):
+            return grad_output
+
+        context = Saliency(
+            use_inputs=False,
+            use_outputs=False,
+            input_modules=["linear1"],
+            target_modules=["linear2"],
+            output_grad_callbacks={"linear1": grad_callback},
+        )
+        with context.prepare(default_test_model) as hooked_module:
+            hooked_module(TensorDict({"input": torch.randn(3, 10)}, batch_size=3))
+
+        assert hooked_module.hooking_context.program == HookProgram(
+            (
+                HookSpec("linear1", "capture", "fwd"),
+                HookSpec("linear2", "capture", "fwd"),
+                HookSpec("linear1", "replace", "bwd_pre"),
+            )
+        )
+        assert all(not submodule._forward_hooks for submodule in default_test_model.modules())
+        assert all(not submodule._backward_pre_hooks for submodule in default_test_model.modules())
 
 
 class TestActivationMaximisation:

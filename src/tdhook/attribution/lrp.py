@@ -2,13 +2,14 @@ from typing import Callable, Optional, List, Dict
 
 from torch import nn
 from warnings import warn
-from tensordict.nn import TensorDictModule, TensorDictModuleBase
+from tensordict.nn import TensorDictModule
 from tensordict import TensorDict
 
 from tdhook.attribution.gradient_helpers import GradientAttribution
 from tdhook._types import UnraveledKey
 from tdhook.attribution.lrp_helpers.rules import Rule
-from tdhook.hooks import resolve_submodule_path
+from tdhook.modules import HookedModule
+from tdhook.runtime import BoundHookProgram, HookProgramBuilder, HookSpec
 
 
 class LRP(GradientAttribution):
@@ -54,41 +55,20 @@ class LRP(GradientAttribution):
         self._warn_on_missing_rule = warn_on_missing_rule
         self._skip_modules = skip_modules
 
-    def _prepare_module(
-        self,
-        module: TensorDictModuleBase,
-        in_keys: List[UnraveledKey],
-        out_keys: List[UnraveledKey],
-        extra_relative_path: str,
-    ) -> TensorDictModuleBase:
-        rule_map = {}
-        for name, child in module.named_modules():
-            if self._skip_modules and self._skip_modules(name, child):
-                continue
-            rule = self._rule_mapper(name, child)
-            if rule is not None:
-                rule.register(child)
-                rule_map[name] = rule
-            elif self._warn_on_missing_rule:
-                warn(f"No rule found for module `{name}` ({type(child).__name__})")
-        module._rule_map = rule_map
-        return super()._prepare_module(module, in_keys, out_keys, extra_relative_path)
-
-    def _restore_module(
-        self,
-        module: TensorDictModuleBase,
-        in_keys: List[UnraveledKey],
-        out_keys: List[UnraveledKey],
-        extra_relative_path: str,
-    ) -> TensorDictModuleBase:
-        module = super()._restore_module(module, in_keys, out_keys, extra_relative_path)
-        if not hasattr(module, "_rule_map"):
-            return module
-        for name, rule in module._rule_map.items():
-            child = resolve_submodule_path(module, name)
-            rule.unregister(child)
-        del module._rule_map
-        return module
+    def _hook_module(self, module: HookedModule) -> BoundHookProgram:
+        with HookProgramBuilder() as program:
+            root = program.resolve_path(module, "", relative_path=module.relative_path)
+            for name, child in root.named_modules():
+                if self._skip_modules and self._skip_modules(name, child):
+                    continue
+                rule = self._rule_mapper(name, child)
+                if rule is not None:
+                    handle = rule.register(child)
+                    program.record(HookSpec(name, "apply_rule", None), handle.remove)
+                elif self._warn_on_missing_rule:
+                    warn(f"No rule found for module `{name}` ({type(child).__name__})")
+            self._register_hook_program(module, program)
+            return program.build()
 
     def _grad_attr(
         self,

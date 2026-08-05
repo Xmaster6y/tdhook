@@ -33,6 +33,7 @@ from tdhook.attribution.lrp_helpers.rules import (
 )
 from tdhook.attribution.lrp_helpers.layers import Sum
 from tdhook.attribution import LRP
+from tdhook.runtime import HookProgram, HookSpec
 
 
 def get_linear_module(seed: int):
@@ -267,6 +268,39 @@ class TestRules:
             warnings.simplefilter("error")
             with clean_lrp.prepare(module):
                 pass
+
+    def test_lrp_rules_are_reported_and_restored_by_the_bound_program(self):
+        module = get_sequential_linear_module(seed=0)
+        lrp = LRP(
+            rule_mapper=EpsilonPlus(epsilon=1e-6),
+            skip_modules=LRP.default_skip,
+            warn_on_missing_rule=False,
+        )
+
+        with lrp.prepare(module) as hooked_module:
+            assert all(hasattr(child, "_prev_forward") for child in module)
+
+        assert hooked_module.hooking_context.program == HookProgram(
+            tuple(HookSpec(str(index), "apply_rule", None) for index in range(len(module)))
+        )
+        assert all(not hasattr(child, "_prev_forward") for child in module)
+
+    def test_lrp_rule_registration_rolls_back_after_mapper_failure(self):
+        module = get_sequential_linear_module(seed=0)
+
+        def failing_mapper(name, _module):
+            if name == "0":
+                return EpsilonRule(epsilon=1e-6)
+            if name == "1":
+                raise RuntimeError("mapper failure")
+            return None
+
+        lrp = LRP(rule_mapper=failing_mapper, warn_on_missing_rule=False)
+        with pytest.raises(RuntimeError, match="mapper failure"):
+            with lrp.prepare(module):
+                pass
+
+        assert not hasattr(module[0], "_prev_forward")
 
     def test_removable_rule_handle_module_none(self):
         """Test RemovableRuleHandle.remove() when module reference is None."""
