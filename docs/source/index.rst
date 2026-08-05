@@ -9,15 +9,10 @@
     :hidden:
 
     start
-    architecture
-    migration
-    colab
-    demos
     methods
-    composition
     tutorials
     api/index
-    references
+    about
 
 .. grid:: 1 1 2 2
     :class-container: hero
@@ -41,33 +36,6 @@
             Interpreting ``torch`` Deep Neural Networks
 
         **tdhook** is a package for explaining ``torch`` deep neural networks based on ``tensordict`` and ``torch`` hooks.
-
-        .. div:: button-group
-
-          .. button-ref:: start
-            :color: primary
-            :shadow:
-
-                  Get Started
-
-          .. button-ref:: tutorials
-            :color: primary
-            :outline:
-
-                Tutorials
-
-          .. button-ref:: demos
-            :color: primary
-            :outline:
-
-                Executable Demos
-
-          .. button-ref:: api/index
-            :color: primary
-            :outline:
-
-                API Reference
-
 
 .. div:: sd-fs-1 sd-font-weight-bold sd-text-center sd-text-primary sd-mb-5
 

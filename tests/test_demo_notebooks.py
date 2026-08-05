@@ -8,18 +8,16 @@ from nbclient import NotebookClient
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEMO_NOTEBOOKS = (
-    REPO_ROOT / "docs/source/notebooks/tutorials/declared-workflows.ipynb",
-    REPO_ROOT / "docs/source/notebooks/methods/representation-similarity.ipynb",
+DEMO_DOCUMENTS = (
+    ("tutorials.rst", "notebooks/tutorials/declared-workflows.ipynb"),
+    ("methods.rst", "notebooks/methods/representation-similarity.ipynb"),
 )
+DEMO_NOTEBOOKS = tuple(REPO_ROOT / "docs/source" / path for _, path in DEMO_DOCUMENTS)
 
 
 def test_demo_notebooks_are_linked_from_the_top_level_docs():
-    demos_page = (REPO_ROOT / "docs/source/demos.rst").read_text()
-
-    for path in DEMO_NOTEBOOKS:
-        relative_path = path.relative_to(REPO_ROOT / "docs/source").as_posix()
-        assert relative_path in demos_page
+    for document, notebook in DEMO_DOCUMENTS:
+        assert notebook in (REPO_ROOT / "docs/source" / document).read_text()
 
 
 @pytest.mark.integration
