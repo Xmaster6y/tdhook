@@ -354,18 +354,12 @@ class Workflow:
 
             with ExitStack() as stack:
                 bound = []
-                rebound_nodes = []
                 for node in execution_nodes:
                     assert isinstance(node, _BoundMethodNode)
                     rebound, prepared = stack.enter_context(_bind_method(node.index, node.method, model))
                     if not _same_bound_facts(node, rebound):
                         raise RuntimeError(f"Bound facts for workflow method {node.name!r} changed after planning")
-                    rebound_nodes.append(rebound)
                     bound.append(prepared)
-                if len(rebound_nodes) > 1:
-                    reason = _coexecution_incompatibility(rebound_nodes[:-1], rebound_nodes[-1])
-                    if reason is not None:
-                        raise RuntimeError(f"Bound method compatibility changed after planning: {reason}")
                 result = bound[-1](current)
                 if result is not None:
                     current = result

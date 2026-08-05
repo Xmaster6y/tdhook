@@ -42,15 +42,15 @@ Most methods should work with minimal configuration. Here's a basic example of r
 
 For a small, fully offline declared-workflow example, start with
 :doc:`declared-pipelines`.  It shows preflight planning, exact model-pass
-budgets, named TensorDict artifacts, provenance, and conservative stage
-splits.  For individual methods, see the :doc:`methods` page.
+budgets, named TensorDict values, and conservative execution splits. For
+individual methods, see the :doc:`methods` page.
 
 Composition terminology
 -----------------------
 
-TDHook's goal is to make every public method available to a declared
-**multi-stage pipeline**, coalescing compatible hooks into the fewest safe model
-executions.  The contract distinguishes a **composed model** (a model with
-multiple inputs, outputs, or submodules), **same-run hook composition**, and
-pipeline stages exchanging named TensorDict artifacts.  See the
-:doc:`composition` contract for the planner target and capability matrix.
+TDHook composes prepared methods and ordinary TensorDict operators in a
+declared **workflow**, coalescing only bound hooks with an explicit safety
+proof. The contract distinguishes a **composed model** (a model with multiple
+inputs, outputs, or submodules), **same-run hook composition**, and sequential
+workflow steps exchanging named TensorDict values. See :doc:`composition` for
+the planner contract and concrete conformance evidence.

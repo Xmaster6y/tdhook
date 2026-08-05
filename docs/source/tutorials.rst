@@ -2,9 +2,9 @@ Tutorials
 =========
 
 Tutorials may demonstrate a method on a **composed model**, a **same-run hook
-composition**, or a **multi-stage pipeline**.  These terms follow the
-:doc:`composition` contract.  Canonical declared workflows exchange named
-TensorDict artifacts and show their preflight model-pass budget before running.
+composition**, or a declared **workflow**. These terms follow the
+:doc:`composition` contract. Canonical workflows exchange named TensorDict
+values and show their preflight model-pass budget before running.
 
 .. raw:: html
 
@@ -37,7 +37,7 @@ TensorDict artifacts and show their preflight model-pass budget before running.
                <i class="fa-solid fa-diagram-project fa-2x"></i>
             </div>
             <div>
-               <h5 class="card-title">Declared Pipelines (Offline)</h5>
+               <h5 class="card-title">Declared Workflows (Offline)</h5>
                <p class="card-text">Plan and run deterministic concept-attribution and conditioned-dimension workflows with named artifacts.</p>
             </div>
          </div>

@@ -147,6 +147,27 @@ class RestoreAfterRemovalFailureFactory(PrepFlagFactory):
         return MultiHookHandle([RemoveFailureHandle(True, [])])
 
 
+class ProgramFailureHandle:
+    def __init__(self, removed):
+        self.removed = removed
+
+    @property
+    def program(self):
+        raise RuntimeError("program inspection failed")
+
+    def remove(self):
+        self.removed.append(True)
+
+
+class ProgramFailureFactory(HookingContextFactory):
+    def __init__(self, removed):
+        super().__init__()
+        self.removed = removed
+
+    def _hook_module(self, module):
+        return ProgramFailureHandle(self.removed)
+
+
 class TestBaseContext:
     """Basic single-context behavior."""
 
@@ -304,6 +325,21 @@ class TestHookingContextLifecycle:
         assert not context._in_context
         assert context._stack is None
 
+    def test_entry_failure_after_hook_installation_removes_the_handle(self, default_test_model):
+        removed = []
+        context = ProgramFailureFactory(removed).prepare(default_test_model)
+
+        with pytest.raises(RuntimeError, match="program inspection failed"):
+            with context:
+                pass
+
+        assert removed == [True]
+
+    def test_direct_execution_state_is_scoped_to_an_active_binding(self, default_test_model):
+        context = HookingContextFactory().prepare(default_test_model)
+        with pytest.raises(RuntimeError, match="only available inside"):
+            _ = context.executes_model_directly
+
 
 class TestCompositeContextDisable:
     def test_disable_hooks_in_composite(self, default_test_model):
@@ -348,6 +384,18 @@ class TestTensorDictModuleContext:
             data = TensorDict({"foo": x}, batch_size=[2, 3])
             hm(data)
             assert "bar" in data and data["bar"].shape == (2, 3, 5)
+
+    def test_prepare_validates_selected_tensordict_module_keys(self, default_test_model):
+        td_mod = TensorDictModule(module=default_test_model, in_keys=["input"], out_keys=["output"])
+        invalid = (
+            ({"in_keys": [object()]}, "in_keys must be unraveled"),
+            ({"in_keys": ["missing"]}, "not in module.in_keys"),
+            ({"out_keys": [object()]}, "out_keys must be unraveled"),
+            ({"out_keys": ["missing"]}, "not in module.out_keys"),
+        )
+        for kwargs, message in invalid:
+            with pytest.raises(ValueError, match=message):
+                HookingContextFactory().prepare(td_mod, **kwargs)
 
 
 class TestCompositeTensorDictModule:

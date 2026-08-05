@@ -43,12 +43,12 @@ with IntegratedGradients(init_attr_targets=init_attr_targets).prepare(model) as 
 ### Composition
 
 TDHook's composability goal is that every public method can participate in a
-declared **multi-stage pipeline**, with compatible hooks combined into the
+declared **workflow**, with compatible hooks combined into the
 fewest safe model executions. The contract distinguishes a **composed model**
 (multiple inputs, outputs, or submodules), **same-run hook composition**, and
-pipeline stages exchanging named TensorDict artifacts. See the
-[composition contract](./docs/source/composition.rst) for the capability
-inventory, planner target, and current implementation status.
+workflow steps exchanging named TensorDict values. See the
+[composition contract](./docs/source/composition.rst) for the execution rules,
+conformance evidence, and current implementation status.
 
 To dig deeper, see the [documentation](https://tdhook.readthedocs.io).
 

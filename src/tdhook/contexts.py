@@ -334,15 +334,6 @@ class HookingContextFactory:
             return "it customises hooked-module spawning"
         return None
 
-    def planner_coexecution_incompatibility(self) -> str | None:
-        """Explain why planner coexecution cannot bypass standalone lifecycle state."""
-        incompatibility = self.hook_group_incompatibility()
-        if incompatibility is not None:
-            return incompatibility
-        if self._hooking_context_kwargs or self._hooked_module_kwargs:
-            return "it configures per-context or per-wrapper instance state"
-        return None
-
 
 class CompositeHookingContextFactory(HookingContextFactory):
     """

@@ -1,4 +1,4 @@
-Declared pipelines: an offline walkthrough
+Declared workflows: an offline walkthrough
 ===========================================
 
 This compact tutorial is the canonical starting point for TDHook's declared
@@ -6,11 +6,11 @@ workflow API.  It uses a deterministic local model and tensors only: no model
 download, checkpoint, or dataset is required.  The accompanying
 ``declared-pipelines`` notebook contains the same executable examples.
 
-Every pipeline has two phases.  :meth:`~tdhook.pipeline.Pipeline.plan` is a
-side-effect-free preflight that exposes model-pass cost and stage boundaries;
-:meth:`~tdhook.pipeline.Pipeline.run` then produces named artifacts and their
-provenance.  A split is intentional: TDHook only co-executes stages with an
-explicit compatible capability contract.
+Every workflow has two phases. :meth:`~tdhook.workflow.Workflow.plan` is a
+side-effect-free preflight that exposes model-pass cost, native key exchange,
+and execution boundaries. Calling the workflow then returns the final
+TensorDict. A split is intentional: TDHook only co-executes bound methods with
+an explicit safety proof.
 
 Offline fixture
 ---------------
@@ -141,9 +141,8 @@ Conformance and scope
 ---------------------
 
 The :doc:`composition` page is the source of truth for supported combinations.
-In particular, a pipeline does not promise universal same-run execution:
+In particular, a workflow does not promise universal same-run execution:
 unknown or incompatible pairs split conservatively before hooks are installed.
-The phrase ``25+ methods`` describes the public API inventory's exported
-classes and documented method variants; it is not a claim that every pair of
-those methods co-executes.  The capability and conformance matrices name the
-tested combinations, expected plans, and pass budgets.
+The conformance matrix names the concrete tested combinations, expected plans,
+and pass budgets; it does not claim that every pair of public methods
+co-executes.

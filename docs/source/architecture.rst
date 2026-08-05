@@ -126,7 +126,7 @@ Concept-conditioned attribution follows the same ownership rule. The first
 ``ConceptSelection`` derives a named selection with no model pass, and
 ``ChannelConditionedLRP`` reads that selection from its declared ``in_keys``
 during the second pass. The selected channel is execution data: it is not
-stored in a stage, notebook callback, or method-level side cache.
+stored in a wrapper, notebook callback, or method-level side cache.
 
 Shared hook runtime
 -------------------
