@@ -1,17 +1,18 @@
 import pytest
 import torch
+from contextlib import ExitStack
 from tensordict import TensorDict
 from tensordict.nn import TensorDictModule, TensorDictModuleBase
 from torch import nn
 
 from tests.composition_conformance import assert_conformance
 from tdhook.contexts import HookingContext, HookingContextFactory
-from tdhook.execution import ExecutionSpec, GradientMode
+from tdhook.execution import AutogradLifetime, ExecutionSpec, GradientMode
 from tdhook.latent import ActivationCaching, Probing
 from tdhook.modules import HookedModule
 from tdhook.runtime import BoundHookProgram, HookProgramBuilder, HookSpec
 from tdhook.targets import Target
-from tdhook.workflow import Workflow, WorkflowUpdate
+from tdhook.workflow import PlannedExecution, Workflow, WorkflowUpdate, _DeferredAutogradCleanup
 
 
 class CountingModel(nn.Module):
@@ -59,6 +60,32 @@ class ReplaceOutput(HookingContextFactory):
             return builder.build()
 
 
+class BackwardCapture(HookingContextFactory):
+    def __init__(self, *, fail=False):
+        super().__init__()
+        self.values = []
+        self.fail = fail
+
+    @property
+    def execution_spec(self):
+        return ExecutionSpec(gradient_mode=GradientMode.REQUIRED, autograd_lifetime=AutogradLifetime.BACKWARD)
+
+    def _hook_module(self, module: HookedModule) -> BoundHookProgram:
+        def capture(_module, _grad_input, grad_output):
+            self.values.append(grad_output[0].detach())
+            if self.fail:
+                raise RuntimeError("backward hook failed")
+
+        with HookProgramBuilder() as builder:
+            builder.register_path(
+                module,
+                capture,
+                HookSpec("", "capture", "bwd"),
+                relative_path=module.relative_path,
+            )
+            return builder.build()
+
+
 class EmptyProgram(HookingContextFactory):
     def _hook_module(self, module: HookedModule) -> BoundHookProgram:
         with HookProgramBuilder() as builder:
@@ -71,6 +98,23 @@ class InvalidOutput(TensorDictModuleBase):
 
     def forward(self, data):
         return "not a tensordict"
+
+
+class DeferredInvalidMethod(HookingContextFactory):
+    def __init__(self):
+        super().__init__()
+        self.context = None
+
+    @property
+    def execution_spec(self):
+        return ExecutionSpec(gradient_mode=GradientMode.REQUIRED, autograd_lifetime=AutogradLifetime.BACKWARD)
+
+    def prepare(self, *args, **kwargs):
+        self.context = super().prepare(*args, **kwargs)
+        return self.context
+
+    def _prepare_module(self, module, in_keys, out_keys, extra_relative_path):
+        return InvalidOutput()
 
 
 class PublishingModule(HookedModule):
@@ -197,12 +241,70 @@ def test_workflow_rejects_ancestor_output_collisions_before_execution(default_te
         Workflow(first, second).plan(default_test_model, data)
 
 
-def test_workflow_rejects_externally_driven_backward_capture(default_test_model):
+def test_workflow_rejects_undeclared_externally_driven_backward_capture(default_test_model):
     workflow = Workflow(ActivationCaching("linear1", directions=["bwd"]))
     data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
 
     with pytest.raises(ValueError, match="backward hooks"):
         workflow.plan(default_test_model, data)
+
+
+def test_workflow_keeps_deferred_backward_hooks_until_backward_completes(default_test_model):
+    method = BackwardCapture()
+    result = Workflow(method)(default_test_model, TensorDict({"input": torch.ones(2, 10)}, batch_size=[2]))
+
+    assert any(module._backward_hooks for module in default_test_model.modules())
+    result["output"].sum().backward()
+
+    assert method.values
+    assert all(not module._backward_hooks for module in default_test_model.modules())
+
+
+def test_workflow_cleans_deferred_backward_hooks_when_backward_fails(default_test_model):
+    method = BackwardCapture(fail=True)
+    result = Workflow(method)(default_test_model, TensorDict({"input": torch.ones(2, 10)}, batch_size=[2]))
+
+    with pytest.raises(RuntimeError, match="backward hook failed"):
+        result["output"].sum().backward()
+
+    assert all(not module._backward_hooks for module in default_test_model.modules())
+
+
+def test_workflow_rejects_deferred_backward_without_an_autograd_output():
+    method = BackwardCapture()
+    model = nn.Identity()
+    with pytest.raises(RuntimeError, match="autograd-enabled model output"):
+        Workflow(method)(model, TensorDict({"input": torch.ones(2, 10)}, batch_size=[2]))
+
+    assert not model._backward_hooks
+
+
+def test_workflow_rejects_deferred_backward_before_a_later_model_execution(default_test_model):
+    workflow = Workflow(BackwardCapture(), CaptureOutput())
+    data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
+
+    with pytest.raises(ValueError, match="cannot precede a later model execution"):
+        workflow.plan(default_test_model, data)
+
+    assert all(not module._backward_hooks for module in default_test_model.modules())
+
+
+def test_deferred_cleanup_preserves_first_cleanup_error_and_is_idempotent():
+    class FailingHandle:
+        def remove(self):
+            raise RuntimeError("handle cleanup failed")
+
+    def fail_stack_cleanup():
+        raise RuntimeError("stack cleanup failed")
+
+    stack = ExitStack()
+    stack.callback(fail_stack_cleanup)
+    cleanup = _DeferredAutogradCleanup(stack)
+    cleanup._handles = [FailingHandle()]
+
+    with pytest.raises(RuntimeError, match="handle cleanup failed"):
+        cleanup.close()
+    cleanup.close()
 
 
 def test_probing_inspection_is_inert_and_declares_additional_keys(default_test_model):
@@ -393,6 +495,11 @@ def test_workflow_explains_each_unproven_coexecution_case(default_test_model):
         def execution_spec(self):
             return ExecutionSpec(gradient_mode=GradientMode.REQUIRED)
 
+    class DeferredGradientCapture(GradientCapture):
+        @property
+        def execution_spec(self):
+            return ExecutionSpec(gradient_mode=GradientMode.REQUIRED, autograd_lifetime=AutogradLifetime.BACKWARD)
+
     class IndirectContext(HookingContext):
         @property
         def executes_model_directly(self):
@@ -405,6 +512,7 @@ def test_workflow_explains_each_unproven_coexecution_case(default_test_model):
     cases = (
         ((CaptureOutput(), TwoPassCapture()), "exactly one model pass"),
         ((CaptureOutput(), GradientCapture()), "different autograd modes"),
+        ((GradientCapture(), DeferredGradientCapture()), "different autograd lifetimes"),
         ((CaptureOutput(), HookingContextFactory()), "did not expose"),
         ((CaptureOutput(), EmptyProgram()), "empty hook program"),
         ((CaptureOutput(), IndirectCapture()), "transforms model execution"),
@@ -429,6 +537,23 @@ def test_workflow_rejects_non_tensordict_step_results(default_test_model):
             assert message in str(error)
         else:
             raise AssertionError("workflow accepted a non-TensorDict result")
+
+
+def test_deferred_method_non_tensordict_result_closes_its_context(default_test_model):
+    method = DeferredInvalidMethod()
+    data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
+
+    with pytest.raises(TypeError, match="method execution"):
+        Workflow(method)(default_test_model, data)
+
+    assert method.context is not None
+    assert not method.context._in_context
+
+
+def test_planned_execution_preserves_the_pre_lifetime_constructor_signature():
+    execution = PlannedExecution(("0:Method",), "method", ("input",), ("output",), 1, GradientMode.OPTIONAL)
+
+    assert execution.autograd_lifetime is None
 
 
 def test_workflow_splits_methods_bound_to_different_model_signatures():

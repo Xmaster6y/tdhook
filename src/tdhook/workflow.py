@@ -6,13 +6,14 @@ from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from typing import Generator, Protocol, Sequence, runtime_checkable
 
+import torch
 from tensordict import TensorDictBase
 from tensordict.nn import TensorDictModuleBase
-from torch import nn
+from torch import Tensor, nn
 
 from tdhook._types import UnraveledKey
 from tdhook.contexts import HookingContext
-from tdhook.execution import ExecutionSpec, GradientMode
+from tdhook.execution import AutogradLifetime, ExecutionSpec, GradientMode
 from tdhook.runtime import HookProgram
 
 
@@ -60,6 +61,7 @@ class PlannedExecution:
     out_keys: tuple[UnraveledKey, ...]
     model_passes: int
     gradient_mode: GradientMode | None
+    autograd_lifetime: AutogradLifetime | None = None
     coexecuted: bool = False
 
 
@@ -185,6 +187,8 @@ def _coexecution_incompatibility(
         return "co-execution requires every method to declare exactly one model pass"
     if any(node.execution_spec.gradient_mode != group[0].execution_spec.gradient_mode for node in group[1:]):
         return "methods require different autograd modes"
+    if any(node.execution_spec.autograd_lifetime != group[0].execution_spec.autograd_lifetime for node in group[1:]):
+        return "methods require different autograd lifetimes"
     if any(
         (node.model_in_keys, node.model_out_keys) != (group[0].model_in_keys, group[0].model_out_keys)
         for node in group[1:]
@@ -258,6 +262,53 @@ def _validate_workflow_method(node: _BoundMethodNode) -> None:
         raise ValueError(
             f"Workflow step {node.name!r} installs backward hooks but does not own an autograd-enabled execution"
         )
+
+
+class _DeferredAutogradCleanup:
+    """Close prepared contexts after the caller's autograd engine finishes."""
+
+    def __init__(self, stack: ExitStack):
+        self._stack = stack
+        self._handles: list[torch.utils.hooks.RemovableHandle] = []
+        self._queued = False
+        self._closed = False
+
+    def arm(self, data: TensorDictBase, keys: Sequence[UnraveledKey]) -> None:
+        tensors = []
+        for key in keys:
+            value = data.get(key)
+            if isinstance(value, Tensor) and value.requires_grad:
+                tensors.append(value)
+        if not tensors:
+            self.close()
+            raise RuntimeError("Deferred-backward workflow execution did not produce an autograd-enabled model output")
+        self._handles = [tensor.register_hook(self._queue_cleanup) for tensor in tensors]
+
+    def _queue_cleanup(self, gradient: Tensor) -> Tensor:
+        if not self._queued:
+            self._queued = True
+            torch.autograd.Variable._execution_engine.queue_callback(self.close)
+        return gradient
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        cleanup_error = None
+        try:
+            for handle in self._handles:
+                try:
+                    handle.remove()
+                except BaseException as error:
+                    cleanup_error = cleanup_error or error
+        finally:
+            self._handles = []
+            try:
+                self._stack.close()
+            except BaseException as error:
+                cleanup_error = cleanup_error or error
+        if cleanup_error is not None:
+            raise cleanup_error
 
 
 def _provided_namespace_covers(provided: UnraveledKey, required: UnraveledKey) -> bool:
@@ -367,6 +418,7 @@ class Workflow:
                         out_keys=node.out_keys,
                         model_passes=0,
                         gradient_mode=None,
+                        autograd_lifetime=None,
                     )
                 )
                 index += 1
@@ -400,10 +452,16 @@ class Workflow:
                     out_keys=tuple(dict.fromkeys(key for item in group for key in item.out_keys)),
                     model_passes=1 if len(group) > 1 else group[0].execution_spec.model_passes,
                     gradient_mode=group[0].execution_spec.gradient_mode,
+                    autograd_lifetime=group[0].execution_spec.autograd_lifetime,
                     coexecuted=len(group) > 1,
                 )
             )
             index += len(group)
+        for index, execution in enumerate(executions):
+            if execution.autograd_lifetime is AutogradLifetime.BACKWARD and any(
+                later.kind == "method" for later in executions[index + 1 :]
+            ):
+                raise ValueError("A deferred-backward workflow execution cannot precede a later model execution")
         return WorkflowPlan(tuple(executions), tuple(decisions))
 
     def plan(self, model: nn.Module, data: TensorDictBase) -> WorkflowPlan:
@@ -462,8 +520,16 @@ class Workflow:
                         current = result
                     for prepared in bound:
                         current = prepared.finalize_tensordict(current)
-            if not isinstance(current, TensorDictBase):
-                raise TypeError(f"Workflow method execution must return a TensorDict, got {type(current).__name__}")
+                if not isinstance(current, TensorDictBase):
+                    raise TypeError(
+                        f"Workflow method execution must return a TensorDict, got {type(current).__name__}"
+                    )
+                if execution.autograd_lifetime is AutogradLifetime.BACKWARD:
+                    cleanup = _DeferredAutogradCleanup(stack.pop_all())
+                    for prepared in bound:
+                        assert prepared.hooking_context is not None
+                        prepared.hooking_context.on_hook_failure(cleanup.close)
+                    cleanup.arm(current, first.model_out_keys)
         return current
 
     def __call__(self, model: nn.Module, data: TensorDictBase) -> TensorDictBase:

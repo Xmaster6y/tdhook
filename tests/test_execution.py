@@ -2,7 +2,7 @@ import pytest
 
 from tdhook.attribution import ActivationMaximisation, IntegratedGradients, Saliency
 from tdhook.contexts import HookingContextFactory
-from tdhook.execution import ExecutionSpec, GradientMode
+from tdhook.execution import AutogradLifetime, ExecutionSpec, GradientMode
 from tdhook.latent import ActivationAddition, ActivationPatching
 
 
@@ -31,6 +31,12 @@ def test_gradient_methods_own_their_execution_requirements():
         ({"model_passes": 0}, ValueError, "at least one model pass"),
         ({"model_passes": True}, TypeError, "must be an integer"),
         ({"gradient_mode": "required"}, TypeError, "must be a GradientMode"),
+        ({"autograd_lifetime": "backward"}, TypeError, "must be an AutogradLifetime"),
+        (
+            {"gradient_mode": GradientMode.OPTIONAL, "autograd_lifetime": AutogradLifetime.BACKWARD},
+            ValueError,
+            "deferred backward",
+        ),
     ],
 )
 def test_execution_spec_rejects_invalid_requirements(kwargs, exception, message):

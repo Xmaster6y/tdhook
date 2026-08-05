@@ -6,6 +6,7 @@ import warnings
 from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
+from functools import wraps
 from typing import Any, Generator
 
 from tensordict import TensorDict, TensorDictBase
@@ -54,9 +55,21 @@ class HookProgram:
 class BoundHookProgram:
     """An installed hook program with deterministic reverse-order cleanup."""
 
-    def __init__(self, program: HookProgram, cleanups: tuple[Callable[[], Any], ...]):
+    def __init__(
+        self,
+        program: HookProgram,
+        cleanups: tuple[Callable[[], Any], ...],
+        hook_failure_handlers: tuple[list[Callable[[], Any] | None], ...] = (),
+    ):
         self.program = program
         self._cleanups = list(cleanups)
+        self._hook_failure_handlers = hook_failure_handlers
+
+    def on_hook_failure(self, callback: Callable[[], Any]) -> None:
+        """Run ``callback`` if one of this program's hooks raises."""
+
+        for handler in self._hook_failure_handlers:
+            handler[0] = callback
 
     def remove(self) -> None:
         """Run every remaining cleanup in reverse registration order."""
@@ -78,6 +91,7 @@ class HookProgramBuilder:
     def __init__(self):
         self._specs: list[HookSpec] = []
         self._cleanups: list[Callable[[], Any]] = []
+        self._hook_failure_handlers: list[list[Callable[[], Any] | None]] = []
         self._built = False
 
     @property
@@ -92,8 +106,20 @@ class HookProgramBuilder:
         self._ensure_open()
         if spec.direction is None:
             raise ValueError("registered hooks require a direction")
-        handle = register_hook_to_module(module, hook, spec.direction, spec.prepend)
+        failure_handler: list[Callable[[], Any] | None] = [None]
+
+        @wraps(hook)
+        def guarded_hook(*args: Any, **kwargs: Any) -> Any:
+            try:
+                return hook(*args, **kwargs)
+            except BaseException:
+                if failure_handler[0] is not None:
+                    failure_handler[0]()
+                raise
+
+        handle = register_hook_to_module(module, guarded_hook, spec.direction, spec.prepend)
         self._cleanups.append(handle.remove)
+        self._hook_failure_handlers.append(failure_handler)
         self._specs.append(spec)
 
     def register_path(
@@ -138,7 +164,7 @@ class HookProgramBuilder:
         """Seal and return the installed program."""
 
         self._ensure_open()
-        bound = BoundHookProgram(self.program, tuple(self._cleanups))
+        bound = BoundHookProgram(self.program, tuple(self._cleanups), tuple(self._hook_failure_handlers))
         self._cleanups.clear()
         self._built = True
         return bound
@@ -148,9 +174,10 @@ class HookProgramBuilder:
 
         self._ensure_open()
         try:
-            BoundHookProgram(self.program, tuple(self._cleanups)).remove()
+            BoundHookProgram(self.program, tuple(self._cleanups), tuple(self._hook_failure_handlers)).remove()
         finally:
             self._cleanups.clear()
+            self._hook_failure_handlers.clear()
             self._specs.clear()
 
     def __enter__(self) -> "HookProgramBuilder":
