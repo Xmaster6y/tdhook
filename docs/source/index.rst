@@ -12,7 +12,7 @@
     methods
     tutorials
     api/index
-    references
+    about
 
 .. grid:: 1 1 2 2
     :class-container: hero
@@ -45,6 +45,12 @@
 
                   Get Started
 
+          .. button-ref:: methods
+            :color: primary
+            :outline:
+
+                Features
+
           .. button-ref:: tutorials
             :color: primary
             :outline:
@@ -56,6 +62,12 @@
             :outline:
 
                 API Reference
+
+          .. button-ref:: about
+            :color: primary
+            :outline:
+
+                About
 
 
 .. div:: sd-fs-1 sd-font-weight-bold sd-text-center sd-text-primary sd-mb-5

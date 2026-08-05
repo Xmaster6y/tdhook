@@ -1,5 +1,5 @@
-Methods
-=======
+Features
+========
 
 .. raw:: html
 

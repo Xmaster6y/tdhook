@@ -38,4 +38,4 @@ Run Integrated Gradients on a VGG16 model:
         }).unsqueeze(0)
         td = hooked_model(td)  # Access attribution with td.get(("attr", "input"))
 
-For more detailed examples, see the :doc:`methods` page.
+For more detailed examples, see :doc:`Features <methods>`.
