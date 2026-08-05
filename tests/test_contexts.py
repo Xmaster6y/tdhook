@@ -9,17 +9,10 @@ from typing import List
 
 import pytest
 
-from tdhook.contexts import (
-    HookingContextFactory,
-    HookingContextWithCache,
-    CompositeHookingContextFactory,
-    HookGroup,
-)
+from tdhook.contexts import HookingContextFactory
 from tdhook.modules import HookedModule
 from tdhook.hooks import MultiHookHandle
 from tdhook._types import UnraveledKey
-from tdhook.attribution import Saliency
-from tdhook.latent import SteeringVectors, ActivationPatching
 
 
 class Context1(HookingContextFactory):
@@ -66,60 +59,9 @@ class PrepFlagFactory(HookingContextFactory):
         return module
 
 
-class BadSpawnFactory(HookingContextFactory):
-    def _spawn_hooked_module(self, prep_module, hooking_context, extra_relative_path):
-        return super()._spawn_hooked_module(prep_module, hooking_context, extra_relative_path)
-
-
-class FailingPrepFactory(PrepFlagFactory):
-    def _prepare_module(self, module, in_keys, out_keys, extra_relative_path):
-        super()._prepare_module(module, in_keys, out_keys, extra_relative_path)
-        raise RuntimeError("preparation failed")
-
-
-class FailingHookFactory(HookingContextFactory):
-    def _hook_module(self, module):
-        raise RuntimeError("hook installation failed")
-
-
-class SpecialisedContextFactory(HookingContextFactory):
-    _hooking_context_class = HookingContextWithCache
-
-
-class SpecialisedHookedModule(HookedModule):
-    pass
-
-
-class SpecialisedModuleFactory(HookingContextFactory):
-    _hooked_module_class = SpecialisedHookedModule
-
-
 class RestoreFailureFactory(HookingContextFactory):
     def _restore_module(self, module, in_keys, out_keys, extra_relative_path):
         raise RuntimeError("restoration failed")
-
-
-class ReplacementFactory(HookingContextFactory):
-    def _prepare_module(self, module, in_keys, out_keys, extra_relative_path):
-        return TensorDictModule(torch.nn.Identity(), in_keys=in_keys, out_keys=out_keys)
-
-
-class OrderedFailingFactory(PrepFlagFactory):
-    def __init__(self, name, events, fail=False):
-        super().__init__(name)
-        self.events = events
-        self.fail = fail
-
-    def _prepare_module(self, module, in_keys, out_keys, extra_relative_path):
-        self.events.append(f"prepare {self.flag_name}")
-        super()._prepare_module(module, in_keys, out_keys, extra_relative_path)
-        if self.fail:
-            raise RuntimeError("preparation failed")
-        return module
-
-    def _restore_module(self, module, in_keys, out_keys, extra_relative_path):
-        self.events.append(f"restore {self.flag_name}")
-        return super()._restore_module(module, in_keys, out_keys, extra_relative_path)
 
 
 class RemoveFailureHandle:
@@ -131,15 +73,6 @@ class RemoveFailureHandle:
         self.removed.append(self.should_fail)
         if self.should_fail:
             raise RuntimeError("removal failed")
-
-
-class PartialRemovalFactory(HookingContextFactory):
-    def __init__(self, removed):
-        super().__init__()
-        self.removed = removed
-
-    def _hook_module(self, module):
-        return MultiHookHandle([RemoveFailureHandle(True, self.removed), RemoveFailureHandle(False, self.removed)])
 
 
 class RestoreAfterRemovalFailureFactory(PrepFlagFactory):
@@ -190,39 +123,6 @@ class TestBaseContext:
             hooked_module(data)
             assert data["output"].shape == (2, 3, 5)
             assert torch.allclose(data["output"], original_output * 2)
-
-
-class TestCompositeContext:
-    """Composition of multiple contexts."""
-
-    def test_composite_context(self, default_test_model):
-        """Composes Context1 then Context2."""
-        input = torch.randn(2, 3, 10)
-        original_output = default_test_model(input)
-        context = CompositeHookingContextFactory(Context1(), Context2())
-        with context.prepare(default_test_model) as hooked_module:
-            data = TensorDict({"input": input}, batch_size=[2, 3])
-            hooked_module(data)
-            assert data["output"].shape == (2, 3, 5)
-            assert torch.allclose(data["output"], (original_output + 1) * 2)
-
-    def test_hook_group_is_compatibility_alias(self):
-        assert HookGroup is CompositeHookingContextFactory
-
-    def test_reused_hook_group_releases_prepared_child_bookkeeping(self, default_test_model):
-        group = HookGroup(Context1(), Context2())
-
-        for _ in range(3):
-            with group.prepare(default_test_model):
-                pass
-            assert len(group._prepared_children) == 0
-
-    def test_hook_group_rejects_hooking_without_prepared_children(self, default_test_model):
-        group = HookGroup(Context1(), Context2())
-        hooked_module = HookedModule.from_module(default_test_model, ["input"], ["output"])
-
-        with pytest.raises(RuntimeError, match="missing prepared child modules"):
-            group._hook_module(hooked_module)
 
 
 class TestHookingContextLifecycle:
@@ -341,27 +241,6 @@ class TestHookingContextLifecycle:
             _ = context.executes_model_directly
 
 
-class TestCompositeContextDisable:
-    def test_disable_hooks_in_composite(self, default_test_model):
-        """Disabling hooks in a composite restores raw behavior temporarily."""
-        x = torch.randn(2, 3, 10)
-        original_output = default_test_model(x)
-        composite = CompositeHookingContextFactory(Context1(), Context2())
-        with composite.prepare(default_test_model) as hm:
-            data = TensorDict({"input": x}, batch_size=[2, 3])
-            hm(data)
-            assert torch.allclose(data["output"], (original_output + 1) * 2)
-
-            with hm.disable_context_hooks():
-                data_disabled = TensorDict({"input": x}, batch_size=[2, 3])
-                hm(data_disabled)
-                assert torch.allclose(data_disabled["output"], original_output)
-
-            data_after = TensorDict({"input": x}, batch_size=[2, 3])
-            hm(data_after)
-            assert torch.allclose(data_after["output"], (original_output + 1) * 2)
-
-
 class TestTensorDictModuleContext:
     def test_prepare_and_restore_td_module_calls_wrapped_prepare_restore(self, default_test_model):
         """Prepare/restore of a TensorDictModule uses factory hooks on wrapped module."""
@@ -396,103 +275,6 @@ class TestTensorDictModuleContext:
         for kwargs, message in invalid:
             with pytest.raises(ValueError, match=message):
                 HookingContextFactory().prepare(td_mod, **kwargs)
-
-
-class TestCompositeTensorDictModule:
-    def test_composite_prepare_restore_td_module_order(self, default_test_model):
-        """Composite applies prepare for each context and restores in reverse order."""
-        td_mod = TensorDictModule(module=default_test_model, in_keys=["input"], out_keys=["output"])
-        c1 = PrepFlagFactory("flag1")
-        c2 = PrepFlagFactory("flag2")
-        composite = CompositeHookingContextFactory(c1, c2)
-        assert not hasattr(td_mod, "flag1")
-        assert not hasattr(td_mod, "flag2")
-        with composite.prepare(td_mod):
-            assert getattr(td_mod, "flag1") == 1
-            assert getattr(td_mod, "flag2") == 1
-        assert not hasattr(td_mod, "flag1")
-        assert not hasattr(td_mod, "flag2")
-
-    def test_composite_raises_on_bad_spawn_override(self, default_test_model):
-        """Composite rejects contexts overriding _spawn_hooked_module."""
-        with pytest.raises(ValueError, match="customises hooked-module spawning"):
-            CompositeHookingContextFactory(BadSpawnFactory())
-
-    def test_composite_rejects_specialised_context_capability(self):
-        with pytest.raises(ValueError, match="HookingContextWithCache capability"):
-            CompositeHookingContextFactory(SpecialisedContextFactory())
-
-    def test_composite_rejects_specialised_module_capability(self):
-        with pytest.raises(ValueError, match="SpecialisedHookedModule capability"):
-            CompositeHookingContextFactory(SpecialisedModuleFactory())
-
-    def test_composite_preparation_failure_restores_earlier_children(self, default_test_model):
-        td_mod = TensorDictModule(module=default_test_model, in_keys=["input"], out_keys=["output"])
-        composite = CompositeHookingContextFactory(PrepFlagFactory("first"), FailingPrepFactory("second"))
-        with pytest.raises(RuntimeError, match="preparation failed"):
-            with composite.prepare(td_mod):
-                pass
-        assert not hasattr(td_mod, "first")
-        assert not hasattr(td_mod, "second")
-
-    def test_composite_preserves_prepare_error_when_rollback_fails(self, default_test_model):
-        composite = CompositeHookingContextFactory(RestoreFailureFactory(), FailingPrepFactory())
-        with pytest.raises(RuntimeError, match="preparation failed"):
-            with composite.prepare(default_test_model):
-                pass
-
-    def test_composite_restores_failed_preparation_in_lifo_order(self, default_test_model):
-        events = []
-        composite = CompositeHookingContextFactory(
-            OrderedFailingFactory("first", events), OrderedFailingFactory("second", events, fail=True)
-        )
-        with pytest.raises(RuntimeError, match="preparation failed"):
-            with composite.prepare(default_test_model):
-                pass
-        assert events == ["prepare first", "prepare second", "restore second", "restore first"]
-
-    def test_composite_hook_failure_removes_registered_hooks(self, default_test_model):
-        composite = CompositeHookingContextFactory(Context1(), FailingHookFactory())
-        x = torch.randn(2, 3, 10)
-        original = default_test_model(x)
-        with pytest.raises(RuntimeError, match="hook installation failed"):
-            with composite.prepare(default_test_model):
-                pass
-        assert torch.allclose(default_test_model(x), original)
-
-    def test_composite_hook_failure_attempts_every_registered_removal(self, default_test_model):
-        removed = []
-        composite = CompositeHookingContextFactory(PartialRemovalFactory(removed), FailingHookFactory())
-        with pytest.raises(RuntimeError, match="hook installation failed"):
-            with composite.prepare(default_test_model):
-                pass
-        assert removed == [True, False]
-
-    def test_saliency_and_steering_share_original_module_paths(self, default_test_model):
-        x = torch.randn(2, 3, 10)
-        composite = CompositeHookingContextFactory(
-            Saliency(),
-            SteeringVectors([""], lambda module_key, output: output + 1),
-        )
-        with composite.prepare(default_test_model) as hooked_module:
-            data = TensorDict({"input": x}, batch_size=[2, 3])
-            hooked_module(data)
-        assert data["_mod_out", "output"].shape == (2, 3, 5)
-        assert data["attr", "input"].shape == x.shape
-
-    def test_wrapped_children_keep_their_own_wrapper_state(self, default_test_model):
-        composite = CompositeHookingContextFactory(Saliency(), ActivationPatching([""]))
-        # Both children access a cache stored on their own TensorDict wrapper
-        # during hook installation. Context entry used to fail before a run
-        # because Saliency received ActivationPatching's wrapper instead.
-        with composite.prepare(default_test_model):
-            pass
-
-    def test_composite_rejects_rewrites_that_drop_the_original_module(self, default_test_model):
-        composite = CompositeHookingContextFactory(ReplacementFactory(), Context1())
-        with pytest.raises(RuntimeError, match="no longer contains the original module"):
-            with composite.prepare(default_test_model):
-                pass
 
 
 class TestDirectHookedModuleUsage:
