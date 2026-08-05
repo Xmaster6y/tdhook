@@ -37,39 +37,6 @@
 
         **tdhook** is a package for explaining ``torch`` deep neural networks based on ``tensordict`` and ``torch`` hooks.
 
-        .. div:: button-group
-
-          .. button-ref:: start
-            :color: primary
-            :shadow:
-
-                  Get Started
-
-          .. button-ref:: methods
-            :color: primary
-            :outline:
-
-                Features
-
-          .. button-ref:: tutorials
-            :color: primary
-            :outline:
-
-                Tutorials
-
-          .. button-ref:: api/index
-            :color: primary
-            :outline:
-
-                API Reference
-
-          .. button-ref:: about
-            :color: primary
-            :outline:
-
-                About
-
-
 .. div:: sd-fs-1 sd-font-weight-bold sd-text-center sd-text-primary sd-mb-5
 
   Key Features
