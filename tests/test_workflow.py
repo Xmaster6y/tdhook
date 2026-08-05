@@ -1,5 +1,6 @@
 import pytest
 import torch
+from contextlib import ExitStack
 from tensordict import TensorDict
 from tensordict.nn import TensorDictModule, TensorDictModuleBase
 from torch import nn
@@ -11,7 +12,7 @@ from tdhook.latent import ActivationCaching, Probing
 from tdhook.modules import HookedModule
 from tdhook.runtime import BoundHookProgram, HookProgramBuilder, HookSpec
 from tdhook.targets import Target
-from tdhook.workflow import Workflow, WorkflowUpdate
+from tdhook.workflow import Workflow, WorkflowUpdate, _DeferredAutogradCleanup
 
 
 class CountingModel(nn.Module):
@@ -250,6 +251,33 @@ def test_workflow_cleans_deferred_backward_hooks_when_backward_fails(default_tes
         result["output"].sum().backward()
 
     assert all(not module._backward_hooks for module in default_test_model.modules())
+
+
+def test_workflow_rejects_deferred_backward_without_an_autograd_output():
+    method = BackwardCapture()
+    model = nn.Identity()
+    with pytest.raises(RuntimeError, match="autograd-enabled model output"):
+        Workflow(method)(model, TensorDict({"input": torch.ones(2, 10)}, batch_size=[2]))
+
+    assert not model._backward_hooks
+
+
+def test_deferred_cleanup_preserves_first_cleanup_error_and_is_idempotent():
+    class FailingHandle:
+        def remove(self):
+            raise RuntimeError("handle cleanup failed")
+
+    def fail_stack_cleanup():
+        raise RuntimeError("stack cleanup failed")
+
+    stack = ExitStack()
+    stack.callback(fail_stack_cleanup)
+    cleanup = _DeferredAutogradCleanup(stack)
+    cleanup._handles = [FailingHandle()]
+
+    with pytest.raises(RuntimeError, match="handle cleanup failed"):
+        cleanup.close()
+    cleanup.close()
 
 
 def test_probing_inspection_is_inert_and_declares_additional_keys(default_test_model):

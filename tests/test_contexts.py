@@ -133,6 +133,16 @@ class TestBaseContext:
 
 
 class TestHookingContextLifecycle:
+    def test_hook_failure_cleanup_requires_an_active_bound_program(self, default_test_model):
+        context = HookingContextFactory().prepare(default_test_model)
+
+        with pytest.raises(RuntimeError, match="only available inside"):
+            context.on_hook_failure(lambda: None)
+
+        with context:
+            with pytest.raises(TypeError, match="BoundHookProgram"):
+                context.on_hook_failure(lambda: None)
+
     def test_cannot_enter_twice(self, default_test_model):
         """Raises when entering the same context twice."""
         ctx = Context1().prepare(default_test_model)

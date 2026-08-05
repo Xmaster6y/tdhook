@@ -3,7 +3,7 @@ import torch
 from torch import nn
 
 from tdhook.latent import ActivationCaching
-from tdhook.runtime import HookProgram, HookProgramBuilder, HookSpec
+from tdhook.runtime import HookProgram, HookProgramBuilder, HookSpec, temporary_module_state
 from tdhook.session import HookSession
 from tdhook.targets import Target
 
@@ -108,6 +108,12 @@ def test_program_builder_rejects_invalid_specs_and_reuse():
     builder = HookProgramBuilder()
     with pytest.raises(TypeError, match="cleanup"):
         builder.record(HookSpec("", "capture", None), cleanup=1)
+
+
+def test_temporary_module_state_rejects_hook_specs():
+    with pytest.raises(ValueError, match="directionless"):
+        with temporary_module_state(nn.Identity(), None, HookSpec("", "state", "fwd")):
+            pass
 
 
 def test_program_builder_context_rolls_back_when_registration_fails():
