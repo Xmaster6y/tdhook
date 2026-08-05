@@ -40,16 +40,6 @@ with IntegratedGradients(init_attr_targets=init_attr_targets).prepare(model) as 
     td = hooked_model(td) # Access attribution with td.get(("attr", "input"))
 ```
 
-### Composition
-
-TDHook's composability goal is that every public method can participate in a
-declared **workflow**, with compatible hooks combined into the
-fewest safe model executions. The contract distinguishes a **composed model**
-(multiple inputs, outputs, or submodules), **same-run hook composition**, and
-workflow steps exchanging named TensorDict values. See the
-[composition contract](./docs/source/composition.rst) for the execution rules,
-conformance evidence, and current implementation status.
-
 To dig deeper, see the [documentation](https://tdhook.readthedocs.io).
 
 ### Skills
