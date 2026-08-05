@@ -3,7 +3,7 @@ from pathlib import Path
 
 from torch import nn
 
-from tdhook import attribution, latent, weights
+from tdhook import attribution, latent, metrics, weights
 from tdhook.attribution import IntegratedGradients, LRP
 from tdhook.latent import dimension_estimation
 from tdhook.latent import ActivationCaching, Probing
@@ -28,7 +28,11 @@ def _capability_rows():
 
 def test_capability_matrix_covers_every_public_method_and_operator():
     public_symbols = (
-        set(attribution.__all__) | set(latent.__all__) | set(dimension_estimation.__all__) | set(weights.__all__)
+        set(attribution.__all__)
+        | set(latent.__all__)
+        | set(dimension_estimation.__all__)
+        | set(metrics.__all__)
+        | set(weights.__all__)
     )
 
     rows = _capability_rows()

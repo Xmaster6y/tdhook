@@ -3,8 +3,9 @@ from typing import Literal, Union
 
 import numpy as np
 import torch
-from tensordict import TensorDict
+from tensordict import TensorDictBase
 from tensordict.nn import TensorDictModuleBase
+from tensordict.utils import NestedKey
 
 from tdhook._optional_deps import requires_sklearn
 
@@ -28,8 +29,8 @@ class CaPcaDimensionEstimator(TensorDictModuleBase):
     def __init__(
         self,
         k: Union[int, Literal["auto"]] = "auto",
-        in_key: str = "data",
-        out_key: str = "dimension",
+        in_key: NestedKey = "data",
+        out_key: NestedKey = "dimension",
         eps: float = 1e-5,
     ):
         super().__init__()
@@ -46,7 +47,7 @@ class CaPcaDimensionEstimator(TensorDictModuleBase):
         self.out_keys = [out_key]
 
     @requires_sklearn
-    def forward(self, td: TensorDict) -> TensorDict:
+    def forward(self, td: TensorDictBase) -> TensorDictBase:
         from sklearn.decomposition import PCA
 
         data = td[self.in_key]

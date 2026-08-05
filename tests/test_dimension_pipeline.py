@@ -177,6 +177,22 @@ def test_existing_estimators_are_swappable_artifact_only_stages(estimator):
     assert result.plan.model_passes == 0
 
 
+def test_dimension_stage_accepts_an_estimator_with_nested_internal_keys():
+    samples = torch.randn(1, 8, 4)
+    artifacts = TensorDict(
+        {"activations": {"samples": NonTensorData(samples, batch_size=[])}},
+        batch_size=[],
+    )
+    estimator = TwoNnDimensionEstimator(
+        in_key=("operator", "samples"),
+        out_key=("operator", "dimension"),
+    )
+
+    result = DimensionEstimationStage("estimate", estimator).run(nn.Identity(), artifacts)
+
+    assert result.get(("metrics", "dimension")).data.shape == (1,)
+
+
 def test_dimension_stages_reject_invalid_artifacts_and_estimator_contracts():
     artifacts = TensorDict(
         {"activations": {"cache": {"invalid": NonTensorData("not-a-tensor", batch_size=[])}}}, batch_size=[]

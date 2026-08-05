@@ -14,6 +14,7 @@ from torch import nn
 from tensordict import TensorDict, TensorDictBase
 from tensordict.nn import TensorDictModuleBase
 from tensordict.tensorclass import NonTensorData
+from tensordict.utils import NestedKey
 
 from tdhook.latent import ActivationCaching
 from tdhook.pipeline import Pipeline, PipelineKey, Stage
@@ -112,8 +113,8 @@ class DimensionEstimationStage(Stage):
     ) -> None:
         in_key = getattr(estimator, "in_key", None)
         out_key = getattr(estimator, "out_key", None)
-        if not isinstance(in_key, str) or not isinstance(out_key, str):
-            raise TypeError("Dimension estimator stages require string in_key and out_key attributes")
+        if not isinstance(in_key, NestedKey) or not isinstance(out_key, NestedKey):
+            raise TypeError("Dimension estimator stages require native TensorDict in_key and out_key attributes")
         super().__init__(
             name,
             required_keys=[sample_key],

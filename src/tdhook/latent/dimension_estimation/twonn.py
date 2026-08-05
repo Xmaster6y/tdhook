@@ -1,8 +1,11 @@
 from textwrap import indent
 
 import torch
-from tensordict import TensorDict
+from tensordict import TensorDictBase
 from tensordict.nn import TensorDictModuleBase
+from tensordict.utils import NestedKey
+
+from tdhook._types import append_key_suffix
 
 from ._utils import sorted_neighbors
 
@@ -18,8 +21,8 @@ class TwoNnDimensionEstimator(TensorDictModuleBase):
 
     def __init__(
         self,
-        in_key: str = "data",
-        out_key: str = "dimension",
+        in_key: NestedKey = "data",
+        out_key: NestedKey = "dimension",
         return_xy: bool = False,
         eps: float = 1e-5,
     ):
@@ -29,9 +32,11 @@ class TwoNnDimensionEstimator(TensorDictModuleBase):
         self.return_xy = return_xy
         self.eps = eps
         self.in_keys = [in_key]
-        self.out_keys = [out_key, f"{out_key}_x", f"{out_key}_y"] if return_xy else [out_key]
+        self._x_key = append_key_suffix(out_key, "_x")
+        self._y_key = append_key_suffix(out_key, "_y")
+        self.out_keys = [out_key, self._x_key, self._y_key] if return_xy else [out_key]
 
-    def forward(self, td: TensorDict) -> TensorDict:
+    def forward(self, td: TensorDictBase) -> TensorDictBase:
         data = td[self.in_key]
         if data.shape[-2] < 3:
             raise ValueError("At least 3 points required for Two NN dimension estimation")
@@ -54,8 +59,8 @@ class TwoNnDimensionEstimator(TensorDictModuleBase):
             y_padded = torch.stack(
                 [torch.nn.functional.pad(y_i, (0, max_len - len(y_i)), value=float("nan")) for y_i in ys]
             )
-            td[f"{self.out_key}_x"] = x_padded.reshape(*batch_shape, max_len)
-            td[f"{self.out_key}_y"] = y_padded.reshape(*batch_shape, max_len)
+            td[self._x_key] = x_padded.reshape(*batch_shape, max_len)
+            td[self._y_key] = y_padded.reshape(*batch_shape, max_len)
         return td
 
     def __repr__(self):

@@ -112,6 +112,14 @@ context exits; pruning no longer requires a separate context implementation.
 Task-vector evaluation applies TensorDict module state through the same runtime
 and reports a scoped ``replace_parameters`` program.
 
+Artifact-only analysis stays outside the hook runtime. Intrinsic-dimension and
+representation-similarity estimators are ordinary ``TensorDictModuleBase``
+operators with native string or nested-tuple ``in_keys`` and ``out_keys``.
+Attribution metrics are model-evaluated operations instead: they consume an
+already evaluated TensorDict, return a separate TensorDict of metric values,
+and expose their exact additional prepared-module pass count. Metric evaluation
+does not mutate the caller's original TensorDict.
+
 Methods migrate onto this runtime incrementally. Until a method exposes a
 ``HookProgram``, compatibility with another method is unknown and the planner
 must keep their executions separate.
