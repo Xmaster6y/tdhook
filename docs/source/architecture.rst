@@ -97,6 +97,13 @@ state. LRP rule installation is also a bound program operation
 (``apply_rule``), so temporary ``forward`` rewrites have the same failure-safe
 ownership and reporting as hooks.
 
+Probing follows the same boundary. ``Probing`` owns only transient ``probe``
+hooks and TensorDict input capture. ``ProbeManager`` owns fitted estimators
+across bindings until ``reset_estimators()`` is called, while fit and prediction
+metrics live in its ``results`` TensorDict and can be reset independently with
+``reset_results()``. Arbitrary probe factories remain supported; their state is
+owned by the factory provider, not by the hook runtime.
+
 Methods migrate onto this runtime incrementally. Until a method exposes a
 ``HookProgram``, compatibility with another method is unknown and the planner
 must keep their executions separate.

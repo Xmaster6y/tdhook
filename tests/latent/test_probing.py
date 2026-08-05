@@ -21,6 +21,7 @@ from tdhook.latent.probing import (
 )
 from tdhook.latent.probing.estimators import BilinearEstimator
 from tdhook.latent.probing.managers import BilinearProbe, BilinearProbeManager
+from tdhook.runtime import HookProgram, HookSpec
 
 
 class ExampleProbe(TensorDictModuleBase):
@@ -71,6 +72,9 @@ class TestProbing:
             assert key in probes
             assert probes[key].called
 
+        assert hooked_module.hooking_context.program == HookProgram((HookSpec(key, "probe", "fwd"),))
+        assert all(not submodule._forward_hooks for submodule in default_test_model.modules())
+
     def test_probing_pattern(self, default_test_model):
         """Test creating a Probing with pattern."""
         probes = {}
@@ -91,6 +95,49 @@ class TestProbing:
 
             assert probes["linear1"].called
             assert probes["linear2"].called
+
+    def test_probe_manager_reuses_fitted_estimator_across_bindings(self, default_test_model):
+        class DummyEstimator:
+            def __init__(self):
+                self.fitted = False
+
+            def fit(self, data, y):
+                self.fitted = True
+
+            def predict(self, data):
+                assert self.fitted
+                return torch.zeros(data.shape[0], dtype=torch.long)
+
+        manager = ProbeManager(
+            estimator_class=DummyEstimator,
+            estimator_kwargs={},
+            compute_metrics=lambda predictions, labels: {"accuracy": float((predictions == labels).float().mean())},
+        )
+        context = Probing(
+            "linear2",
+            manager.probe_factory,
+            additional_keys=["labels", "step_type"],
+        )
+
+        fit_data = TensorDict(
+            {
+                "input": torch.randn(4, 10),
+                "labels": torch.zeros(4, dtype=torch.long),
+                "step_type": "fit",
+            },
+            batch_size=4,
+        )
+        with context.prepare(default_test_model) as hooked_module:
+            hooked_module(fit_data)
+        estimator = manager.estimators["linear2_fwd"]
+
+        predict_data = fit_data.clone().set("step_type", "predict")
+        with context.prepare(default_test_model) as hooked_module:
+            hooked_module(predict_data)
+
+        assert manager.estimators["linear2_fwd"] is estimator
+        assert manager.results["fit", "linear2_fwd", "accuracy"].item() == 1.0
+        assert manager.results["predict", "linear2_fwd", "accuracy"].item() == 1.0
 
 
 class TestMeanDifferenceClassifier:
@@ -249,7 +296,7 @@ class TestProbeAndProbeManager:
         assert fit_results == [((4,), (4,))]
         assert predict_results == [((4,), (4,))]
 
-    def test_probe_manager_overwrite_and_reset_behaviour(self):
+    def test_probe_manager_results_and_independent_resets(self):
         class DummyEstimator:
             def fit(self, X, y):
                 return None
@@ -261,35 +308,53 @@ class TestProbeAndProbeManager:
             estimator_class=DummyEstimator,
             estimator_kwargs={},
             compute_metrics=lambda preds, labels: {"acc": float((preds == labels).float().mean().item())},
-            allow_overwrite=False,
         )
 
         probe = manager.probe_factory("linear1", "fwd")
         data = torch.randn(4, 2)
         labels = torch.zeros(4, dtype=torch.long)
 
-        probe.step(data, labels=labels, step_type="predict")
-        with pytest.raises(ValueError, match="Metrics for linear1_fwd already exist"):
+        result = probe.step(data, labels=labels, step_type="predict")
+        assert isinstance(result, TensorDict)
+        assert result["acc"].item() == 1.0
+        with pytest.raises(ValueError, match="Result for linear1_fwd already exists"):
             probe.step(data, labels=labels, step_type="predict")
-        assert "linear1_fwd" in manager.predict_metrics
+        assert manager.results["predict", "linear1_fwd", "acc"].item() == 1.0
 
-        manager.reset_metrics()
+        manager.reset_results()
         probe.step(data, labels=labels, step_type="fit")
-        with pytest.raises(ValueError, match="Metrics for linear1_fwd already exist"):
+        with pytest.raises(ValueError, match="Result for linear1_fwd already exists"):
             probe.step(data, labels=labels, step_type="fit")
 
-        with pytest.raises(ValueError, match="already exists"):
-            manager.probe_factory("linear1", "fwd")
+        assert manager.probe_factory("linear1", "fwd") is probe
 
         assert manager.estimators
-        assert manager.fit_metrics
-        assert manager.predict_metrics == {}
+        assert manager.results["fit", "linear1_fwd", "acc"].item() == 1.0
+        assert manager.results.get("predict", None) is None
 
         manager.reset_estimators()
-        manager.reset_metrics()
+        manager.reset_results()
         assert manager.estimators == {}
-        assert manager.fit_metrics == {}
-        assert manager.predict_metrics == {}
+        assert manager._probes == {}
+        assert list(manager.results.keys(True, True)) == []
+
+    def test_probe_manager_rejects_non_mapping_metrics(self):
+        class DummyEstimator:
+            def predict(self, data):
+                return data
+
+        manager = ProbeManager(
+            estimator_class=DummyEstimator,
+            estimator_kwargs={},
+            compute_metrics=lambda predictions, labels: 1.0,
+        )
+
+        with pytest.raises(TypeError, match="compute_metrics must return a dict"):
+            manager.probe_factory("linear1", "fwd").step(
+                torch.ones(2, 1),
+                labels=torch.ones(2, 1),
+                step_type="predict",
+            )
 
 
 class TestBilinearProbeManager:
@@ -461,7 +526,6 @@ class TestBilinearProbeManager:
             estimator_class=DummyEstimator,
             estimator_kwargs={},
             compute_metrics=lambda preds, labels: {"n": int(labels.shape[0])},
-            allow_overwrite=False,
         )
 
         _ = manager.probe_factory("a", "fwd")
@@ -475,19 +539,18 @@ class TestBilinearProbeManager:
         dispatcher = manager.probe_factory("a", "bwd")
         labels = torch.zeros(3, dtype=torch.long)
         dispatcher.step(torch.randn(3, 5), labels=labels, step_type="predict")
-        with pytest.raises(ValueError, match="Metrics for a_a_bwd already exist"):
+        with pytest.raises(ValueError, match="Result for a_a_bwd already exists"):
             dispatcher.step(torch.randn(3, 5), labels=labels, step_type="predict")
 
-        manager.reset_metrics()
+        manager.reset_results()
         dispatcher.step(torch.randn(3, 5), labels=labels, step_type="fit")
-        with pytest.raises(ValueError, match="Metrics for a_a_bwd already exist"):
+        with pytest.raises(ValueError, match="Result for a_a_bwd already exists"):
             dispatcher.step(torch.randn(3, 5), labels=labels, step_type="fit")
 
         manager.reset_estimators()
-        manager.reset_metrics()
+        manager.reset_results()
         assert manager.estimators == {}
-        assert manager.fit_metrics == {}
-        assert manager.predict_metrics == {}
+        assert list(manager.results.keys(True, True)) == []
         assert manager._pair_probes == {}
         assert manager._key_to_probes == {}
 
@@ -508,7 +571,7 @@ class TestBilinearProbeManager:
                 "verbose": False,
             },
             compute_metrics=acc_fn,
-            allow_overwrite=True,
+            overwrite_results=True,
         )
         context = Probing(
             manager.key_pattern,
@@ -540,10 +603,15 @@ class TestBilinearProbeManager:
                 hooked_module(batch)
         manager.after_all()
 
-        assert "linear1_linear2_fwd" in manager.fit_metrics
-        assert "linear1_linear2_fwd" in manager.predict_metrics
-        assert "accuracy" in manager.fit_metrics["linear1_linear2_fwd"]
-        assert "accuracy" in manager.predict_metrics["linear1_linear2_fwd"]
+        assert manager.results["fit", "linear1_linear2_fwd", "accuracy"].ndim == 0
+        assert manager.results["predict", "linear1_linear2_fwd", "accuracy"].ndim == 0
+        assert hooked_module.hooking_context.program == HookProgram(
+            (
+                HookSpec("", "capture_inputs", "fwd_pre"),
+                HookSpec("linear1", "probe", "fwd"),
+                HookSpec("linear2", "probe", "fwd"),
+            )
+        )
 
     def test_bilinear_probe_manager_after_all_raises_when_keys_missing(self):
         """after_all raises if some probes still wait on missing keys."""

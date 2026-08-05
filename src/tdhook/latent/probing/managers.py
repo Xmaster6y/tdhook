@@ -1,6 +1,8 @@
 import re
 from typing import Callable, Optional, Any, Dict, List, Tuple
 
+from tensordict import TensorDict
+
 from tdhook.hooks import (
     HookDirection,
 )
@@ -28,11 +30,9 @@ class Probe:
         if step_type == "fit":
             self._estimator.fit(data, y=labels)
             if self._fit_callback is not None:
-                self._fit_callback(self._estimator.predict(data), labels)
-        elif step_type == "predict":
-            self._predict_callback(self._estimator.predict(data), labels)
-        else:
-            raise ValueError(f"Invalid step type: {step_type}")
+                return self._fit_callback(self._estimator.predict(data), labels)
+            return None
+        return self._predict_callback(self._estimator.predict(data), labels)
 
     def _default_data_preprocess_callback(self, data: Any) -> Any:
         return data.detach().flatten(1)
@@ -59,8 +59,7 @@ class BilinearProbe(Probe):
     def step(self, data: Any, key: str, labels: Any, step_type: str, **kwargs):
         data = self._data_preprocess_callback(data)
         if self._h1_key == self._h2_key:
-            self._run(data, data, labels, step_type)
-            return
+            return self._run(data, data, labels, step_type)
 
         if key == self._h1_key:
             self._cached["h1"] = data
@@ -72,7 +71,8 @@ class BilinearProbe(Probe):
         if "h1" in self._cached and "h2" in self._cached:
             h1, h2 = self._cached["h1"], self._cached["h2"]
             self._cached.clear()
-            self._run(h1, h2, labels, step_type)
+            return self._run(h1, h2, labels, step_type)
+        return None
 
     def _run(self, h1: Any, h2: Any, labels: Any, step_type: str):
         if step_type not in ("fit", "predict"):
@@ -80,11 +80,9 @@ class BilinearProbe(Probe):
         if step_type == "fit":
             self._estimator.fit(h1, h2, y=labels)
             if self._fit_callback is not None:
-                self._fit_callback(self._estimator.predict(h1, h2), labels)
-        elif step_type == "predict":
-            self._predict_callback(self._estimator.predict(h1, h2), labels)
-        else:
-            raise ValueError(f"Invalid step type: {step_type}")
+                return self._fit_callback(self._estimator.predict(h1, h2), labels)
+            return None
+        return self._predict_callback(self._estimator.predict(h1, h2), labels)
 
     def before_all(self):
         self._waiting_active = True
@@ -114,69 +112,77 @@ class BilinearProbe(Probe):
 
 
 class ProbeManager:
+    """Own persistent estimators and TensorDict-native metric results."""
+
     def __init__(
         self,
         estimator_class: Any,
         estimator_kwargs: dict,
         compute_metrics: Callable[[Any, Any], Dict[str, Any]],
-        allow_overwrite: bool = False,
+        overwrite_results: bool = False,
         data_preprocess_callback: Callable[[Any], Any] = None,
     ):
         self._estimator_class = estimator_class
         self._estimator_kwargs = estimator_kwargs
         self._compute_metrics = compute_metrics
-        self._allow_overwrite = allow_overwrite
+        self._overwrite_results = overwrite_results
         self._data_preprocess_callback = data_preprocess_callback
 
         self._estimators = {}
-        self._fit_metrics = {}
-        self._predict_metrics = {}
+        self._probes = {}
+        self._results = TensorDict(batch_size=[])
 
     @property
     def estimators(self) -> dict[str, Any]:
         return self._estimators
 
     @property
-    def fit_metrics(self) -> dict[str, Any]:
-        return self._fit_metrics
+    def results(self) -> TensorDict:
+        """Return TensorDict-native fit and predict metrics."""
 
-    @property
-    def predict_metrics(self) -> dict[str, Any]:
-        return self._predict_metrics
+        return self._results
 
     def probe_factory(self, key: str, direction: HookDirection) -> Probe:
         _key = f"{key}_{direction}"
-        if _key in self._estimators and not self._allow_overwrite:
-            raise ValueError(
-                f"Probe {_key} already exists, call reset_estimators() to reset the estimators or use allow_overwrite=True to overwrite the existing estimators"
-            )
+        if _key in self._probes:
+            return self._probes[_key]
         estimator = self._estimator_class(**self._estimator_kwargs)
         self._estimators[_key] = estimator
 
         def predict_callback(predictions: Any, labels: Any):
-            nonlocal self
-            if _key in self._predict_metrics and not self._allow_overwrite:
-                raise ValueError(
-                    f"Metrics for {_key} already exist, call reset_metrics() to reset the metrics or use allow_overwrite=True to overwrite the existing metrics"
-                )
-            self._predict_metrics[_key] = self._compute_metrics(predictions, labels)
+            return self._record_result("predict", _key, predictions, labels)
 
         def fit_callback(predictions: Any, labels: Any):
-            nonlocal self
-            if _key in self._fit_metrics and not self._allow_overwrite:
-                raise ValueError(
-                    f"Metrics for {_key} already exist, call reset_metrics() to reset the metrics or use allow_overwrite=True to overwrite the existing metrics"
-                )
-            self._fit_metrics[_key] = self._compute_metrics(predictions, labels)
+            return self._record_result("fit", _key, predictions, labels)
 
-        return Probe(estimator, predict_callback, fit_callback, self._data_preprocess_callback)
+        probe = Probe(estimator, predict_callback, fit_callback, self._data_preprocess_callback)
+        self._probes[_key] = probe
+        return probe
+
+    def _record_result(self, phase: str, key: str, predictions: Any, labels: Any) -> TensorDict:
+        result_key = (phase, key)
+        if self._results.get(result_key, None) is not None and not self._overwrite_results:
+            raise ValueError(
+                f"Result for {key} already exists in phase {phase!r}; "
+                "call reset_results() or use overwrite_results=True"
+            )
+        metrics = self._compute_metrics(predictions, labels)
+        if not isinstance(metrics, dict):
+            raise TypeError("compute_metrics must return a dict")
+        result = TensorDict.from_dict(metrics, batch_size=[])
+        self._results.set(result_key, result)
+        return result
 
     def reset_estimators(self):
-        self._estimators = {}
+        """Discard fitted estimators and their stable probe objects."""
 
-    def reset_metrics(self):
-        self._fit_metrics = {}
-        self._predict_metrics = {}
+        self._estimators = {}
+        self._probes = {}
+
+    def reset_results(self):
+        """Discard fit and prediction metrics without changing estimators."""
+
+        self._results = TensorDict(batch_size=[])
 
 
 class BilinearProbeManager(ProbeManager):
@@ -188,14 +194,14 @@ class BilinearProbeManager(ProbeManager):
         estimator_class: Any,
         estimator_kwargs: dict,
         compute_metrics: Callable[[Any, Any], Dict[str, Any]],
-        allow_overwrite: bool = False,
+        overwrite_results: bool = False,
         data_preprocess_callback: Optional[Callable[[Any], Any]] = None,
     ):
         super().__init__(
             estimator_class=estimator_class,
             estimator_kwargs=estimator_kwargs,
             compute_metrics=compute_metrics,
-            allow_overwrite=allow_overwrite,
+            overwrite_results=overwrite_results,
             data_preprocess_callback=data_preprocess_callback,
         )
         self._pairs = list(pairs)
@@ -236,26 +242,16 @@ class BilinearProbeManager(ProbeManager):
 
     def _create_pair_probe(self, h1: str, h2: str, direction: HookDirection) -> BilinearProbe:
         pair_key = f"{h1}_{h2}_{direction}"
-        if pair_key in self._estimators and not self._allow_overwrite:
-            raise ValueError(
-                f"Probe {pair_key} already exists, call reset_estimators() to reset or use allow_overwrite=True"
-            )
+        if pair_key in self._estimators:
+            raise ValueError(f"Probe {pair_key} already exists; call reset_estimators() before replacing it")
         estimator = self._estimator_class(**self._estimator_kwargs)
         self._estimators[pair_key] = estimator
 
         def predict_callback(predictions: Any, labels: Any):
-            if pair_key in self._predict_metrics and not self._allow_overwrite:
-                raise ValueError(
-                    f"Metrics for {pair_key} already exist, call reset_metrics() or use allow_overwrite=True"
-                )
-            self._predict_metrics[pair_key] = self._compute_metrics(predictions, labels)
+            return self._record_result("predict", pair_key, predictions, labels)
 
         def fit_callback(predictions: Any, labels: Any):
-            if pair_key in self._fit_metrics and not self._allow_overwrite:
-                raise ValueError(
-                    f"Metrics for {pair_key} already exist, call reset_metrics() or use allow_overwrite=True"
-                )
-            self._fit_metrics[pair_key] = self._compute_metrics(predictions, labels)
+            return self._record_result("fit", pair_key, predictions, labels)
 
         return BilinearProbe(
             h1_key=h1,
@@ -284,6 +280,3 @@ class BilinearProbeManager(ProbeManager):
         super().reset_estimators()
         self._pair_probes.clear()
         self._key_to_probes.clear()
-
-    def reset_metrics(self):
-        super().reset_metrics()

@@ -6,13 +6,14 @@ from tensordict.nn import TensorDictModuleBase
 
 from tdhook.contexts import HookingContextFactory
 from tdhook.hooks import (
+    CacheProxy,
     MultiHookManager,
     HookFactory,
     HookDirection,
-    MultiHookHandle,
     DIRECTION_TO_RETURN,
 )
 from tdhook.modules import HookedModule
+from tdhook.runtime import BoundHookProgram, HookProgramBuilder, HookSpec
 
 
 class Probe(Protocol):
@@ -56,19 +57,10 @@ class Probing(HookingContextFactory):
         self._key_pattern = key_pattern
         self._hook_manager.pattern = key_pattern
 
-    def _hook_module(self, module: HookedModule) -> MultiHookHandle:
-        handles = []
+    def _hook_module(self, module: HookedModule) -> BoundHookProgram:
         if self._additional_keys is not None:
             tmp_cache = TensorDict()
-            handle, additional_items = module.get(
-                cache=tmp_cache,
-                module_key="td_module",
-                cache_key="_additional_keys",
-                callback=lambda **kwargs: kwargs["args"][0].select(*self._additional_keys),
-                direction="fwd_pre",
-                relative=False,
-            )
-            handles.append(handle)
+            additional_items = CacheProxy("_additional_keys", tmp_cache)
         else:
             additional_items = None
 
@@ -86,14 +78,27 @@ class Probing(HookingContextFactory):
 
             return HookFactory.make_reading_hook(callback=callback, direction=direction)
 
-        for direction in self._directions:
-            handles.append(
-                self._hook_manager.register_hook(
-                    module,
-                    (lambda name: hook_factory(name, direction)),
-                    direction=direction,
-                    relative_path=module.relative_path if self._relative else None,
+        with HookProgramBuilder() as program:
+            if self._additional_keys is not None:
+                program.register(
+                    module.td_module,
+                    HookFactory.make_caching_hook(
+                        "_additional_keys",
+                        tmp_cache,
+                        callback=lambda **kwargs: kwargs["args"][0].select(*self._additional_keys),
+                        direction="fwd_pre",
+                    ),
+                    HookSpec("", "capture_inputs", "fwd_pre"),
                 )
-            )
+            for direction in self._directions:
+                for name, submodule in self._hook_manager.iter_modules(
+                    module,
+                    relative_path=module.relative_path if self._relative else None,
+                ):
+                    program.register(
+                        submodule,
+                        hook_factory(name, direction),
+                        HookSpec(name, "probe", direction),
+                    )
 
-        return MultiHookHandle(handles)
+            return program.build()
