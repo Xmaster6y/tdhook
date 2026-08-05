@@ -5,6 +5,8 @@ import torch
 from tensordict import TensorDict
 
 from tdhook.attribution import IntegratedGradients
+from tdhook.attribution.grad_cam import DimsConfig
+from tdhook.descriptions import _freeze
 from tdhook.execution import GradientMode
 from tdhook.latent import ActivationCaching
 from tdhook.targets import Target
@@ -48,6 +50,22 @@ def test_callbacks_require_explicit_stable_identifiers():
     description = method.describe(callback_identifiers={select_output: "tests.select-output/v1"})
     assert description.parameters["callback"] == {"identifier": "tests.select-output/v1"}
 
+    with pytest.raises(TypeError, match="non-empty strings"):
+        method.describe(callback_identifiers={select_output: ""})
+
+
+def test_description_serialization_rejects_ambiguous_configuration_values():
+    assert _freeze(GradientMode.REQUIRED, {}) == "required"
+    assert _freeze(DimsConfig(weight_pooling_dims=(1,)), {}) == {
+        "feature_sum_dims": None,
+        "weight_pooling_dims": (1,),
+    }
+
+    with pytest.raises(TypeError, match="mapping keys must be strings"):
+        _freeze({1: "not-a-field"}, {})
+    with pytest.raises(TypeError, match="not JSON-compatible"):
+        _freeze(object(), {})
+
 
 def test_workflow_description_includes_bound_input_and_output_keys(default_test_model):
     workflow = Workflow(ActivationCaching("linear1", cache_key=("activations", "linear1")))
@@ -57,3 +75,8 @@ def test_workflow_description_includes_bound_input_and_output_keys(default_test_
 
     assert description.in_keys == ("input",)
     assert description.out_keys == ("output", ("activations", "linear1"))
+
+
+def test_workflow_description_rejects_non_tensordict_data(default_test_model):
+    with pytest.raises(TypeError, match="Workflow data must be a TensorDict"):
+        Workflow(ActivationCaching("linear1")).describe(default_test_model, torch.ones(2, 10))

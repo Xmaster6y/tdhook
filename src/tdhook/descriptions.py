@@ -69,10 +69,10 @@ def configured_step_description(
 
 
 def _freeze(value: object, identifiers: Mapping[Callable[..., object], str]) -> object:
-    if value is None or isinstance(value, (str, int, float, bool)):
-        return value
     if isinstance(value, Enum):
         return value.value
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
     if isinstance(value, Target):
         return _freeze(value.to_dict(), identifiers)
     if callable(value):
