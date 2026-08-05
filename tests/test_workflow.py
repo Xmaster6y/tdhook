@@ -12,7 +12,7 @@ from tdhook.latent import ActivationCaching, Probing
 from tdhook.modules import HookedModule
 from tdhook.runtime import BoundHookProgram, HookProgramBuilder, HookSpec
 from tdhook.targets import Target
-from tdhook.workflow import PlannedExecution, Workflow, WorkflowUpdate, _DeferredAutogradCleanup
+from tdhook.workflow import PlannedExecution, Workflow, WorkflowResult, WorkflowUpdate, _DeferredAutogradCleanup
 
 
 class CountingModel(nn.Module):
@@ -153,6 +153,40 @@ def test_workflow_composes_a_method_and_native_tensordict_operator(default_test_
     assert plan.executions[1].out_keys == (("summary", "mean"),)
     assert result["prediction"].shape == (2, 5)
     assert result["summary", "mean"].shape == (2,)
+
+
+def test_workflow_returns_the_plan_used_by_execution(default_test_model):
+    workflow = Workflow(CaptureOutput())
+    data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
+
+    result = workflow.run_with_plan(default_test_model, data)
+
+    assert isinstance(result, WorkflowResult)
+    assert result.plan.model_passes == 1
+    assert result.data["output"].shape == (2, 5)
+    assert workflow.run(default_test_model, data).shape == data.shape
+
+
+def test_executed_plan_is_not_stale_after_a_preflight_plan(default_test_model):
+    class ChangesAfterPreflight(HookingContextFactory):
+        def __init__(self):
+            super().__init__()
+            self.bindings = 0
+
+        def _prepare_module(self, module, in_keys, out_keys, extra_relative_path):
+            self.bindings += 1
+            result_key = "preflight" if self.bindings == 1 else "executed"
+            return TensorDictModule(module, in_keys=in_keys, out_keys=[result_key])
+
+    workflow = Workflow(ChangesAfterPreflight())
+    data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
+
+    preflight = workflow.plan(default_test_model, data)
+    result = workflow.run_with_plan(default_test_model, data)
+
+    assert preflight.executions[0].out_keys == ("preflight",)
+    assert result.plan.executions[0].out_keys == ("executed",)
+    assert "executed" in result.data
 
 
 def test_workflow_coexecutes_real_activation_methods_and_publishes_each_cache(default_test_model):
