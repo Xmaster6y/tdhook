@@ -74,6 +74,13 @@ scripts = [
 notebooks = [
     "ipykernel>=6.29.5",
     "ipywidgets>=8.0.0",
+    "nbclient>=0.10.2",
+    "nbformat>=5.10.4",
+]
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: executable documentation and cross-component integration tests",
 ]
 
 
