@@ -1,6 +1,6 @@
 from torch.utils.hooks import RemovableHandle
 from tensordict.nn import TensorDictModule, TensorDictModuleWrapper, TensorDictModuleBase
-from tensordict import TensorDict, NonTensorData
+from tensordict import NonTensorData, TensorDict, TensorDictBase
 from typing import Callable, Any, Optional, Tuple, TYPE_CHECKING, List
 import torch
 import warnings
@@ -454,6 +454,11 @@ class HookedModule(TensorDictModuleWrapper):
     @property
     def hooking_context(self) -> Optional["HookingContext"]:
         return self._hooking_context
+
+    def finalize_tensordict(self, data: TensorDictBase) -> TensorDictBase:
+        """Publish method-owned products after a shared model execution."""
+
+        return data
 
     @classmethod
     def from_module(

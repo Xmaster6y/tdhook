@@ -106,6 +106,14 @@ every operation in every bound program is a read-only ``capture``. A
 transformed wrapper, intervention, missing program, or other unknown fact
 produces separate executions, and the plan records the reason.
 
+Prepared methods may publish products after that shared call through their
+native TensorDict wrapper. For example, ``ActivationCaching`` adds its
+configured ``cache_key`` to ``out_keys`` and publishes a stable snapshot of
+the context cache. Two activation methods can therefore capture different
+layers into different output keys during one model pass. Shared-execution
+compatibility compares the bound model signature, while dependency validation
+uses each prepared method's full ``in_keys`` and ``out_keys``.
+
 Shared hook runtime
 -------------------
 

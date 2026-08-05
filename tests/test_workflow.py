@@ -80,9 +80,10 @@ def test_workflow_composes_a_method_and_native_tensordict_operator(default_test_
     assert result["summary", "mean"].shape == (2,)
 
 
-def test_workflow_coexecutes_compatible_bound_read_only_programs(default_test_model):
+def test_workflow_coexecutes_real_activation_methods_and_publishes_each_cache(default_test_model):
     model = CountingModel(default_test_model)
-    first, second = CaptureOutput(), CaptureOutput()
+    first = ActivationCaching("model.linear1", cache_key=("activations", "first"))
+    second = ActivationCaching("model.linear2", cache_key=("activations", "second"))
     workflow = Workflow(first, second)
     data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
 
@@ -94,9 +95,13 @@ def test_workflow_coexecutes_compatible_bound_read_only_programs(default_test_mo
     assert plan.compatibility[0].compatible
     assert plan.compatibility[0].reason == "bound read-only capture programs are compatible"
     assert model.calls == 1
-    assert len(first.values) == len(second.values) == 1
-    assert torch.equal(first.values[0], result["output"])
-    assert torch.equal(second.values[0], result["output"])
+    assert plan.executions[0].out_keys == (
+        "output",
+        ("activations", "first"),
+        ("activations", "second"),
+    )
+    assert result["activations", "first"]["model.linear1"].shape == (2, 20)
+    assert result["activations", "second"]["model.linear2"].shape == (2, 20)
 
 
 def test_workflow_splits_mutating_programs_and_explains_why(default_test_model):

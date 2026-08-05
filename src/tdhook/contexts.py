@@ -107,6 +107,18 @@ class HookingContext:
             raise RuntimeError("Direct-execution state is only available inside the prepared context")
         return self._hooked_module.td_module is self._module
 
+    @property
+    def model_in_keys(self) -> tuple[UnraveledKey, ...]:
+        """Return the caller-owned model signature used by this binding."""
+
+        return tuple(self._in_keys)
+
+    @property
+    def model_out_keys(self) -> tuple[UnraveledKey, ...]:
+        """Return the caller-owned model outputs used by this binding."""
+
+        return tuple(self._out_keys)
+
     def __enter__(self):
         return self._enter(managed_by_context_manager=True)
 

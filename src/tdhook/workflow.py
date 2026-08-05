@@ -73,6 +73,8 @@ class _BoundMethodNode:
     method: WorkflowMethod
     in_keys: tuple[UnraveledKey, ...]
     out_keys: tuple[UnraveledKey, ...]
+    model_in_keys: tuple[UnraveledKey, ...]
+    model_out_keys: tuple[UnraveledKey, ...]
     execution_spec: ExecutionSpec
     program: HookProgram | None
     direct_execution: bool
@@ -131,6 +133,8 @@ def _bind_method(
             method=method,
             in_keys=tuple(prepared.in_keys),
             out_keys=tuple(prepared.out_keys),
+            model_in_keys=context.model_in_keys,
+            model_out_keys=context.model_out_keys,
             execution_spec=_method_spec(method),
             program=context.program,
             direct_execution=context.executes_model_directly,
@@ -149,8 +153,11 @@ def _coexecution_incompatibility(
         return "co-execution requires every method to declare exactly one model pass"
     if any(node.execution_spec.gradient_mode != group[0].execution_spec.gradient_mode for node in group[1:]):
         return "methods require different autograd modes"
-    if any((node.in_keys, node.out_keys) != (group[0].in_keys, group[0].out_keys) for node in group[1:]):
-        return "prepared methods expose different TensorDict signatures"
+    if any(
+        (node.model_in_keys, node.model_out_keys) != (group[0].model_in_keys, group[0].model_out_keys)
+        for node in group[1:]
+    ):
+        return "prepared methods bind different model TensorDict signatures"
     if any(not node.direct_execution for node in group):
         return "a prepared method transforms model execution rather than wrapping it directly"
     if any(node.program is None for node in group):
@@ -171,12 +178,16 @@ def _same_bound_facts(planned: _BoundMethodNode, rebound: _BoundMethodNode) -> b
     return (
         planned.in_keys,
         planned.out_keys,
+        planned.model_in_keys,
+        planned.model_out_keys,
         planned.execution_spec,
         planned.program,
         planned.direct_execution,
     ) == (
         rebound.in_keys,
         rebound.out_keys,
+        rebound.model_in_keys,
+        rebound.model_out_keys,
         rebound.execution_spec,
         rebound.program,
         rebound.direct_execution,
@@ -333,6 +344,8 @@ class Workflow:
                 result = bound[-1](current)
                 if result is not None:
                     current = result
+                for prepared in bound[:-1]:
+                    current = prepared.finalize_tensordict(current)
             if not isinstance(current, TensorDictBase):
                 raise TypeError(f"Workflow method execution must return a TensorDict, got {type(current).__name__}")
         return current

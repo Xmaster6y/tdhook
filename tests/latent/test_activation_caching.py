@@ -5,7 +5,9 @@ Tests for the activation caching functionality.
 import torch
 import shutil
 from pathlib import Path
+import pytest
 from tensordict import TensorDict, MemoryMappedTensor
+from tensordict.nn import TensorDictModule
 
 from tdhook.latent.activation_caching import ActivationCaching
 from tdhook.modules import get_best_device
@@ -35,6 +37,49 @@ class TestActivationCaching:
             hooked_module(inputs)
         assert "linear2" in hooked_module.hooking_context.cache
         assert hooked_module.hooking_context.program == HookProgram((HookSpec("linear2", "capture", "fwd"),))
+
+    def test_tensordict_execution_publishes_a_native_cache_output(self, default_test_model):
+        context = ActivationCaching("linear2", cache_key=("activations", "cache"))
+        data = TensorDict({"input": torch.randn(2, 10)}, batch_size=[2])
+
+        with context.prepare(default_test_model) as hooked_module:
+            result = hooked_module(data)
+
+        assert hooked_module.in_keys == ["input"]
+        assert hooked_module.out_keys == ["output", ("activations", "cache")]
+        assert result["activations", "cache"]["linear2"].shape == (2, 20)
+
+    def test_published_cache_is_not_cleared_by_a_later_execution(self, default_test_model):
+        context = ActivationCaching("linear2")
+        first = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
+        second = TensorDict({"input": torch.zeros(2, 10)}, batch_size=[2])
+
+        with context.prepare(default_test_model) as hooked_module:
+            hooked_module(first)
+        first_values = first["cache"]["linear2"].clone()
+        with context.prepare(default_test_model) as hooked_module:
+            hooked_module(second)
+
+        torch.testing.assert_close(first["cache"]["linear2"], first_values)
+
+    def test_cache_output_can_be_disabled_for_context_only_use(self, default_test_model):
+        context = ActivationCaching("linear2", cache_key=None)
+        data = TensorDict({"input": torch.randn(2, 10)}, batch_size=[2])
+
+        with context.prepare(default_test_model) as hooked_module:
+            hooked_module(data)
+
+        assert hooked_module.out_keys == ["output"]
+        assert "cache" not in data
+
+    def test_cache_output_key_is_validated_and_cannot_replace_a_model_output(self):
+        with pytest.raises(TypeError, match="cache_key"):
+            ActivationCaching("", cache_key=object())
+
+        model = TensorDictModule(torch.nn.Identity(), in_keys=["input"], out_keys=["cache"])
+        with pytest.raises(ValueError, match="collides"):
+            with ActivationCaching("", cache_key="cache").prepare(model):
+                pass
 
     def test_different_device_cache(self, default_test_model):
         """Test creating a ActivationCaching with cache on a different device."""
