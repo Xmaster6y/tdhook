@@ -1,0 +1,7 @@
+combination,status,test_id,expected_plan,model_passes
+"LRP -> concept selection -> conditioned LRP",supported,test_concept_attribution_workflow_is_declared_inspectable_and_matches_frozen_fixture,"0:LRP:method:1:separate; 1:ConceptSelection:operator:0:separate; 2:ChannelConditionedLRP:method:1:separate",2
+"ActivationCaching -> conditioned slicing -> TwoNN",supported,test_conditioned_dimension_workflow_has_one_capture_pass_and_frozen_channel_fixture,"0:ActivationCaching:method:1:separate; 1:ActivationSamples:operator:0:separate; 2:DimensionEstimation:operator:0:separate; 3:DimensionSummary:operator:0:separate",1
+"ActivationCaching + ActivationCaching",supported,test_workflow_coexecutes_real_activation_methods_and_publishes_each_cache,"0:ActivationCaching+1:ActivationCaching:method:1:coalesced",1
+"ActivationCaching + Probing",supported,test_activation_capture_and_probing_split_conservatively,"0:ActivationCaching:method:1:separate; 1:Probing:method:1:separate",2
+"Adapters + ActivationCaching",supported,test_intervention_and_activation_read_split_without_state_leaks,"0:Adapters:method:1:separate; 1:ActivationCaching:method:1:separate",2
+"Adapters + Probing failure",supported,test_cross_family_failure_removes_hooks_and_restores_model,"0:Adapters:method:1:separate; 1:Probing:method:1:separate",2
