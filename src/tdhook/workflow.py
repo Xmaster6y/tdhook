@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
-from typing import Generator, Protocol, Sequence, runtime_checkable
+from typing import Callable, Generator, Mapping, Protocol, Sequence, runtime_checkable
 
 import torch
 from tensordict import TensorDictBase
@@ -14,6 +14,7 @@ from torch import Tensor, nn
 from tdhook._types import UnraveledKey
 from tdhook.contexts import HookingContext
 from tdhook.execution import AutogradLifetime, ExecutionSpec, GradientMode
+from tdhook.descriptions import ConfiguredStepDescription
 from tdhook.runtime import HookProgram
 
 
@@ -25,6 +26,10 @@ class WorkflowMethod(Protocol):
     def execution_spec(self) -> ExecutionSpec: ...
 
     def prepare(self, module: nn.Module) -> HookingContext: ...
+
+    def describe(
+        self, *, callback_identifiers: Mapping[Callable[..., object], str] | None = None
+    ) -> ConfiguredStepDescription: ...
 
 
 @dataclass(frozen=True)
@@ -485,6 +490,29 @@ class Workflow:
         nodes = self._inspect(model)
         _validate_dependencies(nodes, data)
         return self._build_plan(nodes)
+
+    def describe(
+        self,
+        model: nn.Module,
+        data: TensorDictBase,
+        *,
+        callback_identifiers: Mapping[Callable[..., object], str] | None = None,
+    ) -> tuple[ConfiguredStepDescription, ...]:
+        """Describe configured methods with the TensorDict keys bound to ``model``."""
+
+        if not isinstance(data, TensorDictBase):
+            raise TypeError(f"Workflow data must be a TensorDict, got {type(data).__name__}")
+        nodes = self._inspect(model)
+        _validate_dependencies(nodes, data)
+        descriptions = []
+        for node in nodes:
+            if isinstance(node, _BoundMethodNode):
+                descriptions.append(
+                    node.method.describe(callback_identifiers=callback_identifiers).with_keys(
+                        node.in_keys, node.out_keys
+                    )
+                )
+        return tuple(descriptions)
 
     def run_with_plan(self, model: nn.Module, data: TensorDictBase) -> WorkflowResult:
         """Execute the workflow and return its TensorDict with the executed plan."""
