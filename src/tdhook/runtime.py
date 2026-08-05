@@ -6,6 +6,7 @@ import warnings
 from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
+from functools import wraps
 from typing import Any, Generator
 
 from tensordict import TensorDict, TensorDictBase
@@ -107,6 +108,7 @@ class HookProgramBuilder:
             raise ValueError("registered hooks require a direction")
         failure_handler: list[Callable[[], Any] | None] = [None]
 
+        @wraps(hook)
         def guarded_hook(*args: Any, **kwargs: Any) -> Any:
             try:
                 return hook(*args, **kwargs)

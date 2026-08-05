@@ -61,7 +61,7 @@ class PlannedExecution:
     out_keys: tuple[UnraveledKey, ...]
     model_passes: int
     gradient_mode: GradientMode | None
-    autograd_lifetime: AutogradLifetime | None
+    autograd_lifetime: AutogradLifetime | None = None
     coexecuted: bool = False
 
 
@@ -520,14 +520,16 @@ class Workflow:
                         current = result
                     for prepared in bound:
                         current = prepared.finalize_tensordict(current)
+                if not isinstance(current, TensorDictBase):
+                    raise TypeError(
+                        f"Workflow method execution must return a TensorDict, got {type(current).__name__}"
+                    )
                 if execution.autograd_lifetime is AutogradLifetime.BACKWARD:
                     cleanup = _DeferredAutogradCleanup(stack.pop_all())
                     for prepared in bound:
                         assert prepared.hooking_context is not None
                         prepared.hooking_context.on_hook_failure(cleanup.close)
                     cleanup.arm(current, first.model_out_keys)
-            if not isinstance(current, TensorDictBase):
-                raise TypeError(f"Workflow method execution must return a TensorDict, got {type(current).__name__}")
         return current
 
     def __call__(self, model: nn.Module, data: TensorDictBase) -> TensorDictBase:

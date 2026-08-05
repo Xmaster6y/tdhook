@@ -98,6 +98,8 @@ def test_program_builder_rejects_invalid_specs_and_reuse():
     builder = HookProgramBuilder()
     with pytest.raises(ValueError, match="require a direction"):
         builder.register(nn.Identity(), lambda *_: None, HookSpec("", "capture", None))
+    with pytest.raises(ValueError, match="must have the signature"):
+        builder.register(nn.Identity(), lambda _module: None, HookSpec("", "capture", "fwd"))
 
     builder.build()
     with pytest.raises(RuntimeError, match="already built"):

@@ -12,7 +12,7 @@ from tdhook.latent import ActivationCaching, Probing
 from tdhook.modules import HookedModule
 from tdhook.runtime import BoundHookProgram, HookProgramBuilder, HookSpec
 from tdhook.targets import Target
-from tdhook.workflow import Workflow, WorkflowUpdate, _DeferredAutogradCleanup
+from tdhook.workflow import PlannedExecution, Workflow, WorkflowUpdate, _DeferredAutogradCleanup
 
 
 class CountingModel(nn.Module):
@@ -98,6 +98,23 @@ class InvalidOutput(TensorDictModuleBase):
 
     def forward(self, data):
         return "not a tensordict"
+
+
+class DeferredInvalidMethod(HookingContextFactory):
+    def __init__(self):
+        super().__init__()
+        self.context = None
+
+    @property
+    def execution_spec(self):
+        return ExecutionSpec(gradient_mode=GradientMode.REQUIRED, autograd_lifetime=AutogradLifetime.BACKWARD)
+
+    def prepare(self, *args, **kwargs):
+        self.context = super().prepare(*args, **kwargs)
+        return self.context
+
+    def _prepare_module(self, module, in_keys, out_keys, extra_relative_path):
+        return InvalidOutput()
 
 
 class PublishingModule(HookedModule):
@@ -520,6 +537,23 @@ def test_workflow_rejects_non_tensordict_step_results(default_test_model):
             assert message in str(error)
         else:
             raise AssertionError("workflow accepted a non-TensorDict result")
+
+
+def test_deferred_method_non_tensordict_result_closes_its_context(default_test_model):
+    method = DeferredInvalidMethod()
+    data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
+
+    with pytest.raises(TypeError, match="method execution"):
+        Workflow(method)(default_test_model, data)
+
+    assert method.context is not None
+    assert not method.context._in_context
+
+
+def test_planned_execution_preserves_the_pre_lifetime_constructor_signature():
+    execution = PlannedExecution(("0:Method",), "method", ("input",), ("output",), 1, GradientMode.OPTIONAL)
+
+    assert execution.autograd_lifetime is None
 
 
 def test_workflow_splits_methods_bound_to_different_model_signatures():
