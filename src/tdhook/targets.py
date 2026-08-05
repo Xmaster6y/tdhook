@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 import json
-from typing import Iterator, Literal
+from typing import Literal
 
-import torch
 from torch import Tensor, nn
 
-from tdhook.hooks import register_hook_to_module, resolve_submodule_path
+from tdhook.paths import resolve_submodule_path
 
 
 TargetKind = Literal["activation", "gradient", "parameter"]
@@ -90,73 +88,6 @@ class Target:
             self._selection(parameter)
         return module
 
-    @contextmanager
-    def capture(self, model: nn.Module) -> Iterator["CapturedTarget"]:
-        """Capture selected values while the context is active.
-
-        For activation and gradient targets, run the relevant forward/backward
-        pass inside the context. Parameter targets are captured on entry.
-        """
-        module = self.validate(model)
-        captured = CapturedTarget()
-        if self.kind == "parameter":
-            captured.value = self._select(module.get_parameter(self.parameter)).detach().clone()  # type: ignore[arg-type]
-            yield captured
-            return
-
-        def forward_hook(_module: nn.Module, _args: tuple[object, ...], value: Tensor | tuple[Tensor, ...]):
-            tensor = self._hook_tensor(value)
-            captured.value = self._select(tensor).detach().clone()
-
-        def gradient_hook(_module: nn.Module, values: tuple[Tensor, ...]):
-            tensor = self._hook_tensor(values)
-            captured.value = self._select(tensor).detach().clone()
-
-        direction = "fwd" if self.kind == "activation" else "bwd_pre"
-        handle = register_hook_to_module(
-            module, forward_hook if self.kind == "activation" else gradient_hook, direction=direction
-        )
-        try:
-            yield captured
-        finally:
-            handle.remove()
-
-    @contextmanager
-    def replace(self, model: nn.Module, value: Tensor | float | int) -> Iterator[None]:
-        """Temporarily replace selected values, restoring the model on exit."""
-        module = self.validate(model)
-        if self.kind == "parameter":
-            parameter = module.get_parameter(self.parameter)  # type: ignore[arg-type]
-            original = self._select(parameter).detach().clone()
-            with torch.no_grad():
-                self._assign(parameter, value)
-            try:
-                yield
-            finally:
-                with torch.no_grad():
-                    self._assign(parameter, original)
-            return
-
-        def forward_hook(_module: nn.Module, _args: tuple[object, ...], output: Tensor | tuple[Tensor, ...]):
-            replacement = self._hook_tensor(output).clone()
-            self._assign(replacement, value)
-            return (replacement,) if isinstance(output, tuple) else replacement
-
-        def gradient_hook(_module: nn.Module, values: tuple[Tensor, ...]):
-            tensor = self._hook_tensor(values)
-            replacement = tensor.clone()
-            self._assign(replacement, value)
-            return (replacement,) + values[1:]
-
-        direction = "fwd" if self.kind == "activation" else "bwd_pre"
-        handle = register_hook_to_module(
-            module, forward_hook if self.kind == "activation" else gradient_hook, direction=direction
-        )
-        try:
-            yield
-        finally:
-            handle.remove()
-
     def _selection(self, tensor: Tensor) -> tuple[object, ...]:
         axis = self.feature_axis if self.feature_axis >= 0 else tensor.ndim + self.feature_axis
         if axis < 0 or axis >= tensor.ndim:
@@ -174,17 +105,5 @@ class Target:
     def _assign(self, tensor: Tensor, value: Tensor | float | int) -> None:
         tensor[self._selection(tensor)] = value
 
-    @staticmethod
-    def _hook_tensor(value: Tensor | tuple[Tensor, ...]) -> Tensor:
-        if isinstance(value, Tensor):
-            return value
-        if len(value) != 1 or not isinstance(value[0], Tensor):
-            raise ValueError("Targets currently require a hook value containing exactly one tensor")
-        return value[0]
 
-
-@dataclass
-class CapturedTarget:
-    """The selected tensor captured by :meth:`Target.capture`."""
-
-    value: Tensor | None = None
+__all__ = ["Target", "TargetKind"]

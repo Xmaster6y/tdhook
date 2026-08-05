@@ -18,8 +18,23 @@ Standalone methods
 
 Interactive sessions
    Direct capture and intervention remain available for exploratory work. The
-   interface is imperative and flexible, while its implementation records the
-   same targets and hook specifications used by declared methods.
+   interface is imperative and flexible. ``HookSession`` owns the temporary
+   lifecycle and records the ordered ``HookProgram`` it actually installs::
+
+       from tdhook.session import HookSession
+       from tdhook.targets import Target
+
+       target = Target("features.0", "activation", -1, (3,))
+       with HookSession(model) as session:
+           captured = session.capture(target)
+           session.replace(target, 0)
+           output = model(inputs)
+
+       activation = captured.value
+       program = session.program
+
+   ``Target`` only describes and validates the selection; it never installs a
+   hook or mutates the model itself.
 
 Declared workflows
    A workflow composes methods and ordinary TensorDict modules by their
@@ -63,10 +78,11 @@ workflow language.
 Dependency direction
 --------------------
 
-Pure targets and execution requirements sit at the bottom of TDHook. The shared runtime
-depends on those descriptions and on PyTorch and TensorDict. Methods depend on
-the runtime. Workflow planning depends on method protocols rather than concrete
-method families. Reporting depends on immutable plans and provenance records.
+Pure targets, model paths, and execution requirements sit at the bottom of
+TDHook. The shared runtime depends on those descriptions and on PyTorch and
+TensorDict. Methods depend on the runtime. Workflow planning depends on method
+protocols rather than concrete method families. Reporting depends on immutable
+plans and provenance records.
 
 The runtime must not import concrete methods or workflow code. Methods must not
 import the workflow planner. Targets describe selections; the runtime performs
@@ -76,9 +92,9 @@ Scope
 -----
 
 TDHook owns interpretability semantics, hook lifecycle, safe model-state
-restoration, method execution requirements, and execution planning. TensorDict owns tensor
-storage, nested keys, batching, devices, persistence, parameter containers, and
-module composition. PyTorch owns modules, hooks, and autograd.
+restoration, method execution requirements, and execution planning. TensorDict
+owns tensor storage, nested keys, batching, devices, persistence, parameter
+containers, and module composition. PyTorch owns modules, hooks, and autograd.
 
 TDHook is not a generic DAG engine, distributed scheduler, experiment tracker,
 artifact database, or replacement for TensorDict.

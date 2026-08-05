@@ -10,6 +10,8 @@ __all__ = [
     "contexts",
     "execution",
     "hooks",
+    "paths",
+    "session",
     "targets",
     "metrics",
     "modules",
