@@ -90,6 +90,19 @@ class WorkflowPlan:
 
 
 @dataclass(frozen=True)
+class WorkflowResult:
+    """The TensorDict and exact plan produced by one workflow execution.
+
+    Use :meth:`Workflow.run_with_plan` when consumers need execution metadata.
+    :meth:`Workflow.run` continues to return only the TensorDict for existing
+    callers.
+    """
+
+    data: TensorDictBase
+    plan: WorkflowPlan
+
+
+@dataclass(frozen=True)
 class _BoundMethodNode:
     index: int
     name: str
@@ -473,8 +486,8 @@ class Workflow:
         _validate_dependencies(nodes, data)
         return self._build_plan(nodes)
 
-    def run(self, model: nn.Module, data: TensorDictBase) -> TensorDictBase:
-        """Execute the validated workflow and return its TensorDict."""
+    def run_with_plan(self, model: nn.Module, data: TensorDictBase) -> WorkflowResult:
+        """Execute the workflow and return its TensorDict with the executed plan."""
 
         if not isinstance(data, TensorDictBase):
             raise TypeError(f"Workflow data must be a TensorDict, got {type(data).__name__}")
@@ -530,7 +543,15 @@ class Workflow:
                         assert prepared.hooking_context is not None
                         prepared.hooking_context.on_hook_failure(cleanup.close)
                     cleanup.arm(current, first.model_out_keys)
-        return current
+        return WorkflowResult(data=current, plan=plan)
+
+    def run(self, model: nn.Module, data: TensorDictBase) -> TensorDictBase:
+        """Execute the workflow and return its TensorDict.
+
+        Use :meth:`run_with_plan` to also receive the exact execution plan.
+        """
+
+        return self.run_with_plan(model, data).data
 
     def __call__(self, model: nn.Module, data: TensorDictBase) -> TensorDictBase:
         return self.run(model, data)
@@ -543,5 +564,6 @@ __all__ = [
     "Workflow",
     "WorkflowMethod",
     "WorkflowPlan",
+    "WorkflowResult",
     "WorkflowUpdate",
 ]
