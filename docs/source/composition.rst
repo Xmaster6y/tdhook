@@ -272,18 +272,18 @@ pairs remain unsupported and are split conservatively.
 Declared intrinsic dimension
 ----------------------------
 
-``tdhook.dimension.conditioned_dimension_pipeline`` is the canonical
-activation-to-dimension workflow.  It contains one
-``ActivationCachingStage`` model pass followed by explicit artifact-only
-selection, estimator, and summary stages.  ``channel_conditioned_samples``
+``tdhook.dimension.conditioned_dimension_workflow`` is the canonical
+activation-to-dimension workflow. It contains one ``ActivationCaching`` model
+pass followed by the ordinary TensorDict operators ``ActivationSamples``,
+``DimensionEstimation``, and ``DimensionSummary``. ``channel_conditioned_samples``
 and ``spatial_conditioned_samples`` provide generic reshapes for
 ``(samples, channels, ...)`` and ``(samples, channels, height, width)``
 activations; application-specific layer selection and plotting remain outside
-the pipeline.
+the workflow.
 
-The estimator stage accepts the existing ``TwoNnDimensionEstimator``,
+The estimation operator accepts the existing ``TwoNnDimensionEstimator``,
 ``LocalKnnDimensionEstimator``, ``LocalPcaDimensionEstimator``, and
-``CaPcaDimensionEstimator`` without changing their public APIs.  Its samples,
+``CaPcaDimensionEstimator`` without changing their public APIs. Its samples,
 dimensions, and summary are shape-neutral TensorDict artifacts so condition
 axes do not have to match the original model batch.  The compact CPU fixture
 in ``test_dimension_pipeline.py`` fixes the channel-conditioned TwoNN result

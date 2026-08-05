@@ -135,6 +135,29 @@ def test_workflow_rejects_missing_native_dependencies_before_model_execution(def
     assert model.calls == 0
 
 
+def test_workflow_rechecks_a_declared_namespace_before_the_consumer_runs():
+    consumed = []
+
+    def consume(value):
+        consumed.append(value)
+        return value
+
+    producer = TensorDictModule(lambda value: value, in_keys=["input"], out_keys=["namespace"])
+    consumer = TensorDictModule(consume, in_keys=[("namespace", "leaf")], out_keys=["result"])
+    workflow = Workflow(producer, consumer)
+    data = TensorDict({"input": torch.ones(2)}, batch_size=[2])
+
+    workflow.plan(nn.Identity(), data)
+    try:
+        workflow(nn.Identity(), data)
+    except ValueError as error:
+        assert "namespace" in str(error) and "leaf" in str(error)
+    else:
+        raise AssertionError("workflow accepted a missing runtime namespace leaf")
+
+    assert consumed == []
+
+
 def test_workflow_binding_restores_hooks_when_later_validation_fails(default_test_model):
     model = CountingModel(default_test_model)
     capture = CaptureOutput()

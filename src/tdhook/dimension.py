@@ -1,27 +1,21 @@
-"""Declared, artifact-only intrinsic-dimension analysis stages.
-
-The stages in this module turn cached activations into estimator inputs without
-encoding a model, board, or plotting convention.  They deliberately run after
-``ActivationCachingStage``: the only model pass belongs to activation capture.
-"""
+"""TensorDict-native operators for conditioned intrinsic-dimension analysis."""
 
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 
 import torch
-from torch import nn
 from tensordict import TensorDict, TensorDictBase
 from tensordict.nn import TensorDictModuleBase
 from tensordict.tensorclass import NonTensorData
 from tensordict.utils import NestedKey
 
+from tdhook._types import join_keys
 from tdhook.latent import ActivationCaching
-from tdhook.pipeline import Pipeline, PipelineKey, Stage
-from tdhook.stages import ActivationCachingStage
+from tdhook.workflow import Workflow
 
 
-def _store_shape_neutral(artifacts: TensorDictBase, key: PipelineKey, value: object) -> None:
+def _store_shape_neutral(artifacts: TensorDictBase, key: NestedKey, value: object) -> None:
     """Store analysis output without imposing the model batch shape on it."""
     artifacts.set(key, NonTensorData(value, batch_size=artifacts.batch_size))
 
@@ -54,32 +48,31 @@ def spatial_conditioned_samples(activations: torch.Tensor) -> torch.Tensor:
     return activations.permute(2, 3, 0, 1).reshape(height * width, samples, channels)
 
 
-class ActivationSampleStage(Stage):
+class ActivationSamples(TensorDictModuleBase):
     """Select one cached activation and reshape it into estimator datasets."""
 
     def __init__(
         self,
-        name: str,
-        activation_key: PipelineKey,
+        activation_key: NestedKey,
         transform: Callable[[torch.Tensor], torch.Tensor],
         *,
-        cache_key: PipelineKey = ("activations", "cache"),
-        sample_key: PipelineKey = ("activations", "samples"),
+        cache_key: NestedKey = ("activations", "cache"),
+        out_key: NestedKey = ("activations", "samples"),
     ) -> None:
-        super().__init__(
-            name,
-            required_keys=[cache_key],
-            provided_keys=[sample_key],
-            effects=["activation_selection"],
-            method_id="ActivationSample",
-        )
+        super().__init__()
+        if not isinstance(activation_key, NestedKey):
+            raise TypeError("activation_key must be a TensorDict nested key")
+        if not isinstance(cache_key, NestedKey) or not isinstance(out_key, NestedKey):
+            raise TypeError("cache_key and out_key must be TensorDict nested keys")
         self.activation_key = activation_key
         self.transform = transform
         self.cache_key = cache_key
-        self.sample_key = sample_key
+        self.out_key = out_key
+        self.in_keys = [join_keys(cache_key, activation_key)]
+        self.out_keys = [out_key]
 
-    def run(self, model: nn.Module, artifacts: TensorDictBase) -> TensorDictBase:
-        activations = artifacts.get(self.cache_key).get(self.activation_key)
+    def forward(self, artifacts: TensorDictBase) -> TensorDictBase:
+        activations = artifacts.get(self.in_keys[0])
         if not isinstance(activations, torch.Tensor):
             raise TypeError(f"Cached activation {self.activation_key!r} must be a tensor")
         samples = self.transform(activations)
@@ -90,82 +83,76 @@ class ActivationSampleStage(Stage):
         # Condition axes (channels, positions, or layers) need not align with
         # the model input batch.  NonTensorData preserves the tensor exactly
         # while retaining TensorDict ownership and provenance.
-        _store_shape_neutral(artifacts, self.sample_key, samples)
+        _store_shape_neutral(artifacts, self.out_key, samples)
         return artifacts
 
 
-class DimensionEstimationStage(Stage):
+class DimensionEstimation(TensorDictModuleBase):
     """Run an existing TensorDict intrinsic-dimension estimator on an artifact.
 
     ``TwoNnDimensionEstimator``, ``LocalKnnDimensionEstimator``,
-    ``LocalPcaDimensionEstimator``, and ``CaPcaDimensionEstimator`` all use
-    this adapter unchanged.  Their existing ``in_key`` and ``out_key`` remain
-    private to the stage; callers use stable artifact paths instead.
+    ``LocalPcaDimensionEstimator``, and ``CaPcaDimensionEstimator`` are used
+    unchanged. Their configured keys remain internal to this remapping
+    operator; callers use stable workflow keys instead.
     """
 
     def __init__(
         self,
-        name: str,
         estimator: TensorDictModuleBase,
         *,
-        sample_key: PipelineKey = ("activations", "samples"),
-        dimension_key: PipelineKey = ("metrics", "dimension"),
+        in_key: NestedKey = ("activations", "samples"),
+        out_key: NestedKey = ("metrics", "dimension"),
     ) -> None:
-        in_key = getattr(estimator, "in_key", None)
-        out_key = getattr(estimator, "out_key", None)
+        super().__init__()
+        estimator_in_key = getattr(estimator, "in_key", None)
+        estimator_out_key = getattr(estimator, "out_key", None)
+        if not isinstance(estimator_in_key, NestedKey) or not isinstance(estimator_out_key, NestedKey):
+            raise TypeError("Dimension estimation requires native estimator in_key and out_key attributes")
         if not isinstance(in_key, NestedKey) or not isinstance(out_key, NestedKey):
-            raise TypeError("Dimension estimator stages require native TensorDict in_key and out_key attributes")
-        super().__init__(
-            name,
-            required_keys=[sample_key],
-            provided_keys=[dimension_key],
-            effects=["dimension_estimation"],
-            method_id=type(estimator).__name__,
-        )
+            raise TypeError("in_key and out_key must be TensorDict nested keys")
         self.estimator = estimator
-        self.sample_key = sample_key
-        self.dimension_key = dimension_key
-        self._in_key = in_key
-        self._out_key = out_key
+        self.in_key = in_key
+        self.out_key = out_key
+        self.estimator_in_key = estimator_in_key
+        self.estimator_out_key = estimator_out_key
+        self.in_keys = [in_key]
+        self.out_keys = [out_key]
 
-    def run(self, model: nn.Module, artifacts: TensorDictBase) -> TensorDictBase:
-        samples = _shape_neutral_value(artifacts.get(self.sample_key))
+    def forward(self, artifacts: TensorDictBase) -> TensorDictBase:
+        samples = _shape_neutral_value(artifacts.get(self.in_key))
         if not isinstance(samples, torch.Tensor):
-            raise TypeError(f"Estimator samples at {self.sample_key!r} must be a tensor")
+            raise TypeError(f"Estimator samples at {self.in_key!r} must be a tensor")
         if samples.ndim < 2:
             raise ValueError("Estimator samples must have shape (..., points, features)")
-        storage = TensorDict({self._in_key: samples}, batch_size=[])
+        storage = TensorDict({self.estimator_in_key: samples}, batch_size=[])
         result = self.estimator(storage)
-        _store_shape_neutral(artifacts, self.dimension_key, result.get(self._out_key))
+        _store_shape_neutral(artifacts, self.out_key, result.get(self.estimator_out_key))
         return artifacts
 
 
-class DimensionSummaryStage(Stage):
+class DimensionSummary(TensorDictModuleBase):
     """Publish finite-value count, mean, and standard deviation for dimensions."""
 
     def __init__(
         self,
-        name: str,
         *,
-        dimension_key: PipelineKey = ("metrics", "dimension"),
-        summary_key: PipelineKey = ("metrics", "dimension_summary"),
+        in_key: NestedKey = ("metrics", "dimension"),
+        out_key: NestedKey = ("metrics", "dimension_summary"),
         dims: int | Sequence[int] | None = None,
     ) -> None:
-        super().__init__(
-            name,
-            required_keys=[dimension_key],
-            provided_keys=[summary_key],
-            effects=["dimension_summary"],
-            method_id="DimensionSummary",
-        )
-        self.dimension_key = dimension_key
-        self.summary_key = summary_key
+        super().__init__()
+        if not isinstance(in_key, NestedKey) or not isinstance(out_key, NestedKey):
+            raise TypeError("in_key and out_key must be TensorDict nested keys")
+        self.in_key = in_key
+        self.out_key = out_key
         self.dims = dims
+        self.in_keys = [in_key]
+        self.out_keys = [out_key]
 
-    def run(self, model: nn.Module, artifacts: TensorDictBase) -> TensorDictBase:
-        dimensions = _shape_neutral_value(artifacts.get(self.dimension_key))
+    def forward(self, artifacts: TensorDictBase) -> TensorDictBase:
+        dimensions = _shape_neutral_value(artifacts.get(self.in_key))
         if not isinstance(dimensions, torch.Tensor):
-            raise TypeError(f"Dimensions at {self.dimension_key!r} must be a tensor")
+            raise TypeError(f"Dimensions at {self.in_key!r} must be a tensor")
         reduce_dims = (
             tuple(range(dimensions.ndim))
             if self.dims is None
@@ -190,7 +177,7 @@ class DimensionSummaryStage(Stage):
                 },
                 batch_size=[],
             )
-            _store_shape_neutral(artifacts, self.summary_key, summary)
+            _store_shape_neutral(artifacts, self.out_key, summary)
             return artifacts
         values = torch.where(finite, dimensions, torch.zeros_like(dimensions))
         count = finite.sum(dim=reduce_dims, keepdim=True)
@@ -201,45 +188,40 @@ class DimensionSummaryStage(Stage):
         variance = torch.where(count > 0, centered.square().sum(dim=reduce_dims, keepdim=True) / divisor, nan)
         count, mean, variance = (value.squeeze(dim=reduce_dims) for value in (count, mean, variance))
         summary = TensorDict({"count": count, "mean": mean, "std": variance.sqrt()}, batch_size=[])
-        _store_shape_neutral(artifacts, self.summary_key, summary)
+        _store_shape_neutral(artifacts, self.out_key, summary)
         return artifacts
 
 
-def conditioned_dimension_pipeline(
+def conditioned_dimension_workflow(
     cache: ActivationCaching,
-    activation_key: PipelineKey,
+    activation_key: NestedKey,
     transform: Callable[[torch.Tensor], torch.Tensor],
     estimator: TensorDictModuleBase,
     *,
-    input_key: PipelineKey = ("inputs", "input"),
-    cache_key: PipelineKey = ("activations", "cache"),
-    sample_key: PipelineKey = ("activations", "samples"),
-    dimension_key: PipelineKey = ("metrics", "dimension"),
-    summary_key: PipelineKey = ("metrics", "dimension_summary"),
+    cache_key: NestedKey = ("activations", "cache"),
+    sample_key: NestedKey = ("activations", "samples"),
+    dimension_key: NestedKey = ("metrics", "dimension"),
+    summary_key: NestedKey = ("metrics", "dimension_summary"),
     summary_dims: int | Sequence[int] | None = None,
-) -> Pipeline:
-    """Build the standard capture, selection, estimation, and summary pipeline."""
-    return Pipeline(
-        [
-            ActivationCachingStage("capture-activations", cache, input_key=input_key, cache_key=cache_key),
-            ActivationSampleStage(
-                "select-samples", activation_key, transform, cache_key=cache_key, sample_key=sample_key
-            ),
-            DimensionEstimationStage(
-                "estimate-dimension", estimator, sample_key=sample_key, dimension_key=dimension_key
-            ),
-            DimensionSummaryStage(
-                "summarize-dimension", dimension_key=dimension_key, summary_key=summary_key, dims=summary_dims
-            ),
-        ]
+) -> Workflow:
+    """Build the standard capture, selection, estimation, and summary workflow."""
+    if cache.cache_key != cache_key:
+        raise ValueError(
+            f"ActivationCaching publishes {cache.cache_key!r}; configure cache_key={cache_key!r} on the method"
+        )
+    return Workflow(
+        cache,
+        ActivationSamples(activation_key, transform, cache_key=cache_key, out_key=sample_key),
+        DimensionEstimation(estimator, in_key=sample_key, out_key=dimension_key),
+        DimensionSummary(in_key=dimension_key, out_key=summary_key, dims=summary_dims),
     )
 
 
 __all__ = [
-    "ActivationSampleStage",
-    "DimensionEstimationStage",
-    "DimensionSummaryStage",
+    "ActivationSamples",
+    "DimensionEstimation",
+    "DimensionSummary",
     "channel_conditioned_samples",
-    "conditioned_dimension_pipeline",
+    "conditioned_dimension_workflow",
     "spatial_conditioned_samples",
 ]

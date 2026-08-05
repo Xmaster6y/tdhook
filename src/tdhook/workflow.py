@@ -195,16 +195,40 @@ def _same_bound_facts(planned: _BoundMethodNode, rebound: _BoundMethodNode) -> b
 
 
 def _available_keys(data: TensorDictBase) -> set[UnraveledKey]:
-    return set(data.keys(include_nested=True, leaves_only=True))
+    return set(data.keys(include_nested=True, leaves_only=False))
+
+
+def _key_path(key: UnraveledKey) -> tuple[str, ...]:
+    return (key,) if isinstance(key, str) else key
+
+
+def _provided_namespace_covers(provided: UnraveledKey, required: UnraveledKey) -> bool:
+    provided_path = _key_path(provided)
+    required_path = _key_path(required)
+    return len(provided_path) < len(required_path) and required_path[: len(provided_path)] == provided_path
 
 
 def _validate_dependencies(nodes: Sequence[_ExecutionNode], data: TensorDictBase) -> None:
     available = _available_keys(data)
+    provided_namespaces: set[UnraveledKey] = set()
     for node in nodes:
-        missing = tuple(key for key in node.in_keys if key not in available)
+        missing = tuple(
+            key
+            for key in node.in_keys
+            if key not in available
+            and not any(_provided_namespace_covers(provided, key) for provided in provided_namespaces)
+        )
         if missing:
             raise ValueError(f"Workflow step {node.name!r} requires missing TensorDict keys: {missing!r}")
         available.update(node.out_keys)
+        provided_namespaces.update(node.out_keys)
+
+
+def _validate_runtime_dependencies(nodes: Sequence[_ExecutionNode], data: TensorDictBase) -> None:
+    for node in nodes:
+        missing = tuple(key for key in node.in_keys if key not in data)
+        if missing:
+            raise ValueError(f"Workflow step {node.name!r} requires missing TensorDict keys: {missing!r}")
 
 
 class Workflow:
@@ -318,6 +342,7 @@ class Workflow:
         by_name = {node.name: node for node in nodes}
         for execution in plan.executions:
             execution_nodes = [by_name[name] for name in execution.steps]
+            _validate_runtime_dependencies(execution_nodes, current)
             first = execution_nodes[0]
             if isinstance(first, _OperatorNode):
                 current = first.operator(current)

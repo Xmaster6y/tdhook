@@ -105,37 +105,37 @@ in the conformance matrix.
 Conditioned intrinsic dimension
 -------------------------------
 
-Use :func:`tdhook.dimension.conditioned_dimension_pipeline` when a captured
+Use :func:`tdhook.dimension.conditioned_dimension_workflow` when a captured
 activation should become a conditioned estimator input.  Its only model pass
 is activation capture; sample selection, estimation, and summary are
-artifact-only stages.  For image or board features, use
+ordinary TensorDict operators. For image or board features, use
 :func:`tdhook.dimension.channel_conditioned_samples` for ``(sample, channel,
 ...)`` activations and keep rendering or plotting downstream.
 
 .. code-block:: python
 
-   from tdhook.dimension import channel_conditioned_samples, conditioned_dimension_pipeline
+   from tdhook.dimension import channel_conditioned_samples, conditioned_dimension_workflow
    from tdhook.latent import ActivationCaching
    from tdhook.latent.dimension_estimation import TwoNnDimensionEstimator
 
-   dimension_pipeline = conditioned_dimension_pipeline(
-       ActivationCaching("features"),
+   dimension_workflow = conditioned_dimension_workflow(
+       ActivationCaching("features", cache_key=("activations", "cache")),
        "features",
        channel_conditioned_samples,
        TwoNnDimensionEstimator(),
    )
-   artifacts = TensorDict({"inputs": {"input": examples}}, batch_size=[len(examples)])
-   plan = dimension_pipeline.plan(artifacts)
+   artifacts = TensorDict({"input": examples}, batch_size=[len(examples)])
+   plan = dimension_workflow.plan(dimension_model, artifacts)
    assert plan.model_passes == 1
-   print([(run.stages, run.model_passes) for run in plan.runs])
-   result = dimension_pipeline.run(dimension_model, artifacts, model_id="offline-tiny", seed=0)
+   print([(execution.steps, execution.model_passes) for execution in plan.executions])
+   result = dimension_workflow(dimension_model, artifacts)
 
 The result publishes the real cache at ``("activations", "cache")``, shaped
 samples at ``("activations", "samples")``, estimates at ``("metrics",
 "dimension")``, and finite-value summary at ``("metrics", "dimension_summary")``.
 These latter three can have a condition axis unrelated to the original batch,
-so TDHook preserves them as shape-neutral named artifacts instead of copying
-them to Python dictionaries.
+so TensorDict stores them as shape-neutral ``NonTensorData`` rather than
+copying them to Python dictionaries.
 
 Conformance and scope
 ---------------------

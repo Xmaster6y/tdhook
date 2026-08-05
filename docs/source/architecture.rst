@@ -114,6 +114,13 @@ layers into different output keys during one model pass. Shared-execution
 compatibility compares the bound model signature, while dependency validation
 uses each prepared method's full ``in_keys`` and ``out_keys``.
 
+Artifact-only analysis remains ordinary TensorDict composition. The
+conditioned-dimension workflow is one ``ActivationCaching`` method followed by
+``ActivationSamples``, ``DimensionEstimation``, and ``DimensionSummary``
+operators. Condition axes that do not match the model batch remain owned by
+TensorDict as shape-neutral ``NonTensorData`` values; TDHook does not introduce
+an artifact adapter or result wrapper for them.
+
 Shared hook runtime
 -------------------
 
