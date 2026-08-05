@@ -1,40 +1,20 @@
-from typing import Callable, Optional, List, Dict, Tuple
-from torch import nn
-from tensordict.nn import TensorDictModule, TensorDictModuleBase
+from typing import Callable, Optional, Dict, Tuple
+
 from tensordict import TensorDict
+from tensordict.nn import TensorDictModule
+from torch import nn
 from torch.nn.utils import prune
 
-from tdhook.contexts import HookingContextFactory, HookingContext
-from tdhook.modules import resolve_submodule_path
-
-from tdhook._types import UnraveledKey
+from tdhook.contexts import HookingContextFactory
 from tdhook.hooks import merge_paths
-
-
-class PruningContext(HookingContext):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._old_weights = None
-
-    def _enter(self, managed_by_context_manager: bool = True):
-        self._old_weights = TensorDict.from_module(self._module).clone()
-        return super()._enter(managed_by_context_manager=managed_by_context_manager)
-
-    def __enter__(self):
-        return self._enter(managed_by_context_manager=True)
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        super().__exit__(exc_type, exc_value, traceback)
-        self._old_weights.to_module(self._module, inplace=True)
-        self._old_weights = None
+from tdhook.modules import HookedModule, resolve_submodule_path
+from tdhook.runtime import BoundHookProgram, HookProgramBuilder, HookSpec
 
 
 class Pruning(HookingContextFactory):
     """
     Relevance-based pruning :cite:`Yeom2019PruningBE` and circuit pruning :cite:`Pochinkov2024DissectingLM`.
     """
-
-    _hooking_context_class = PruningContext
 
     def __init__(
         self,
@@ -54,15 +34,57 @@ class Pruning(HookingContextFactory):
         self._skip_modules = skip_modules
         self._relative_path = relative_path or ""
 
-    def _prepare_module(
-        self,
-        module: TensorDictModuleBase,
-        in_keys: List[UnraveledKey],
-        out_keys: List[UnraveledKey],
-        extra_relative_path: str,
-    ) -> TensorDictModuleBase:
-        root_module = resolve_submodule_path(module, merge_paths(extra_relative_path, self._relative_path))
+    def _hook_module(self, module: HookedModule) -> BoundHookProgram:
+        root_path = merge_paths(module.relative_path, self._relative_path)
+        root_module = resolve_submodule_path(module, root_path)
+        if self._pruning_reparameterizations(root_module):
+            raise ValueError("Pruning does not accept parameters that are already reparameterized")
+        old_weights = TensorDict.from_module(module.td_module).clone()
+        existing_reparameterizations = self._pruning_reparameterizations(module.td_module)
 
+        with HookProgramBuilder() as program:
+            program.record(
+                HookSpec(self._relative_path, "prune_parameters", None),
+                lambda: self._restore_parameters(
+                    module.td_module,
+                    old_weights,
+                    existing_reparameterizations,
+                ),
+            )
+            self._apply_pruning(root_module)
+            return program.build()
+
+    @staticmethod
+    def _pruning_reparameterizations(module: nn.Module) -> set[tuple[nn.Module, str]]:
+        return {
+            (submodule, buffer_name.removesuffix("_mask"))
+            for submodule in module.modules()
+            for buffer_name, _ in submodule.named_buffers(recurse=False)
+            if buffer_name.endswith("_mask") and hasattr(submodule, f"{buffer_name.removesuffix('_mask')}_orig")
+        }
+
+    @classmethod
+    def _restore_parameters(
+        cls,
+        module: nn.Module,
+        old_weights: TensorDict,
+        existing_reparameterizations: set[tuple[nn.Module, str]],
+    ) -> None:
+        error = None
+        introduced = cls._pruning_reparameterizations(module) - existing_reparameterizations
+        for submodule, parameter_name in introduced:
+            try:
+                prune.remove(submodule, parameter_name)
+            except BaseException as exc:
+                error = error or exc
+        try:
+            old_weights.to_module(module, inplace=True)
+        except BaseException as exc:
+            error = error or exc
+        if error is not None:
+            raise error
+
+    def _apply_pruning(self, root_module: nn.Module) -> None:
         if self._modules_to_prune is None:
             parameters_to_prune = []
             importance_scores = {}
@@ -107,7 +129,6 @@ class Pruning(HookingContextFactory):
                     n=1,
                 )
                 prune.remove(submodule, param_name)
-        return module
 
     @staticmethod
     def default_skip(name: str, module: nn.Module) -> bool:

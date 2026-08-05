@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import torch
+import pytest
 from tensordict import TensorDict
 
+from tdhook.runtime import HookProgram, HookSpec
 from tdhook.weights.adapters import Adapters
 
 
@@ -24,6 +26,12 @@ class TestAdapters:
             patched_out = patched_data["output"]
             assert not torch.allclose(baseline_out, patched_out)
 
+        expected_specs = []
+        if adapter_source != adapter_target:
+            expected_specs.append(HookSpec(adapter_source, "capture", "fwd"))
+        expected_specs.append(HookSpec(adapter_target, "replace", "fwd"))
+        assert hooked.hooking_context.program == HookProgram(tuple(expected_specs))
+
         restored_out = default_test_model(data["input"])
         assert torch.allclose(baseline_out, restored_out)
 
@@ -32,3 +40,12 @@ class TestAdapters:
 
     def test_adapter_crosslayer(self, default_test_model):
         self._test_adapter_behavior(default_test_model, "linear1", "linear2")
+
+    def test_adapter_registration_failure_removes_source_hook(self, default_test_model):
+        adapters = {"broken": (_DoubleAdapter(), "linear1", "missing")}
+
+        with pytest.raises(ValueError, match="missing"):
+            with Adapters(adapters).prepare(default_test_model):
+                pass
+
+        assert not default_test_model.linear1._forward_hooks

@@ -104,6 +104,14 @@ metrics live in its ``results`` TensorDict and can be reset independently with
 ``reset_results()``. Arbitrary probe factories remain supported; their state is
 owned by the factory provider, not by the hook runtime.
 
+Weight methods use the same lifecycle without conflating two kinds of
+intervention. ``Adapters`` reports activation ``capture`` and ``replace``
+hooks, while ``Pruning`` reports temporary ``prune_parameters`` state. The
+bound runtime restores the caller-owned model on both successful and failed
+context exits; pruning no longer requires a separate context implementation.
+Task-vector evaluation applies TensorDict module state through the same runtime
+and reports a scoped ``replace_parameters`` program.
+
 Methods migrate onto this runtime incrementally. Until a method exposes a
 ``HookProgram``, compatibility with another method is unknown and the planner
 must keep their executions separate.

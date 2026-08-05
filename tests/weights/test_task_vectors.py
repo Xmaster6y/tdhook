@@ -4,7 +4,9 @@ Tests for the weights functionality.
 
 import torch
 import torch.nn as nn
+import pytest
 
+from tdhook.runtime import HookProgram, HookSpec
 from tdhook.weights.task_vectors import TaskVectors
 
 
@@ -54,3 +56,41 @@ class TestTaskVectors:
             new_weights = hooked_module.get_weights(learn_vector, forget_vector, alpha=0.1)
             for new_v, v in zip(new_weights.flatten_keys().values(), hooked_module._weights.flatten_keys().values()):
                 assert torch.allclose(v, new_v)
+
+    def test_applied_vectors_report_and_restore_parameter_state(self):
+        task_vectors = TaskVectors(
+            alphas=[0.5],
+            get_test_accuracy=lambda _: 1.0,
+            get_control_adequacy=lambda _: True,
+        )
+        model = nn.Linear(3, 2)
+        finetuned = nn.Linear(3, 2)
+        original = {key: value.detach().clone() for key, value in model.state_dict().items()}
+
+        with task_vectors.prepare(model) as hooked:
+            vector = hooked.get_task_vector(finetuned)
+            with hooked.with_applied_vectors(vector, alpha=0.5):
+                assert hooked.applied_program == HookProgram((HookSpec("", "replace_parameters", None),))
+                assert any(not torch.equal(value, original[key]) for key, value in model.state_dict().items())
+
+        for key, value in model.state_dict().items():
+            torch.testing.assert_close(value, original[key])
+
+    def test_applied_vectors_restore_after_failure(self):
+        task_vectors = TaskVectors(
+            alphas=[0.5],
+            get_test_accuracy=lambda _: 1.0,
+            get_control_adequacy=lambda _: True,
+        )
+        model = nn.Linear(3, 2)
+        finetuned = nn.Linear(3, 2)
+        original = {key: value.detach().clone() for key, value in model.state_dict().items()}
+
+        with task_vectors.prepare(model) as hooked:
+            vector = hooked.get_task_vector(finetuned)
+            with pytest.raises(RuntimeError, match="evaluation failed"):
+                with hooked.with_applied_vectors(vector, alpha=0.5):
+                    raise RuntimeError("evaluation failed")
+
+        for key, value in model.state_dict().items():
+            torch.testing.assert_close(value, original[key])

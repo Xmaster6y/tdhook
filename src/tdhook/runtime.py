@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Callable
+from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Generator
 
+from tensordict import TensorDict, TensorDictBase
 from torch import nn
 
 from tdhook.hooks import HookDirection, register_hook_to_module
@@ -164,4 +166,31 @@ class HookProgramBuilder:
             raise RuntimeError("HookProgramBuilder is already built")
 
 
-__all__ = ["BoundHookProgram", "HookProgram", "HookProgramBuilder", "HookSpec"]
+@contextmanager
+def temporary_module_state(
+    module: nn.Module,
+    state: TensorDictBase,
+    spec: HookSpec,
+) -> Generator[HookProgram, None, None]:
+    """Apply TensorDict module state and restore the caller-owned module on exit."""
+
+    if spec.direction is not None:
+        raise ValueError("temporary module state requires a directionless HookSpec")
+    original = TensorDict.from_module(module).clone()
+    with HookProgramBuilder() as builder:
+        builder.record(spec, lambda: original.to_module(module, inplace=True))
+        state.to_module(module, inplace=True)
+        bound = builder.build()
+    try:
+        yield bound.program
+    finally:
+        bound.remove()
+
+
+__all__ = [
+    "BoundHookProgram",
+    "HookProgram",
+    "HookProgramBuilder",
+    "HookSpec",
+    "temporary_module_state",
+]
