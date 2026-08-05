@@ -262,6 +262,16 @@ def test_workflow_rejects_deferred_backward_without_an_autograd_output():
     assert not model._backward_hooks
 
 
+def test_workflow_rejects_deferred_backward_before_a_later_model_execution(default_test_model):
+    workflow = Workflow(BackwardCapture(), CaptureOutput())
+    data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
+
+    with pytest.raises(ValueError, match="cannot precede a later model execution"):
+        workflow.plan(default_test_model, data)
+
+    assert all(not module._backward_hooks for module in default_test_model.modules())
+
+
 def test_deferred_cleanup_preserves_first_cleanup_error_and_is_idempotent():
     class FailingHandle:
         def remove(self):

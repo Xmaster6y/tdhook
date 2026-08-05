@@ -457,6 +457,11 @@ class Workflow:
                 )
             )
             index += len(group)
+        for index, execution in enumerate(executions):
+            if execution.autograd_lifetime is AutogradLifetime.BACKWARD and any(
+                later.kind == "method" for later in executions[index + 1 :]
+            ):
+                raise ValueError("A deferred-backward workflow execution cannot precede a later model execution")
         return WorkflowPlan(tuple(executions), tuple(decisions))
 
     def plan(self, model: nn.Module, data: TensorDictBase) -> WorkflowPlan:
