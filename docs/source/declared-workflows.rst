@@ -76,13 +76,13 @@ context, or activation cache is transferred between passes.
 
    concept_workflow = Workflow(
        LRP(
-           input_modules=["features"],
+           input_modules=["linear1"],
            attribution_key=("attributions", "concept_examples"),
            warn_on_missing_rule=False,
        ),
-       ConceptSelection(("attributions", "concept_examples", "features")),
+       ConceptSelection(("attributions", "concept_examples", "linear1")),
        ChannelConditionedLRP(
-           LRP(warn_on_missing_rule=False), condition_module="features",
+           LRP(warn_on_missing_rule=False), condition_module="linear1",
        ),
    )
    artifacts = TensorDict(

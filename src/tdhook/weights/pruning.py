@@ -7,7 +7,8 @@ from torch.nn.utils import prune
 
 from tdhook.contexts import HookingContextFactory
 from tdhook.hooks import merge_paths
-from tdhook.modules import HookedModule, resolve_submodule_path
+from tdhook.modules import HookedModule
+from tdhook.paths import resolve_submodule_path
 from tdhook.runtime import BoundHookProgram, HookProgramBuilder, HookSpec
 
 

@@ -1,3 +1,5 @@
+from contextvars import copy_context
+
 import pytest
 import torch
 from tensordict import TensorDict
@@ -213,6 +215,14 @@ def test_concept_conditioning_rejects_invalid_selection_artifacts(default_test_m
         _uniform_selection(TensorDict({"channel": torch.zeros(2)}, batch_size=[2]))
     with pytest.raises(TypeError, match="must be tensors"):
         _uniform_selection(TensorDict({"channel": "zero", "direction": "positive"}, batch_size=[]))
+    invalid_values = (
+        (torch.zeros(2), torch.ones(2, dtype=torch.long), TypeError),
+        (torch.zeros(2, dtype=torch.long), torch.zeros(2, dtype=torch.long), ValueError),
+        (torch.full((2,), -1, dtype=torch.long), torch.ones(2, dtype=torch.long), ValueError),
+    )
+    for channel, direction, error in invalid_values:
+        with pytest.raises(error):
+            _uniform_selection(TensorDict({"channel": channel, "direction": direction}, batch_size=[2]))
 
 
 def test_conditioned_method_preserves_base_initialisation_and_guards_hook_order(default_test_model):
@@ -235,6 +245,35 @@ def test_conditioned_method_preserves_base_initialisation_and_guards_hook_order(
         callback = bound._output_grad_callbacks["linear1"]
         with pytest.raises(RuntimeError, match="not loaded"):
             callback((torch.ones(2, 20),))
+
+
+def test_conditioned_selection_is_local_to_each_execution_context(default_test_model):
+    method = ChannelConditionedLRP(LRP(warn_on_missing_rule=False), condition_module="linear1")
+    with method.prepare(default_test_model) as prepared:
+        bound = method._prepared[prepared.td_module]
+        initialise = bound._init_attr_inputs
+        callback = bound._output_grad_callbacks["linear1"]
+        first_context = copy_context()
+        second_context = copy_context()
+        inputs = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
+        first_context.run(
+            initialise,
+            inputs,
+            _conditioned_artifacts(torch.zeros(2, dtype=torch.long), torch.ones(2, dtype=torch.long)),
+        )
+        second_context.run(
+            initialise,
+            inputs,
+            _conditioned_artifacts(torch.ones(2, dtype=torch.long), -torch.ones(2, dtype=torch.long)),
+        )
+
+        first = first_context.run(callback, (torch.ones(2, 20),))[0]
+        second = second_context.run(callback, (torch.ones(2, 20),))[0]
+
+    assert torch.equal(first[:, 0], torch.ones(2))
+    assert torch.equal(first[:, 1], torch.zeros(2))
+    assert torch.equal(second[:, 0], torch.zeros(2))
+    assert torch.equal(second[:, 1], -torch.ones(2))
 
 
 def test_concept_channel_gradient_callback_validates_its_selection_and_shape():

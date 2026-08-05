@@ -75,6 +75,27 @@ class TestProbing:
         assert hooked_module.hooking_context.program == HookProgram((HookSpec(key, "probe", "fwd"),))
         assert all(not submodule._forward_hooks for submodule in default_test_model.modules())
 
+    def test_inspection_callbacks_are_inert_and_key_pattern_is_mutable(self, default_test_model):
+        created = []
+
+        def probe_factory(key, direction):
+            created.append((key, direction))
+            return ExampleProbe()
+
+        method = Probing("linear1", probe_factory)
+        assert method.key_pattern == "linear1"
+        method.key_pattern = "linear2"
+        assert method.key_pattern == "linear2"
+
+        context = method.prepare(default_test_model)
+        with context.inspect() as prepared:
+            prepared(TensorDict({"input": torch.ones(2, 10)}, batch_size=[2]))
+
+        assert created == []
+
+        with pytest.raises(TypeError, match="additional_keys"):
+            Probing("linear1", probe_factory, additional_keys=[object()])
+
     def test_probing_pattern(self, default_test_model):
         """Test creating a Probing with pattern."""
         probes = {}

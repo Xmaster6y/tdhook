@@ -13,24 +13,31 @@ from tdhook.contexts import HookingContextFactory
 from tdhook.modules import HookedModule
 from tdhook.hooks import MultiHookHandle
 from tdhook._types import UnraveledKey
+from tdhook.runtime import HookProgramBuilder, HookSpec
 
 
 class Context1(HookingContextFactory):
     def _hook_module(self, module: HookedModule) -> MultiHookHandle:
-        return module.register_submodule_hook(
-            key="",
-            hook=lambda module, args, output: output + 1,
-            direction="fwd",
-        )
+        with HookProgramBuilder() as builder:
+            builder.register_path(
+                module,
+                lambda module, args, output: output + 1,
+                HookSpec("", "replace", "fwd"),
+                relative_path=module.relative_path,
+            )
+            return builder.build()
 
 
 class Context2(HookingContextFactory):
     def _hook_module(self, module: HookedModule) -> MultiHookHandle:
-        return module.register_submodule_hook(
-            key="",
-            hook=lambda module, args, output: output * 2,
-            direction="fwd",
-        )
+        with HookProgramBuilder() as builder:
+            builder.register_path(
+                module,
+                lambda module, args, output: output * 2,
+                HookSpec("", "replace", "fwd"),
+                relative_path=module.relative_path,
+            )
+            return builder.build()
 
 
 class PrepFlagFactory(HookingContextFactory):
@@ -156,7 +163,7 @@ class TestHookingContextLifecycle:
             hm(data)
             assert torch.allclose(data["output"], original_output + 1)
 
-            with hm.disable_context_hooks():
+            with ctx.disable_hooks():
                 data_disabled = TensorDict({"input": x}, batch_size=[2, 3])
                 hm(data_disabled)
                 assert torch.allclose(data_disabled["output"], original_output)
@@ -171,7 +178,7 @@ class TestHookingContextLifecycle:
         original_output = default_test_model(x)
         ctx = Context1().prepare(default_test_model)
         with ctx as hm:
-            with hm.disable_context() as raw_module:
+            with ctx.disable() as raw_module:
                 raw_out = raw_module(x)
                 assert torch.allclose(raw_out, original_output)
 
@@ -239,6 +246,8 @@ class TestHookingContextLifecycle:
         context = HookingContextFactory().prepare(default_test_model)
         with pytest.raises(RuntimeError, match="only available inside"):
             _ = context.executes_model_directly
+        with context:
+            assert context.executes_model_directly is True
 
 
 class TestTensorDictModuleContext:
@@ -275,30 +284,3 @@ class TestTensorDictModuleContext:
         for kwargs, message in invalid:
             with pytest.raises(ValueError, match=message):
                 HookingContextFactory().prepare(td_mod, **kwargs)
-
-
-class TestDirectHookedModuleUsage:
-    """Tests for using prepare(return_context=False) to get hooked module directly."""
-
-    def test_direct_hooked_module_works_and_restores(self, default_test_model):
-        """Hooked module obtained directly works and can be restored."""
-        input = torch.randn(2, 3, 10)
-        original_output = default_test_model(input)
-        factory = Context1()
-        hooked_module = factory.prepare(default_test_model, return_context=False)
-
-        data = TensorDict({"input": input}, batch_size=[2, 3])
-        hooked_module(data)
-        assert torch.allclose(data["output"], original_output + 1)
-
-        hooked_module.restore()
-        assert not hooked_module.hooking_context._in_context
-
-    def test_restore_raises_when_managed_by_context_manager(self, default_test_model):
-        """restore() raises error when context is managed by context manager."""
-        factory = Context1()
-        with factory.prepare(default_test_model) as hooked_module:
-            with pytest.raises(
-                RuntimeError, match="Cannot call restore\\(\\) when context is managed by a context manager"
-            ):
-                hooked_module.restore()

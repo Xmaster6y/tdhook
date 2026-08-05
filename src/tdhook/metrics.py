@@ -78,7 +78,7 @@ class InfidelityMetric:
             for _ in range(self.n_perturb_samples):
                 perturbed_data = self._perturb_data(original_data, [key])
                 perturbed_result = module(perturbed_data)
-                perturbed_input = _require_tensor(perturbed_result, key, role="Perturbed model input")
+                perturbed_input = _require_tensor(perturbed_data, key, role="Perturbed model input")
                 perturbed_output = _require_tensor(perturbed_result, self.output_key, role="Perturbed model output")
                 perturbation = original_input - perturbed_input
                 perturbation_scores.append(_feature_reduce(original_attr * perturbation, batch_dims))

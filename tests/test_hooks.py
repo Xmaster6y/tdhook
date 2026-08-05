@@ -641,8 +641,16 @@ class TestResolveSubmodulePath:
     def test_module_dictionary_and_objects_without_instance_attributes(self):
         modules = torch.nn.ModuleDict({"named": torch.nn.Identity()})
         assert resolve_submodule_path(modules, "['named']") is modules["named"]
+        with pytest.raises(ValueError, match="ModuleDict indexes must be strings"):
+            resolve_submodule_path(modules, "[0]")
         with pytest.raises(ValueError, match="missing"):
             resolve_submodule_path(object(), "missing")
+
+    def test_plain_modules_reject_positional_indexes(self):
+        module = torch.nn.Module()
+        module.child = torch.nn.Identity()
+        with pytest.raises(ValueError, match="not a positional module container"):
+            resolve_submodule_path(module, "[0]")
 
     def test_dotted_index_is_rejected(self):
         class DummyRoot:

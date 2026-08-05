@@ -29,6 +29,20 @@ class WorkflowMethod(Protocol):
 WorkflowStep = WorkflowMethod | TensorDictModuleBase
 
 
+class MethodBinding(Protocol):
+    """Prepared method surface used for execution after facts are validated."""
+
+    in_keys: list[UnraveledKey]
+    out_keys: list[UnraveledKey]
+
+    @property
+    def td_module(self) -> TensorDictModuleBase: ...
+
+    def __call__(self, data: TensorDictBase) -> TensorDictBase: ...
+
+    def finalize_tensordict(self, data: TensorDictBase) -> TensorDictBase: ...
+
+
 @dataclass(frozen=True)
 class PlannedExecution:
     """One deterministic execution in a workflow plan."""
@@ -114,7 +128,7 @@ def _bind_method(
     model: nn.Module,
     *,
     for_inspection: bool = False,
-) -> Generator[tuple[_BoundMethodNode, TensorDictModuleBase], None, None]:
+) -> Generator[tuple[_BoundMethodNode, MethodBinding], None, None]:
     context = method.prepare(model)
     if not isinstance(context, HookingContext):
         raise TypeError(
@@ -125,6 +139,13 @@ def _bind_method(
         if not isinstance(prepared, TensorDictModuleBase):
             raise TypeError(
                 f"{type(method).__name__}.prepare(model) must bind a TensorDictModuleBase, "
+                f"got {type(prepared).__name__}"
+            )
+        if not isinstance(getattr(prepared, "td_module", None), TensorDictModuleBase) or not callable(
+            getattr(prepared, "finalize_tensordict", None)
+        ):
+            raise TypeError(
+                f"{type(method).__name__}.prepare(model) must bind the MethodBinding protocol, "
                 f"got {type(prepared).__name__}"
             )
         node = _BoundMethodNode(
@@ -164,6 +185,12 @@ def _coexecution_incompatibility(
         return "a prepared method did not expose its bound hook program"
     if any(not node.program.hooks for node in group if node.program is not None):
         return "an empty hook program is not evidence of shared execution compatibility"
+    method_outputs: list[UnraveledKey] = []
+    for node in group:
+        owned = [key for key in node.out_keys if key not in node.model_out_keys]
+        if any(_key_paths_overlap(key, existing) for key in owned for existing in method_outputs):
+            return "method-owned output namespaces overlap"
+        method_outputs.extend(owned)
     if any(
         spec.operation != "capture" or spec.direction is None
         for node in group
@@ -200,6 +227,24 @@ def _available_keys(data: TensorDictBase) -> set[UnraveledKey]:
 
 def _key_path(key: UnraveledKey) -> tuple[str, ...]:
     return (key,) if isinstance(key, str) else key
+
+
+def _key_paths_overlap(left: UnraveledKey, right: UnraveledKey) -> bool:
+    left_path = _key_path(left)
+    right_path = _key_path(right)
+    common = min(len(left_path), len(right_path))
+    return left_path[:common] == right_path[:common]
+
+
+def _validate_workflow_method(node: _BoundMethodNode) -> None:
+    if (
+        node.execution_spec.gradient_mode is not GradientMode.REQUIRED
+        and node.program is not None
+        and any(spec.direction in {"bwd", "bwd_pre"} for spec in node.program.hooks)
+    ):
+        raise ValueError(
+            f"Workflow step {node.name!r} installs backward hooks but does not own an autograd-enabled execution"
+        )
 
 
 def _provided_namespace_covers(provided: UnraveledKey, required: UnraveledKey) -> bool:
@@ -290,10 +335,12 @@ class Workflow:
                 continue
 
             group = [node]
+            _validate_workflow_method(node)
             while index + len(group) < len(nodes):
                 candidate = nodes[index + len(group)]
                 if not isinstance(candidate, _BoundMethodNode):
                     break
+                _validate_workflow_method(candidate)
                 reason = _coexecution_incompatibility(group, candidate)
                 decisions.append(
                     CompatibilityDecision(
@@ -360,11 +407,16 @@ class Workflow:
                     if not _same_bound_facts(node, rebound):
                         raise RuntimeError(f"Bound facts for workflow method {node.name!r} changed after planning")
                     bound.append(prepared)
-                result = bound[-1](current)
-                if result is not None:
-                    current = result
-                for prepared in bound[:-1]:
-                    current = prepared.finalize_tensordict(current)
+                if len(bound) == 1:
+                    result = bound[0](current)
+                    if result is not None:
+                        current = result
+                else:
+                    result = bound[0].td_module(current)
+                    if result is not None:
+                        current = result
+                    for prepared in bound:
+                        current = prepared.finalize_tensordict(current)
             if not isinstance(current, TensorDictBase):
                 raise TypeError(f"Workflow method execution must return a TensorDict, got {type(current).__name__}")
         return current
@@ -375,6 +427,7 @@ class Workflow:
 
 __all__ = [
     "CompatibilityDecision",
+    "MethodBinding",
     "PlannedExecution",
     "Workflow",
     "WorkflowMethod",

@@ -122,6 +122,20 @@ def test_session_restores_parameter_when_replacement_assignment_fails():
         assert session.program == HookProgram()
 
 
+def test_session_restores_the_live_parameter_after_reference_reassignment():
+    model = nn.Linear(3, 2, bias=False)
+    target = Target("", "parameter", 0, (0,), parameter="weight")
+    original_row = model.weight[0].detach().clone()
+
+    with HookSession(model) as session:
+        session.replace(target, -3)
+        replacement = nn.Parameter(model.weight.detach().clone())
+        replacement.data[0].fill_(9)
+        model.weight = replacement
+
+    torch.testing.assert_close(model.weight[0], original_row)
+
+
 def test_session_requires_an_active_live_model(default_test_model):
     session = HookSession(default_test_model)
     target = Target("linear1", "activation", -1, (0,))

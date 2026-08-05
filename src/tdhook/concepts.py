@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextvars import ContextVar
 from copy import copy
 from typing import Literal
 from weakref import WeakKeyDictionary
@@ -11,7 +12,7 @@ from tensordict import TensorDict, TensorDictBase
 from tensordict.nn import TensorDictModuleBase
 from tensordict.utils import NestedKey
 
-from tdhook._types import join_keys
+from tdhook._types import is_nested_key, join_keys
 from tdhook.attribution import LRP
 from tdhook.contexts import HookingContextFactory
 from tdhook.execution import ExecutionSpec
@@ -33,7 +34,7 @@ class ConceptSelection(TensorDictModuleBase):
         super().__init__()
         if direction not in {"positive", "negative"}:
             raise ValueError("direction must be 'positive' or 'negative'")
-        if not all(isinstance(key, NestedKey) for key in (relevance_key, labels_key, out_key)):
+        if not all(is_nested_key(key) for key in (relevance_key, labels_key, out_key)):
             raise TypeError("Concept selection keys must be TensorDict nested keys")
         self.relevance_key = relevance_key
         self.labels_key = labels_key
@@ -119,11 +120,24 @@ def _uniform_selection(selection: TensorDictBase) -> tuple[int, int]:
         raise TypeError("Concept selection channel and direction must be tensors")
     if channel.numel() == 0 or direction.numel() == 0:
         raise ValueError("Concept selection channel and direction cannot be empty")
+    if (
+        channel.dtype == torch.bool
+        or direction.dtype == torch.bool
+        or channel.is_floating_point()
+        or direction.is_floating_point()
+    ):
+        raise TypeError("Concept selection channel and direction must use integer tensor dtypes")
     if not torch.equal(channel, channel.flatten()[0].expand_as(channel)) or not torch.equal(
         direction, direction.flatten()[0].expand_as(direction)
     ):
         raise ValueError("Concept selection must be identical for every example in the batch")
-    return int(channel.flatten()[0].item()), int(direction.flatten()[0].item())
+    selected_channel = int(channel.flatten()[0].item())
+    selected_direction = int(direction.flatten()[0].item())
+    if selected_channel < 0:
+        raise ValueError("Concept selection channel must be non-negative")
+    if selected_direction not in {-1, 1}:
+        raise ValueError("Concept selection direction must be either -1 or 1")
+    return selected_channel, selected_direction
 
 
 class ChannelConditionedLRP(HookingContextFactory):
@@ -148,7 +162,7 @@ class ChannelConditionedLRP(HookingContextFactory):
             raise TypeError("base must be an LRP method")
         if not condition_module:
             raise ValueError("condition_module must be non-empty")
-        if not isinstance(selection_key, NestedKey) or not isinstance(attribution_key, NestedKey):
+        if not is_nested_key(selection_key) or not is_nested_key(attribution_key):
             raise TypeError("selection_key and attribution_key must be TensorDict nested keys")
         if condition_module in base._output_grad_callbacks:
             raise ValueError(f"LRP method already has a gradient callback for {condition_module!r}")
@@ -173,20 +187,24 @@ class ChannelConditionedLRP(HookingContextFactory):
         ]
         bound._attr_key = self.attribution_key
         original_init = bound._init_attr_inputs
-        selected: dict[str, int] = {}
+        selected: ContextVar[tuple[int, int] | None] = ContextVar(
+            f"conditioned_lrp_selection_{id(bound)}",
+            default=None,
+        )
 
         def initialise(inputs: TensorDict, additional: TensorDict) -> TensorDict:
             channel, direction = _uniform_selection(additional.get(self.selection_key))
-            selected["channel"] = channel
-            selected["direction"] = direction
+            selected.set((channel, direction))
             return original_init(inputs, additional) if original_init is not None else inputs
 
         def condition(grad_output, **kwargs):
-            if "channel" not in selected:
+            selection = selected.get()
+            if selection is None:
                 raise RuntimeError("Concept selection was not loaded before conditioned attribution")
-            return concept_channel_gradient_callback(
-                selected["channel"], selected["direction"], channel_axis=self.gradient_channel_axis
-            )(grad_output, **kwargs)
+            channel, direction = selection
+            return concept_channel_gradient_callback(channel, direction, channel_axis=self.gradient_channel_axis)(
+                grad_output, **kwargs
+            )
 
         bound._init_attr_inputs = initialise
         bound._output_grad_callbacks = {**bound._output_grad_callbacks, self.condition_module: condition}

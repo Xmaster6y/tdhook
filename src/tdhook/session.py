@@ -108,7 +108,7 @@ class HookSession:
             except BaseException:
                 self._restore_parameter(target, parameter, original)
                 raise
-            builder.record(spec, lambda: self._restore_parameter(target, parameter, original))
+            builder.record(spec, lambda: self._restore_live_parameter(target, original))
         else:
 
             def forward_hook(_module: nn.Module, _args: tuple[object, ...], output: Tensor | tuple[Tensor, ...]):
@@ -150,6 +150,11 @@ class HookSession:
     def _restore_parameter(target: Target, parameter: Tensor, original: Tensor) -> None:
         with torch.no_grad():
             target._assign(parameter, original)
+
+    def _restore_live_parameter(self, target: Target, original: Tensor) -> None:
+        module = target.validate(self._model())
+        parameter = module.get_parameter(target.parameter)  # type: ignore[arg-type]
+        self._restore_parameter(target, parameter, original)
 
     @staticmethod
     def _hook_tensor(value: Tensor | tuple[Tensor, ...]) -> Tensor:

@@ -95,9 +95,10 @@ workflow language.
 
 Planning uses an inspection binding: it installs and removes the same hooks as
 execution but makes no model call and does not consume execution state such as
-clearing an activation cache. Before an inspected plan is executed, the method
-is rebound and its signature, execution requirements, hook program, and direct
-wrapper status must still match. A changed fact fails before the model call.
+clearing an activation cache or constructing a stateful probe estimator. Before
+an inspected plan is executed, the method is rebound and its signature,
+execution requirements, hook program, and direct wrapper status must still
+match. A changed fact fails before the model call.
 
 The initial same-run proof is intentionally narrow. Adjacent one-pass methods
 may share one model call only when their prepared TensorDict signatures and
@@ -105,6 +106,13 @@ autograd modes match, both wrappers execute the caller's model directly, and
 every operation in every bound program is a read-only ``capture``. A
 transformed wrapper, intervention, missing program, or other unknown fact
 produces separate executions, and the plan records the reason.
+
+Methods that install externally driven backward hooks are rejected from a
+workflow unless their execution contract owns the complete autograd-enabled
+recipe. Standalone managed preparation and ``HookSession`` retain that
+interactive flexibility. Method-owned output namespaces must also be disjoint
+for shared execution; an overlap forces declared sequential execution so the
+later method has normal TensorDict ordering semantics.
 
 Prepared methods may publish products after that shared call through their
 native TensorDict wrapper. For example, ``ActivationCaching`` adds its

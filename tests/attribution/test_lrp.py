@@ -285,6 +285,17 @@ class TestRules:
         )
         assert all(not hasattr(child, "_prev_forward") for child in module)
 
+    def test_lrp_out_keys_match_use_inputs_contract(self, default_test_model):
+        method = LRP(
+            use_inputs=False,
+            input_modules=["linear1"],
+            warn_on_missing_rule=False,
+        )
+
+        with method.prepare(default_test_model) as prepared:
+            assert ("attr", "input") not in prepared.out_keys
+            assert ("attr", "linear1") in prepared.out_keys
+
     def test_lrp_rule_registration_rolls_back_after_mapper_failure(self):
         module = get_sequential_linear_module(seed=0)
 

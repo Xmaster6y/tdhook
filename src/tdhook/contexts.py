@@ -1,14 +1,14 @@
 from contextlib import contextmanager
 from contextlib import ExitStack
 import sys
-from typing import List, Optional, Generator, Dict, overload, Literal
+from typing import List, Optional, Generator, Dict
 from torch import nn
 from tensordict.nn import TensorDictModuleBase, TensorDictModule
 from tensordict import TensorDict
 
 from tdhook.modules import HookedModule
 from tdhook.hooks import MultiHookHandle, merge_paths
-from tdhook._types import UnraveledKey
+from tdhook._types import UnraveledKey, is_nested_key
 from tdhook.execution import ExecutionSpec
 from tdhook.runtime import HookProgram
 
@@ -46,13 +46,13 @@ class HookingContext:
 
         self._in_keys = self._module.in_keys
         self._out_keys = self._module.out_keys
-        self._managed_by_context_manager = False
+        self._for_inspection = False
 
-    def _enter(self, managed_by_context_manager: bool = True, *, for_inspection: bool = False):
+    def _enter(self, *, for_inspection: bool = False):
         if self._in_context:
             raise RuntimeError("Cannot enter context twice")
         self._in_context = True
-        self._managed_by_context_manager = managed_by_context_manager
+        self._for_inspection = for_inspection
         self._program = None
 
         working_module = self._module
@@ -88,6 +88,7 @@ class HookingContext:
                         self._stack.__exit__(None, None, None)
                 finally:
                     self._in_context = False
+                    self._for_inspection = False
                     self._hooked_module = None
                     self._handle = None
                     self._stack = None
@@ -97,6 +98,12 @@ class HookingContext:
         """Return the model-free hook program installed by this context."""
 
         return self._program
+
+    @property
+    def for_inspection(self) -> bool:
+        """Whether this binding exists only to discover execution facts."""
+
+        return self._for_inspection
 
     @property
     def executes_model_directly(self) -> bool:
@@ -119,13 +126,13 @@ class HookingContext:
         return tuple(self._out_keys)
 
     def __enter__(self):
-        return self._enter(managed_by_context_manager=True)
+        return self._enter()
 
     @contextmanager
     def inspect(self) -> Generator[TensorDictModuleBase, None, None]:
         """Bind temporarily for planning without consuming execution state."""
 
-        prepared = self._enter(managed_by_context_manager=True, for_inspection=True)
+        prepared = self._enter(for_inspection=True)
         try:
             yield prepared
         finally:
@@ -145,6 +152,7 @@ class HookingContext:
                 cleanup_error = cleanup_error or error
         finally:
             self._in_context = False
+            self._for_inspection = False
             self._hooked_module = None
             self._handle = None
             if self._stack is not None:
@@ -199,16 +207,13 @@ class HookingContextWithCache(HookingContext):
     def clear(self):
         self._cache.clear()
 
-    def _enter(self, managed_by_context_manager: bool = True, *, for_inspection: bool = False):
+    def _enter(self, *, for_inspection: bool = False):
         if self._clear_cache and not for_inspection:
             self.clear()
-        return super()._enter(
-            managed_by_context_manager=managed_by_context_manager,
-            for_inspection=for_inspection,
-        )
+        return super()._enter(for_inspection=for_inspection)
 
     def __enter__(self):
-        return self._enter(managed_by_context_manager=True)
+        return self._enter()
 
 
 class HookingContextFactory:
@@ -229,67 +234,30 @@ class HookingContextFactory:
 
         return ExecutionSpec()
 
-    @overload
     def prepare(
         self,
         module: nn.Module,
         in_keys: Optional[List[UnraveledKey] | Dict[UnraveledKey, str]] = None,
         out_keys: Optional[List[UnraveledKey]] = None,
-        *,
-        return_context: Literal[True] = True,
-    ) -> "HookingContext": ...
-
-    @overload
-    def prepare(
-        self,
-        module: nn.Module,
-        in_keys: Optional[List[UnraveledKey] | Dict[UnraveledKey, str]] = None,
-        out_keys: Optional[List[UnraveledKey]] = None,
-        *,
-        return_context: Literal[False],
-    ) -> HookedModule: ...
-
-    def prepare(
-        self,
-        module: nn.Module,
-        in_keys: Optional[List[UnraveledKey] | Dict[UnraveledKey, str]] = None,
-        out_keys: Optional[List[UnraveledKey]] = None,
-        *,
-        return_context: bool = True,
-    ) -> "HookingContext | HookedModule":
-        """
-        Prepare the module for execution.
-
-        Args:
-            module: The module to prepare.
-            in_keys: Optional input keys.
-            out_keys: Optional output keys.
-            return_context: If True (default), returns a context manager. If False, returns the hooked module directly.
-
-        Returns:
-            If return_context is True, returns a HookingContext that can be used as a context manager.
-            If return_context is False, returns the HookedModule directly (context is automatically entered).
-        """
+    ) -> "HookingContext":
+        """Return the sole managed binding interface for ``module``."""
         if isinstance(module, TensorDictModuleBase):
             if in_keys is not None:
                 for key in in_keys:
-                    if not isinstance(key, UnraveledKey):
+                    if not is_nested_key(key):
                         raise ValueError(f"in_keys must be unraveled, got {type(key)}")
                     if key not in module.in_keys:
                         raise ValueError(f"Key {key} not in module.in_keys")
             if out_keys is not None:
                 for key in out_keys:
-                    if not isinstance(key, UnraveledKey):
+                    if not is_nested_key(key):
                         raise ValueError(f"out_keys must be unraveled, got {type(key)}")
                     if key not in module.out_keys:
                         raise ValueError(f"Key {key} not in module.out_keys")
 
         context = self._hooking_context_class(self, module, in_keys, out_keys, **self._hooking_context_kwargs)
 
-        if return_context:
-            return context
-        else:
-            return context._enter(managed_by_context_manager=False)
+        return context
 
     def _prepare_module(
         self,

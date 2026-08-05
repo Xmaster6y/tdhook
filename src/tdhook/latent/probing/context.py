@@ -14,10 +14,23 @@ from tdhook.hooks import (
 )
 from tdhook.modules import HookedModule
 from tdhook.runtime import BoundHookProgram, HookProgramBuilder, HookSpec
+from tdhook._types import UnraveledKey, is_nested_key
 
 
 class Probe(Protocol):
     def step(self, data: Any, **kwargs) -> Any: ...
+
+
+class _ProbingHookedModule(HookedModule):
+    """Expose probe metadata as native inputs without mutating the model contract."""
+
+    def __init__(self, *args, additional_keys: list[UnraveledKey], **kwargs):
+        super().__init__(*args, **kwargs)
+        self._probing_in_keys = list(dict.fromkeys([*self.td_module.in_keys, *additional_keys]))
+
+    @property
+    def in_keys(self):
+        return self._probing_in_keys
 
 
 class Probing(HookingContextFactory):
@@ -27,6 +40,7 @@ class Probing(HookingContextFactory):
 
     default_classes_to_hook = (nn.Module,)
     default_classes_to_skip = (nn.ModuleList, nn.Sequential, TensorDictModuleBase)
+    _hooked_module_class = _ProbingHookedModule
 
     def __init__(
         self,
@@ -34,7 +48,7 @@ class Probing(HookingContextFactory):
         probe_factory: Callable[[str, str], Probe],
         relative: bool = True,
         directions: Optional[List[HookDirection]] = None,
-        additional_keys: Optional[List[str]] = None,
+        additional_keys: Optional[List[UnraveledKey]] = None,
         classes_to_hook: Optional[List[Type[nn.Module]]] = None,
         classes_to_skip: Optional[List[Type[nn.Module]]] = None,
     ):
@@ -46,7 +60,10 @@ class Probing(HookingContextFactory):
         self._relative = relative
         self._probe_factory = probe_factory
         self._directions = directions or ["fwd"]
-        self._additional_keys = additional_keys
+        self._additional_keys = list(additional_keys or [])
+        if not all(is_nested_key(key) for key in self._additional_keys):
+            raise TypeError("additional_keys must contain TensorDict nested keys")
+        self._hooked_module_kwargs["additional_keys"] = self._additional_keys
 
     @property
     def key_pattern(self) -> str:
@@ -58,7 +75,7 @@ class Probing(HookingContextFactory):
         self._hook_manager.pattern = key_pattern
 
     def _hook_module(self, module: HookedModule) -> BoundHookProgram:
-        if self._additional_keys is not None:
+        if self._additional_keys:
             tmp_cache = TensorDict()
             additional_items = CacheProxy("_additional_keys", tmp_cache)
         else:
@@ -66,7 +83,10 @@ class Probing(HookingContextFactory):
 
         def hook_factory(name: str, direction: HookDirection) -> Callable:
             nonlocal self, additional_items
-            probe = self._probe_factory(name, direction)
+            if module.hooking_context is not None and module.hooking_context.for_inspection:
+                probe = None
+            else:
+                probe = self._probe_factory(name, direction)
 
             def callback(**kwargs):
                 nonlocal additional_items
@@ -74,12 +94,14 @@ class Probing(HookingContextFactory):
                     _additional_items = additional_items.resolve()
                 else:
                     _additional_items = {}
-                return probe.step(kwargs[DIRECTION_TO_RETURN[direction]], **_additional_items)
+                if probe is not None:
+                    return probe.step(kwargs[DIRECTION_TO_RETURN[direction]], **_additional_items)
+                return None
 
             return HookFactory.make_reading_hook(callback=callback, direction=direction)
 
         with HookProgramBuilder() as program:
-            if self._additional_keys is not None:
+            if self._additional_keys:
                 program.register(
                     module.td_module,
                     HookFactory.make_caching_hook(

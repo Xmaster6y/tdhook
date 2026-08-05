@@ -1,3 +1,5 @@
+from importlib.util import find_spec
+
 import pytest
 import torch
 from tensordict import TensorDict
@@ -21,15 +23,21 @@ from tdhook.latent.representation_similarity import CkaEstimator, InformationImb
             in_key=("representations", "samples"),
             out_key=("metrics", "dimension"),
         ),
-        LocalPcaDimensionEstimator(
-            k=2,
-            in_key=("representations", "samples"),
-            out_key=("metrics", "dimension"),
+        pytest.param(
+            LocalPcaDimensionEstimator(
+                k=2,
+                in_key=("representations", "samples"),
+                out_key=("metrics", "dimension"),
+            ),
+            marks=pytest.mark.skipif(find_spec("sklearn") is None, reason="scikit-learn is optional"),
         ),
-        CaPcaDimensionEstimator(
-            k=2,
-            in_key=("representations", "samples"),
-            out_key=("metrics", "dimension"),
+        pytest.param(
+            CaPcaDimensionEstimator(
+                k=2,
+                in_key=("representations", "samples"),
+                out_key=("metrics", "dimension"),
+            ),
+            marks=pytest.mark.skipif(find_spec("sklearn") is None, reason="scikit-learn is optional"),
         ),
     ],
 )

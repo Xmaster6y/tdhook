@@ -9,7 +9,7 @@ import pytest
 from tensordict import TensorDict, MemoryMappedTensor
 from tensordict.nn import TensorDictModule
 
-from tdhook.latent.activation_caching import ActivationCaching
+from tdhook.latent.activation_caching import ActivationCaching, ActivationCachingModule
 from tdhook.modules import get_best_device
 from tdhook.runtime import HookProgram, HookSpec
 
@@ -80,6 +80,23 @@ class TestActivationCaching:
         with pytest.raises(ValueError, match="collides"):
             with ActivationCaching("", cache_key="cache").prepare(model):
                 pass
+
+        nested_output = TensorDictModule(torch.nn.Identity(), in_keys=["input"], out_keys=[("result", "value")])
+        for cache_key in ("result", ("result", "value", "cache")):
+            with pytest.raises(ValueError, match="collides"):
+                with ActivationCaching("", cache_key=cache_key).prepare(nested_output):
+                    pass
+
+    def test_cache_publication_requires_context_and_key_pattern_is_mutable(self):
+        td_module = TensorDictModule(torch.nn.Identity(), in_keys=["input"], out_keys=["output"])
+        prepared = ActivationCachingModule(td_module, cache_key="cache")
+        with pytest.raises(RuntimeError, match="prepared hooking context"):
+            prepared.finalize_tensordict(TensorDict({"output": torch.ones(2, 3)}, batch_size=[2]))
+
+        method = ActivationCaching("linear1")
+        assert method.key_pattern == "linear1"
+        method.key_pattern = "linear2"
+        assert method.key_pattern == "linear2"
 
     def test_different_device_cache(self, default_test_model):
         """Test creating a ActivationCaching with cache on a different device."""

@@ -6,7 +6,18 @@ from tdhook.modules import HookedModule
 from tdhook.contexts import HookingContextFactory, HookingContextWithCache
 from tdhook.hooks import MultiHookManager, HookFactory, HookDirection
 from tdhook.runtime import BoundHookProgram, HookProgramBuilder, HookSpec
-from tdhook._types import UnraveledKey
+from tdhook._types import UnraveledKey, is_nested_key
+
+
+def _key_path(key: UnraveledKey) -> tuple[str, ...]:
+    return (key,) if isinstance(key, str) else key
+
+
+def _keys_overlap(left: UnraveledKey, right: UnraveledKey) -> bool:
+    left_path = _key_path(left)
+    right_path = _key_path(right)
+    common = min(len(left_path), len(right_path))
+    return left_path[:common] == right_path[:common]
 
 
 class ActivationCachingModule(HookedModule):
@@ -16,7 +27,7 @@ class ActivationCachingModule(HookedModule):
         super().__init__(*args, **kwargs)
         self.cache_key = cache_key
         if cache_key is not None:
-            if cache_key in self.out_keys:
+            if any(_keys_overlap(cache_key, output_key) for output_key in self.out_keys):
                 raise ValueError(f"Activation cache key {cache_key!r} collides with a model output key")
             self.out_keys = [*self.out_keys, cache_key]
 
@@ -26,12 +37,6 @@ class ActivationCachingModule(HookedModule):
         if self.hooking_context is None:
             raise RuntimeError("ActivationCachingModule requires a prepared hooking context")
         return data.set(self.cache_key, self.hooking_context.cache.copy())
-
-    def forward(self, *args, **kwargs):
-        result = super().forward(*args, **kwargs)
-        if isinstance(result, TensorDictBase):
-            return self.finalize_tensordict(result)
-        return result
 
 
 class ActivationCaching(HookingContextFactory):
@@ -54,7 +59,7 @@ class ActivationCaching(HookingContextFactory):
         cache_key: UnraveledKey | None = "cache",
     ):
         super().__init__()
-        if cache_key is not None and not isinstance(cache_key, UnraveledKey):
+        if cache_key is not None and not is_nested_key(cache_key):
             raise TypeError("cache_key must be a TensorDict nested key or None")
         self._hooking_context_kwargs["cache"] = cache
         self._hooking_context_kwargs["clear_cache"] = clear_cache

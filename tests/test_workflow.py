@@ -1,3 +1,4 @@
+import pytest
 import torch
 from tensordict import TensorDict
 from tensordict.nn import TensorDictModule, TensorDictModuleBase
@@ -6,7 +7,7 @@ from torch import nn
 from tests.composition_conformance import assert_conformance
 from tdhook.contexts import HookingContext, HookingContextFactory
 from tdhook.execution import ExecutionSpec, GradientMode
-from tdhook.latent import ActivationCaching
+from tdhook.latent import ActivationCaching, Probing
 from tdhook.modules import HookedModule
 from tdhook.runtime import BoundHookProgram, HookProgramBuilder, HookSpec
 from tdhook.workflow import Workflow
@@ -71,6 +72,19 @@ class InvalidOutput(TensorDictModuleBase):
         return "not a tensordict"
 
 
+class PublishingModule(HookedModule):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.out_keys = [*self.out_keys, "published"]
+
+    def finalize_tensordict(self, data):
+        return data.set("published", torch.ones(*data.batch_size))
+
+
+class PublishingMethod(HookingContextFactory):
+    _hooked_module_class = PublishingModule
+
+
 def test_workflow_composes_a_method_and_native_tensordict_operator(default_test_model):
     model = TensorDictModule(
         default_test_model,
@@ -122,6 +136,70 @@ def test_workflow_coexecutes_real_activation_methods_and_publishes_each_cache(de
     )
     assert result["activations", "first"]["model.linear1"].shape == (2, 20)
     assert result["activations", "second"]["model.linear2"].shape == (2, 20)
+
+
+def test_method_publication_contract_applies_to_standalone_and_workflow_execution(default_test_model):
+    data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
+    method = PublishingMethod()
+
+    with method.prepare(default_test_model) as prepared:
+        standalone = prepared(data.clone())
+    workflow_result = Workflow(method)(default_test_model, data.clone())
+
+    assert torch.equal(standalone["published"], torch.ones(2))
+    assert torch.equal(workflow_result["published"], torch.ones(2))
+
+
+def test_workflow_splits_overlapping_method_owned_outputs_in_declared_order(default_test_model):
+    first = ActivationCaching("linear1", cache_key=("activations", "shared"))
+    second = ActivationCaching("linear2", cache_key=("activations", "shared"))
+    workflow = Workflow(first, second)
+    data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
+
+    plan = workflow.plan(default_test_model, data)
+    result = workflow(default_test_model, data)
+
+    assert plan.model_passes == 2
+    assert "output namespaces overlap" in plan.compatibility[0].reason
+    assert "linear2" in result["activations", "shared"]
+    assert "linear1" not in result["activations", "shared"]
+
+
+def test_workflow_rejects_externally_driven_backward_capture(default_test_model):
+    workflow = Workflow(ActivationCaching("linear1", directions=["bwd"]))
+    data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
+
+    with pytest.raises(ValueError, match="backward hooks"):
+        workflow.plan(default_test_model, data)
+
+
+def test_probing_inspection_is_inert_and_declares_additional_keys(default_test_model):
+    created = []
+
+    class Probe:
+        def step(self, data, **kwargs):
+            return None
+
+    def factory(name, direction):
+        created.append((name, direction))
+        return Probe()
+
+    method = Probing("linear1", factory, additional_keys=["labels", "step_type"])
+    workflow = Workflow(method)
+    data = TensorDict(
+        {"input": torch.ones(2, 10), "labels": torch.ones(2), "step_type": "fit"},
+        batch_size=[2],
+    )
+
+    plan = workflow.plan(default_test_model, data)
+
+    assert created == []
+    assert plan.executions[0].in_keys == ("input", "labels", "step_type")
+    with pytest.raises(ValueError, match="step_type"):
+        workflow.plan(default_test_model, data.exclude("step_type"))
+
+    workflow(default_test_model, data)
+    assert created == [("linear1", "fwd")]
 
 
 def test_workflow_splits_mutating_programs_and_explains_why(default_test_model):
@@ -241,18 +319,27 @@ def test_workflow_rejects_invalid_method_protocol_results(default_test_model):
             return object()
 
     class NonModuleContext(HookingContext):
-        def _enter(self, managed_by_context_manager=True, *, for_inspection=False):
+        def _enter(self, *, for_inspection=False):
             self._in_context = True
             return object()
 
     class InvalidPrepared(HookingContextFactory):
         _hooking_context_class = NonModuleContext
 
+    class MissingBindingContext(HookingContext):
+        def _enter(self, *, for_inspection=False):
+            self._in_context = True
+            return TensorDictModule(lambda value: value, in_keys=["input"], out_keys=["output"])
+
+    class MissingBinding(HookingContextFactory):
+        _hooking_context_class = MissingBindingContext
+
     data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
     cases = (
         (InvalidSpec(), "ExecutionSpec"),
         (InvalidContext(), "HookingContext"),
         (InvalidPrepared(), "TensorDictModuleBase"),
+        (MissingBinding(), "MethodBinding"),
     )
     for method, message in cases:
         try:
@@ -274,12 +361,21 @@ def test_workflow_explains_each_unproven_coexecution_case(default_test_model):
         def execution_spec(self):
             return ExecutionSpec(gradient_mode=GradientMode.REQUIRED)
 
+    class IndirectContext(HookingContext):
+        @property
+        def executes_model_directly(self):
+            return False
+
+    class IndirectCapture(CaptureOutput):
+        _hooking_context_class = IndirectContext
+
     data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
     cases = (
         ((CaptureOutput(), TwoPassCapture()), "exactly one model pass"),
         ((CaptureOutput(), GradientCapture()), "different autograd modes"),
         ((CaptureOutput(), HookingContextFactory()), "did not expose"),
         ((CaptureOutput(), EmptyProgram()), "empty hook program"),
+        ((CaptureOutput(), IndirectCapture()), "transforms model execution"),
     )
     for methods, message in cases:
         plan = Workflow(*methods).plan(default_test_model, data)

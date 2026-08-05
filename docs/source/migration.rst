@@ -31,6 +31,12 @@ model.  Native ``in_keys`` and ``out_keys`` describe data dependencies.
 ``Workflow.plan(model, data)`` reports executions and model-pass cost before
 ``Workflow(model, data)`` runs them.
 
+The v0.1 ``HookedModule.run/get/set`` helpers and unmanaged
+``prepare(return_context=False)`` path are removed. Use ``HookSession`` for
+imperative capture or replacement and the managed ``prepare`` context for a
+configured method. This leaves one hook-registration primitive and one cleanup
+owner for every execution path.
+
 Activation capture
 ------------------
 
@@ -104,7 +110,8 @@ Migration checklist
    budget.
 5. Use ``Workflow.plan`` before multi-method execution when pass count or
    coexecution matters.
-6. Do not retain prepared wrappers, hook handles, or temporary model state
+6. Replace direct ``HookedModule`` hook operations with ``HookSession``.
+7. Do not retain prepared wrappers, hook handles, or temporary model state
    outside their context manager.
 
 See :doc:`architecture` for ownership and lifecycle boundaries and

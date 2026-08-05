@@ -32,6 +32,18 @@ def activation_fixture():
     return model, inputs
 
 
+def test_dimension_operators_reject_invalid_runtime_nested_keys():
+    estimator = TwoNnDimensionEstimator()
+    with pytest.raises(TypeError, match="activation_key"):
+        ActivationSamples((), lambda value: value)
+    with pytest.raises(TypeError, match="cache_key and out_key"):
+        ActivationSamples("value", lambda value: value, cache_key=())
+    with pytest.raises(TypeError, match="in_key and out_key"):
+        DimensionEstimation(estimator, in_key=())
+    with pytest.raises(TypeError, match="in_key and out_key"):
+        DimensionSummary(out_key=())
+
+
 def test_conditioned_dimension_workflow_has_one_capture_pass_and_frozen_channel_fixture(activation_fixture):
     model, inputs = activation_fixture
     hooks_before = sum(len(module._forward_hooks) + len(module._forward_pre_hooks) for module in model.modules())

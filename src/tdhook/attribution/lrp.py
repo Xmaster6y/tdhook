@@ -75,7 +75,7 @@ class LRP(GradientAttribution):
     def _prepare_module(self, module, in_keys, out_keys, extra_relative_path):
         prepared = super()._prepare_module(module, in_keys, out_keys, extra_relative_path)
         public_in_keys = [*in_keys, *self._additional_init_keys]
-        attribution_sources = [*in_keys, *self._input_modules]
+        attribution_sources = [*(in_keys if self._use_inputs else ()), *self._input_modules]
         public_out_keys = [*out_keys, *(join_keys(self._attr_key, key) for key in attribution_sources)]
         return _LRPModule(prepared, public_in_keys, public_out_keys)
 

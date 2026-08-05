@@ -143,13 +143,20 @@ def _resolve_submodule_attribute(current: object, attribute: str) -> object:
 
 def _resolve_submodule_index(current: object, index: str | int | slice) -> object:
     """Index only registered module containers and builtin collections."""
-    if isinstance(current, nn.Module):
+    if isinstance(current, nn.ModuleDict):
+        if not isinstance(index, str):
+            raise TypeError("ModuleDict indexes must be strings")
         modules = _instance_attributes(current).get("_modules")
         assert isinstance(modules, dict)
-        values = list(modules.values())
+        return modules[index]
+    if isinstance(current, (nn.ModuleList, nn.Sequential)):
         if isinstance(index, str):
-            return modules[index]
-        return values[index]
+            raise TypeError(f"{type(current).__name__} indexes must be integers or slices")
+        modules = _instance_attributes(current).get("_modules")
+        assert isinstance(modules, dict)
+        return list(modules.values())[index]
+    if isinstance(current, nn.Module):
+        raise TypeError(f"'{type(current).__name__}' is not a positional module container")
     if type(current) in (dict, list, tuple):
         return current[index]
     raise TypeError(f"'{type(current).__name__}' is not a supported indexable container")

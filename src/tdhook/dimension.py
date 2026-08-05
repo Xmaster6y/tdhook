@@ -10,7 +10,7 @@ from tensordict.nn import TensorDictModuleBase
 from tensordict.tensorclass import NonTensorData
 from tensordict.utils import NestedKey
 
-from tdhook._types import join_keys
+from tdhook._types import is_nested_key, join_keys
 from tdhook.latent import ActivationCaching
 from tdhook.workflow import Workflow
 
@@ -60,9 +60,9 @@ class ActivationSamples(TensorDictModuleBase):
         out_key: NestedKey = ("activations", "samples"),
     ) -> None:
         super().__init__()
-        if not isinstance(activation_key, NestedKey):
+        if not is_nested_key(activation_key):
             raise TypeError("activation_key must be a TensorDict nested key")
-        if not isinstance(cache_key, NestedKey) or not isinstance(out_key, NestedKey):
+        if not is_nested_key(cache_key) or not is_nested_key(out_key):
             raise TypeError("cache_key and out_key must be TensorDict nested keys")
         self.activation_key = activation_key
         self.transform = transform
@@ -106,9 +106,9 @@ class DimensionEstimation(TensorDictModuleBase):
         super().__init__()
         estimator_in_key = getattr(estimator, "in_key", None)
         estimator_out_key = getattr(estimator, "out_key", None)
-        if not isinstance(estimator_in_key, NestedKey) or not isinstance(estimator_out_key, NestedKey):
+        if not is_nested_key(estimator_in_key) or not is_nested_key(estimator_out_key):
             raise TypeError("Dimension estimation requires native estimator in_key and out_key attributes")
-        if not isinstance(in_key, NestedKey) or not isinstance(out_key, NestedKey):
+        if not is_nested_key(in_key) or not is_nested_key(out_key):
             raise TypeError("in_key and out_key must be TensorDict nested keys")
         self.estimator = estimator
         self.in_key = in_key
@@ -141,7 +141,7 @@ class DimensionSummary(TensorDictModuleBase):
         dims: int | Sequence[int] | None = None,
     ) -> None:
         super().__init__()
-        if not isinstance(in_key, NestedKey) or not isinstance(out_key, NestedKey):
+        if not is_nested_key(in_key) or not is_nested_key(out_key):
             raise TypeError("in_key and out_key must be TensorDict nested keys")
         self.in_key = in_key
         self.out_key = out_key
