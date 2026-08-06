@@ -17,7 +17,7 @@ class FrozenDict(dict[str, object]):
     def _immutable(self, *args: object, **kwargs: object) -> None:
         raise TypeError("Configured step descriptions are immutable")
 
-    __delitem__ = __setitem__ = clear = pop = popitem = setdefault = update = _immutable
+    __delitem__ = __ior__ = __setitem__ = clear = pop = popitem = setdefault = update = _immutable
 
 
 @dataclass(frozen=True)
@@ -75,6 +75,11 @@ def _freeze(value: object, identifiers: Mapping[Callable[..., object], str]) -> 
         return value
     if isinstance(value, Target):
         return _freeze(value.to_dict(), identifiers)
+    if isinstance(value, ConfiguredStepDescription):
+        return _freeze(value.to_dict(), identifiers)
+    describe = getattr(value, "describe", None)
+    if callable(describe):
+        return _freeze(describe(callback_identifiers=identifiers).to_dict(), identifiers)
     if callable(value):
         try:
             identifier = identifiers[value]
@@ -96,7 +101,7 @@ def _freeze(value: object, identifiers: Mapping[Callable[..., object], str]) -> 
 
 
 def _key_list(keys: Sequence[UnraveledKey]) -> tuple[object, ...]:
-    return tuple(list(key) if isinstance(key, tuple) else key for key in keys)
+    return tuple(tuple(key) if isinstance(key, tuple) else key for key in keys)
 
 
 __all__ = ["ConfiguredStepDescription", "FrozenDict", "configured_step_description"]

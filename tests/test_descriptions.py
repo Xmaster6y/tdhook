@@ -6,6 +6,8 @@ from tensordict import TensorDict
 
 from tdhook.attribution import IntegratedGradients
 from tdhook.attribution.grad_cam import DimsConfig
+from tdhook.attribution.lrp import LRP
+from tdhook.concepts import ChannelConditionedLRP
 from tdhook.descriptions import _freeze
 from tdhook.execution import GradientMode
 from tdhook.latent import ActivationCaching
@@ -25,6 +27,10 @@ def test_method_description_is_immutable_json_compatible_and_changes_with_target
     json.dumps(description.to_dict(), sort_keys=True)
     with pytest.raises(TypeError, match="immutable"):
         description.parameters["relative"] = False
+    with pytest.raises(TypeError, match="immutable"):
+        description.parameters |= {"relative": False}
+    with pytest.raises(TypeError, match="immutable"):
+        description.to_dict()["parameters"] |= {"relative": False}
 
 
 def test_integrated_gradient_description_captures_baseline_and_step_settings():
@@ -67,6 +73,13 @@ def test_description_serialization_rejects_ambiguous_configuration_values():
         _freeze(object(), {})
 
 
+def test_description_serializes_nested_configured_methods():
+    description = ChannelConditionedLRP(LRP(), condition_module="linear1").describe()
+
+    assert description.parameters["base"]["method_type"] == "tdhook.attribution.lrp.LRP"
+    assert description.parameters["base"]["execution"]["gradient_mode"] == "required"
+
+
 def test_workflow_description_includes_bound_input_and_output_keys(default_test_model):
     workflow = Workflow(ActivationCaching("linear1", cache_key=("activations", "linear1")))
     data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
@@ -75,6 +88,8 @@ def test_workflow_description_includes_bound_input_and_output_keys(default_test_
 
     assert description.in_keys == ("input",)
     assert description.out_keys == ("output", ("activations", "linear1"))
+    assert description.to_dict()["out_keys"] == ("output", ("activations", "linear1"))
+    json.dumps(description.to_dict(), sort_keys=True)
 
 
 def test_workflow_description_rejects_non_tensordict_data(default_test_model):
