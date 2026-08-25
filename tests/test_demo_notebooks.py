@@ -6,10 +6,10 @@ import nbformat
 import pytest
 from nbclient import NotebookClient
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEMO_DOCUMENTS = (
     ("tutorials.rst", "notebooks/tutorials/declared-workflows.ipynb"),
+    ("tutorials.rst", "notebooks/tutorials/torchrl-composable-policy.ipynb"),
     ("methods.rst", "notebooks/methods/representation-similarity.ipynb"),
 )
 DEMO_NOTEBOOKS = tuple(REPO_ROOT / "docs/source" / path for _, path in DEMO_DOCUMENTS)

@@ -40,6 +40,23 @@ Complete examples for common TDHook workflows and domain integrations.
          </div>
 
    .. grid-item-card::
+      :link: notebooks/tutorials/torchrl-composable-policy.ipynb
+      :class-card: surface
+      :class-body: surface
+
+      .. raw:: html
+
+         <div class="d-flex align-items-center">
+            <div class="d-flex justify-content-center" style="min-width: 50px; margin-right: 20px; height: 100%;">
+               <i class="fa-solid fa-route fa-2x"></i>
+            </div>
+            <div>
+               <h5 class="card-title">Composable TorchRL Policy Investigation</h5>
+               <p class="card-text">Follow a fitted-Q policy from concept attribution to causal intervention and paired rollouts.</p>
+            </div>
+         </div>
+
+   .. grid-item-card::
       :link: notebooks/tutorials/torchrl-ppo.ipynb
       :class-card: surface
       :class-body: surface
@@ -112,6 +129,7 @@ Complete examples for common TDHook workflows and domain integrations.
    :maxdepth: 2
 
    notebooks/tutorials/torchrl-ppo.ipynb
+   notebooks/tutorials/torchrl-composable-policy.ipynb
    notebooks/tutorials/declared-workflows.ipynb
    notebooks/tutorials/chess-value-saliency.ipynb
    notebooks/tutorials/concept-attribution.ipynb
