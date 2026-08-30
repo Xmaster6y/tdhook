@@ -1,118 +1,132 @@
 Tutorials
 =========
 
-Complete examples for common TDHook workflows and domain integrations.
+These notebooks are the maintained guides to TDHook. Start with one method or
+follow a complete workflow that combines methods with a model or domain.
 
-.. raw:: html
+Learn the methods
+-----------------
 
-   <script>
-   document.addEventListener('DOMContentLoaded', (event) => {
-      document.querySelectorAll('h5.card-title').forEach(el => {
-      el.style.margin = '0';
-      });
-   });
-   </script>
-
-   <style>
-      .toctree-wrapper {
-         display: none !important;
-      }
-   </style>
-
-.. grid:: 2
+.. grid:: 1 2 2 2
    :gutter: 3
 
-   .. grid-item-card::
-      :link: notebooks/tutorials/declared-workflows.ipynb
+   .. grid-item-card:: Integrated Gradients
+      :link: notebooks/methods/integrated-gradients
+      :link-type: doc
       :class-card: surface
-      :class-body: surface
 
-      .. raw:: html
+      :octicon:`graph;2em;sd-text-primary`
 
-         <div class="d-flex align-items-center">
-            <div class="d-flex justify-content-center" style="min-width: 50px; margin-right: 20px; height: 100%;">
-               <i class="fa-solid fa-diagram-project fa-2x"></i>
-            </div>
-            <div>
-               <h5 class="card-title">Declared Workflows</h5>
-               <p class="card-text">Run two offline workflows with named TensorDict values.</p>
-            </div>
-         </div>
+      Attribute predictions to inputs with an accumulated gradient path.
 
-   .. grid-item-card::
-      :link: notebooks/tutorials/torchrl-ppo.ipynb
+   .. grid-item-card:: Steering Vectors
+      :link: notebooks/methods/steering-vectors
+      :link-type: doc
       :class-card: surface
-      :class-body: surface
 
-      .. raw:: html
+      :octicon:`iterations;2em;sd-text-primary`
 
-         <div class="d-flex align-items-center">
-            <div class="d-flex justify-content-center" style="min-width: 50px; margin-right: 20px; height: 100%;">
-               <i class="fa-solid fa-robot fa-2x"></i>
-            </div>
-            <div>
-               <h5 class="card-title">TorchRL PPO Action Probing</h5>
-               <p class="card-text">Set up a TorchRL PPO agent and use tdhook to probe action representations.</p>
-            </div>
-         </div>
+      Modify model behavior through intermediate activation directions.
 
-   .. grid-item-card::
-      :link: notebooks/tutorials/chess-value-saliency.ipynb
+   .. grid-item-card:: Linear Probing
+      :link: notebooks/methods/linear-probing
+      :link-type: doc
       :class-card: surface
-      :class-body: surface
 
-      .. raw:: html
+      :octicon:`search;2em;sd-text-primary`
 
-         <div class="d-flex align-items-center">
-            <div class="d-flex justify-content-center" style="min-width: 50px; margin-right: 20px; height: 100%;">
-               <i class="fa-solid fa-chess fa-2x"></i>
-            </div>
-            <div>
-               <h5 class="card-title">Chess Value Saliency</h5>
-               <p class="card-text">Compute attribution maps for chess model predictions using saliency methods.</p>
-            </div>
-         </div>
+      Test which concepts are linearly available in learned representations.
 
-   .. grid-item-card::
-      :link: notebooks/tutorials/concept-attribution.ipynb
+   .. grid-item-card:: Bilinear Probing
+      :link: notebooks/methods/bilinear-probing
+      :link-type: doc
       :class-card: surface
-      :class-body: surface
 
-      .. raw:: html
+      :octicon:`git-compare;2em;sd-text-primary`
 
-         <div class="d-flex align-items-center">
-            <div class="d-flex justify-content-center" style="min-width: 50px; margin-right: 20px; height: 100%;">
-               <i class="fa-solid fa-map fa-2x"></i>
-            </div>
-            <div>
-               <h5 class="card-title">Concept Attribution</h5>
-               <p class="card-text">Visualise concept attribution on natural images.</p>
-            </div>
-         </div>
+      Capture interactions between paired layer representations.
 
-   .. grid-item-card::
-      :link: notebooks/tutorials/chess-dimension-estimation.ipynb
+   .. grid-item-card:: Dimension Estimation
+      :link: notebooks/methods/dimension-estimation
+      :link-type: doc
       :class-card: surface
-      :class-body: surface
 
-      .. raw:: html
+      :octicon:`number;2em;sd-text-primary`
 
-         <div class="d-flex align-items-center">
-            <div class="d-flex justify-content-center" style="min-width: 50px; margin-right: 20px; height: 100%;">
-               <i class="fa-solid fa-chess-board fa-2x"></i>
-            </div>
-            <div>
-               <h5 class="card-title">Chess Dimension Estimation</h5>
-               <p class="card-text">Estimate and plot dimensions for chess activations.</p>
-            </div>
-         </div>
+      Estimate intrinsic dimension with TwoNN, local PCA, and related methods.
+
+   .. grid-item-card:: Representation Similarity
+      :link: notebooks/methods/representation-similarity
+      :link-type: doc
+      :class-card: surface
+
+      :octicon:`diff;2em;sd-text-primary`
+
+      Compare learned representations with CKA and information imbalance.
+
+Complete workflows
+------------------
+
+.. grid:: 1 2 2 2
+   :gutter: 3
+
+   .. grid-item-card:: Declared Workflows
+      :link: notebooks/tutorials/declared-workflows
+      :link-type: doc
+      :class-card: surface
+
+      :octicon:`workflow;2em;sd-text-primary`
+
+      Run inspectable pipelines with named ``TensorDict`` values.
+
+   .. grid-item-card:: TorchRL PPO Action Probing
+      :link: notebooks/tutorials/torchrl-ppo
+      :link-type: doc
+      :class-card: surface
+
+      :octicon:`dependabot;2em;sd-text-primary`
+
+      Probe action representations in a TorchRL PPO agent.
+
+   .. grid-item-card:: Chess Value Saliency
+      :link: notebooks/tutorials/chess-value-saliency
+      :link-type: doc
+      :class-card: surface
+
+      :octicon:`eye;2em;sd-text-primary`
+
+      Attribute chess value predictions with saliency methods.
+
+   .. grid-item-card:: Concept Attribution
+      :link: notebooks/tutorials/concept-attribution
+      :link-type: doc
+      :class-card: surface
+
+      :octicon:`project-roadmap;2em;sd-text-primary`
+
+      Visualize concept attribution on natural images.
+
+   .. grid-item-card:: Chess Dimension Estimation
+      :link: notebooks/tutorials/chess-dimension-estimation
+      :link-type: doc
+      :class-card: surface
+
+      :octicon:`telescope;2em;sd-text-primary`
+
+      Estimate and plot dimensions for chess activations.
 
 .. toctree::
    :hidden:
    :maxdepth: 2
 
-   notebooks/tutorials/torchrl-ppo.ipynb
-   notebooks/tutorials/declared-workflows.ipynb
-   notebooks/tutorials/chess-value-saliency.ipynb
-   notebooks/tutorials/concept-attribution.ipynb
-   notebooks/tutorials/chess-dimension-estimation.ipynb
+   notebooks/methods/integrated-gradients
+   notebooks/methods/steering-vectors
+   notebooks/methods/linear-probing
+   notebooks/methods/bilinear-probing
+   notebooks/methods/dimension-estimation
+   notebooks/methods/representation-similarity
+   notebooks/tutorials/declared-workflows
+   notebooks/tutorials/torchrl-ppo
+   notebooks/tutorials/chess-value-saliency
+   notebooks/tutorials/concept-attribution
+   notebooks/tutorials/chess-dimension-estimation

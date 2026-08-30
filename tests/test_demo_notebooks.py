@@ -10,14 +10,16 @@ from nbclient import NotebookClient
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEMO_DOCUMENTS = (
     ("tutorials.rst", "notebooks/tutorials/declared-workflows.ipynb"),
-    ("methods.rst", "notebooks/methods/representation-similarity.ipynb"),
+    ("tutorials.rst", "notebooks/methods/representation-similarity.ipynb"),
 )
 DEMO_NOTEBOOKS = tuple(REPO_ROOT / "docs/source" / path for _, path in DEMO_DOCUMENTS)
 
 
 def test_demo_notebooks_are_linked_from_the_top_level_docs():
     for document, notebook in DEMO_DOCUMENTS:
-        assert notebook in (REPO_ROOT / "docs/source" / document).read_text()
+        document_lines = (REPO_ROOT / "docs/source" / document).read_text().splitlines()
+        expected_link = f":link: {notebook.removesuffix('.ipynb')}"
+        assert expected_link in {line.strip() for line in document_lines}
 
 
 @pytest.mark.integration

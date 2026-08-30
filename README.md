@@ -17,36 +17,56 @@
 ![publish](https://github.com/Xmaster6y/tdhook/actions/workflows/publish.yml/badge.svg)
 [![docs](https://readthedocs.org/projects/tdhook/badge/?version=latest)](https://tdhook.readthedocs.io/en/latest/?badge=latest)
 
-Interpretability with `tensordict` and `torch` hooks.
+Composable interpretability for PyTorch with `TensorDict` and `torch` hooks.
 
 ## Getting Started
 
-Most methods should work with minimal configuration. Here's a basic example of running Integrated Gradients on a VGG16 model (full example available [here](./docs/source/notebooks/methods/integrated-gradients.ipynb)):
+Install TDHook from PyPI:
 
-```python
-from tdhook.attribution import IntegratedGradients
-
-# Define attribution target (e.g., zebra class = 340)
-def init_attr_targets(targets, _):
-    zebra_logit = targets["output"][..., 340]
-    return TensorDict(out=zebra_logit, batch_size=targets.batch_size)
-
-# Compute attribution
-with IntegratedGradients(init_attr_targets=init_attr_targets).prepare(model) as hooked_model:
-    td = TensorDict({
-        "input": image_tensor,
-        ("baseline", "input"): torch.zeros_like(image_tensor) # required for integrated gradients
-    }).unsqueeze(0)
-    td = hooked_model(td) # Access attribution with td.get(("attr", "input"))
+```console
+pip install tdhook
 ```
 
-To dig deeper, see the [documentation](https://tdhook.readthedocs.io).
+TDHook methods wrap an ordinary PyTorch model for the lifetime of a context
+manager. Inputs, baselines, model outputs, and interpretability results use
+explicit `TensorDict` keys:
 
-### Skills
+```python
+import torch
+from torch import nn
+from tensordict import TensorDict
+from tdhook.attribution import IntegratedGradients
 
-An [agent skill](skills/tdhook/SKILL.md) is available for tdhook. It provides AI guidance for attribution, activation analysis, probing, steering, and weight-level interventions—including when to use each method and how to wire TensorDict keys.
+model = nn.Sequential(nn.Linear(4, 8), nn.ReLU(), nn.Linear(8, 2))
+inputs = torch.tensor([[0.2, -0.1, 0.4, 0.7]])
 
-### Features
+def select_score(outputs, _):
+    score = outputs["output"][..., 0]
+    return TensorDict(score=score, batch_size=outputs.batch_size)
+
+data = TensorDict(
+    {
+        "input": inputs,
+        ("baseline", "input"): torch.zeros_like(inputs),
+    },
+    batch_size=[1],
+)
+
+with IntegratedGradients(init_attr_targets=select_score).prepare(model) as hooked_model:
+    result = hooked_model(data)
+
+attributions = result["attr", "input"]
+```
+
+The context installs and removes the hooks; the returned attribution has the
+same shape as `inputs`. See [Getting Started](https://tdhook.readthedocs.io/en/latest/start.html)
+for the annotated version.
+
+## Learn by example
+
+The [tutorial gallery](https://tdhook.readthedocs.io/en/latest/tutorials.html)
+collects all maintained method and end-to-end notebooks. Launch a method
+notebook directly in Colab:
 
 - [Integrated Gradients](https://tdhook.readthedocs.io/en/latest/notebooks/methods/integrated-gradients.html): [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Xmaster6y/tdhook/blob/main/docs/source/notebooks/methods/integrated-gradients.ipynb)
 - [Steering Vectors](https://tdhook.readthedocs.io/en/latest/notebooks/methods/steering-vectors.html): [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Xmaster6y/tdhook/blob/main/docs/source/notebooks/methods/steering-vectors.ipynb)
@@ -55,6 +75,11 @@ An [agent skill](skills/tdhook/SKILL.md) is available for tdhook. It provides AI
 - [Dimension Estimation](https://tdhook.readthedocs.io/en/latest/notebooks/methods/dimension-estimation.html): [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Xmaster6y/tdhook/blob/main/docs/source/notebooks/methods/dimension-estimation.ipynb)
 - [Representation Similarity](https://tdhook.readthedocs.io/en/latest/notebooks/methods/representation-similarity.html): [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Xmaster6y/tdhook/blob/main/docs/source/notebooks/methods/representation-similarity.ipynb)
 
+Use the generated [API reference](https://tdhook.readthedocs.io/en/latest/api/index.html)
+for exact signatures. The [TDHook agent skill](skills/tdhook/SKILL.md) provides
+guidance for attribution, activation analysis, probing, steering, and
+weight-level interventions.
+
 ## Config
 
 This project uses [`uv`](https://docs.astral.sh/uv/) to manage python dependencies and run scripts, as well as [`just`](https://github.com/casey/just) to run commands.
@@ -62,6 +87,7 @@ This project uses [`uv`](https://docs.astral.sh/uv/) to manage python dependenci
 ## Citation
 
 If you're using `tdhook` in your research, please cite it using the following BibTeX entry:
+
 ```
 @misc{poupart2025tdhooklightweightframeworkinterpretability,
       title={TDHook: A Lightweight Framework for Interpretability},
@@ -75,4 +101,5 @@ If you're using `tdhook` in your research, please cite it using the following Bi
 ```
 
 ## License
+
 `tdhook` is licensed under the MIT License. See [LICENSE](./LICENSE) for details.
