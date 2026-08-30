@@ -8,11 +8,10 @@
     :maxdepth: 1
     :hidden:
 
-    start
-    methods
-    tutorials
-    api/index
-    about
+    Getting Started <start>
+    Tutorials <tutorials>
+    API Reference <api/index>
+    About <about>
 
 .. grid:: 1 1 2 2
     :class-container: hero
@@ -33,39 +32,60 @@
 
         .. div:: sd-fs-4 sd-font-weight-bold sd-my-0 sub-bot image-container
 
-            Interpreting ``torch`` Deep Neural Networks
+            Composable interpretability for PyTorch
 
-        **tdhook** is a package for explaining ``torch`` deep neural networks based on ``tensordict`` and ``torch`` hooks.
+        Capture, transform, and compose model evidence with ``TensorDict`` and
+        ``torch`` hooks.
 
-.. div:: sd-fs-1 sd-font-weight-bold sd-text-center sd-text-primary sd-mb-5
+        .. div:: button-group
 
-  Key Features
+          .. button-ref:: start
+            :color: primary
+            :shadow:
 
-.. grid:: 1 1 2 2
-    :class-container: features
+                Get Started
 
-    .. grid-item::
+          .. button-ref:: tutorials
+            :color: primary
+            :outline:
 
-      .. div:: features-container
+                Tutorials
 
-        .. image:: _static/images/one.png
-          :width: 150
+          .. button-ref:: api/index
+            :color: primary
+            :outline:
 
-        .. div::
+                API Reference
 
-          **Efficiency**
+Explore
+-------
 
-          Memory and time efficient, no large bundle, only what you need.
+.. grid:: 1 1 3 3
+   :gutter: 3
 
-    .. grid-item::
+   .. grid-item-card:: Start interpreting
+      :link: start
+      :link-type: doc
+      :class-card: surface
 
-      .. div:: features-container
+      :octicon:`play;2em;sd-text-primary`
 
-        .. image:: _static/images/two.png
-          :width: 150
+      Install TDHook and choose the right path through the documentation.
 
-        .. div::
+   .. grid-item-card:: Learn by example
+      :link: tutorials
+      :link-type: doc
+      :class-card: surface
 
-          **Interpretability**
+      :octicon:`mortar-board;2em;sd-text-primary`
 
-          Wide range of interpretability methods ready to be plugged in, with a general API to have full control over the interpretability process.
+      Run the maintained method and end-to-end notebooks.
+
+   .. grid-item-card:: Look up the API
+      :link: api/index
+      :link-type: doc
+      :class-card: surface
+
+      :octicon:`code-square;2em;sd-text-primary`
+
+      Browse generated modules, signatures, types, and fields.
