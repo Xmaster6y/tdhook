@@ -15,7 +15,6 @@ Deep documentation for the tdhook skill. See [SKILL.md](../SKILL.md) for the qui
 ## Official Documentation
 
 - [Home](https://tdhook.readthedocs.io/en/latest/)
-- [Methods](https://tdhook.readthedocs.io/en/latest/methods.html)
 - [Tutorials](https://tdhook.readthedocs.io/en/latest/tutorials.html)
 - [API Reference](https://tdhook.readthedocs.io/en/latest/api/index.html)
 - [GitHub](https://github.com/Xmaster6y/tdhook)

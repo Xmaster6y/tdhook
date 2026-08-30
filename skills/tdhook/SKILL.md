@@ -12,7 +12,7 @@ dependencies: [tdhook, tensordict>=0.3.0, torch>=2.0.0]
 
 Interpretability with TensorDict and PyTorch hooks. One pattern: `with Method(...).prepare(model) as hooked: td = hooked(td)`.
 
-**Docs**: [Home](https://tdhook.readthedocs.io/en/latest/) · [Methods](https://tdhook.readthedocs.io/en/latest/methods.html) · [Tutorials](https://tdhook.readthedocs.io/en/latest/tutorials.html) · [API](https://tdhook.readthedocs.io/en/latest/api/index.html) · **GitHub**: [Xmaster6y/tdhook](https://github.com/Xmaster6y/tdhook) · **Paper**: [arXiv:2509.25475](https://arxiv.org/abs/2509.25475)
+**Docs**: [Home](https://tdhook.readthedocs.io/en/latest/) · [Tutorials](https://tdhook.readthedocs.io/en/latest/tutorials.html) · [API](https://tdhook.readthedocs.io/en/latest/api/index.html) · **GitHub**: [Xmaster6y/tdhook](https://github.com/Xmaster6y/tdhook) · **Paper**: [arXiv:2509.25475](https://arxiv.org/abs/2509.25475)
 
 ## When to Use
 
@@ -199,4 +199,4 @@ For Colab setup: see [tutorials.md](references/tutorials.md) Setup section.
 | [references/issues.md](references/issues.md) | GitHub issues & solutions |
 | [references/file_structure.md](references/file_structure.md) | Contributor-only source-tree navigation |
 
-**Official docs**: [Home](https://tdhook.readthedocs.io/en/latest/) · [Methods](https://tdhook.readthedocs.io/en/latest/methods.html) · [Tutorials](https://tdhook.readthedocs.io/en/latest/tutorials.html) · [API Reference](https://tdhook.readthedocs.io/en/latest/api/index.html) · [Releases](https://github.com/Xmaster6y/tdhook/releases)
+**Official docs**: [Home](https://tdhook.readthedocs.io/en/latest/) · [Tutorials](https://tdhook.readthedocs.io/en/latest/tutorials.html) · [API Reference](https://tdhook.readthedocs.io/en/latest/api/index.html) · [Releases](https://github.com/Xmaster6y/tdhook/releases)
