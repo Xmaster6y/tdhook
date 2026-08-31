@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Literal
+from dataclasses import dataclass, field
+from typing import Literal, Self
 import weakref
 
 import torch
@@ -19,9 +19,19 @@ HookOperation = Literal["capture", "replace", "stop"]
 
 @dataclass
 class CapturedTarget:
-    """Mutable result populated when a capture hook observes its target."""
+    """Mutable result populated whenever a capture hook observes its target.
+
+    ``value`` retains the most recent observation for compatibility with a
+    single model execution. ``values`` preserves every observation in call
+    order, so repeated executions remain distinguishable.
+    """
 
     value: Tensor | None = None
+    values: list[Tensor] = field(default_factory=list)
+
+    def _record(self, value: Tensor) -> None:
+        self.value = value
+        self.values.append(value)
 
 
 @dataclass
@@ -60,7 +70,7 @@ class HookSession:
 
         return self._builder.program if self._builder is not None else self._program
 
-    def __enter__(self) -> "HookSession":
+    def __enter__(self) -> Self:
         if self._builder is not None:
             raise RuntimeError("Cannot enter a HookSession twice")
         self._model()
@@ -95,15 +105,15 @@ class HookSession:
 
         if target.kind == "parameter":
             parameter = module.get_parameter(target.parameter)  # type: ignore[arg-type]
-            captured.value = target._select(parameter).detach().clone()
+            captured._record(target._select(parameter).detach().clone())
             builder.record(spec)
         else:
 
             def forward_hook(_module: nn.Module, _args: tuple[object, ...], value: object):
-                captured.value = target.select_output(value).detach().clone()
+                captured._record(target.select_output(value).detach().clone())
 
             def gradient_hook(_module: nn.Module, values: tuple[Tensor | None, ...]):
-                captured.value = target.select_output(values).detach().clone()
+                captured._record(target.select_output(values).detach().clone())
 
             builder.register(
                 module,

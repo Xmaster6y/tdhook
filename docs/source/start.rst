@@ -51,6 +51,41 @@ Gradients reads ``("baseline", "input")`` and writes
 ``("attr", "input")``. Here, ``attributions.shape`` is ``(1, 4)``, matching
 the input.
 
+Interactive operations across a workflow
+----------------------------------------
+
+Use :meth:`~tdhook.workflow.Workflow.session` when captures or interventions
+must wrap every model execution in a declared workflow. The managed object
+exposes the normal :class:`~tdhook.session.HookSession` operations and runs the
+bound workflow without requiring a second, manually nested context:
+
+.. code-block:: python
+
+   from tdhook.latent import ActivationCaching
+   from tdhook.targets import Target
+   from tdhook.workflow import Workflow
+
+   workflow = Workflow(
+       ActivationCaching("0", cache_key=("activations", "first")),
+       ActivationCaching("2", cache_key=("activations", "second")),
+   )
+
+   with workflow.session(model) as session:
+       observed = session.capture(Target("0", "activation", -1, (0,)))
+       execution = session.run(data)
+
+   execution.plan       # the exact WorkflowPlan that ran
+   execution.program    # the HookProgram applied around that plan
+   observed.values      # one entry per matching model execution, in call order
+
+Session operations wrap the complete run; they are not workflow steps and do
+not change planning or co-execution decisions. If
+:meth:`~tdhook.session.HookSession.stop` reaches its target, it aborts the
+workflow run, so no complete workflow result is returned. Its
+:class:`~tdhook.session.EarlyStopResult` still exposes the partial module
+output, and the surrounding managed context restores workflow hooks, session
+hooks, and temporary model state.
+
 Where to go next
 ----------------
 
