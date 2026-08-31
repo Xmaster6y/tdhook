@@ -112,6 +112,66 @@ def test_session_preserves_mapping_output_types(container_factory):
     assert output["metadata"] == "kept"
 
 
+def test_session_captures_and_replaces_keyword_inputs():
+    class KeywordModule(nn.Module):
+        def forward(self, x, *, scale):
+            return x * scale
+
+    model = KeywordModule()
+    x = torch.ones(2, 3)
+    target = Target("", "activation", -1, (1,), output_path=(1, "scale"))
+
+    with HookSession(model) as session:
+        captured = session.capture(target, direction="fwd_pre_kwargs")
+        session.replace(target, 4, direction="fwd_pre_kwargs")
+        output = model(x, scale=torch.ones(2, 3))
+
+    assert captured.value is not None
+    assert torch.equal(captured.value, torch.ones(2, 1))
+    assert torch.equal(output[:, 1], torch.full((2,), 4.0))
+    assert torch.equal(output[:, (0, 2)], torch.ones(2, 2))
+    assert session.program == HookProgram(
+        (
+            HookSpec("", "capture", "fwd_pre_kwargs", target=target),
+            HookSpec("", "replace", "fwd_pre_kwargs", target=target),
+        )
+    )
+    assert not model._forward_pre_hooks
+
+
+@pytest.mark.parametrize(
+    "container_factory,output_path",
+    [
+        (lambda value: (value, "kept"), (0, 0)),
+        (lambda value: [value, "kept"], (0, 0)),
+        (lambda value: UserDict({"predictions": value, "metadata": "kept"}), (0, "predictions")),
+        (
+            lambda value: TensorDict({"predictions": value, "metadata": "kept"}, batch_size=[]),
+            (0, "predictions"),
+        ),
+    ],
+)
+def test_session_preserves_structured_forward_inputs(container_factory, output_path):
+    class InputModule(nn.Module):
+        def forward(self, value):
+            return value
+
+    model = InputModule()
+    original = container_factory(torch.ones(2, 3))
+    target = Target("", "activation", -1, (2,), output_path=output_path)
+
+    with HookSession(model) as session:
+        captured = session.capture(target, direction="fwd_pre")
+        session.replace(target, 0, direction="fwd_pre")
+        output = model(original)
+
+    assert isinstance(output, type(original))
+    assert captured.value is not None
+    assert torch.equal(captured.value, torch.ones(2, 1))
+    selected = Target._output_tensor((output,), output_path)
+    assert torch.equal(selected[:, 2], torch.zeros(2))
+
+
 def test_session_selects_one_gradient_from_multiple_module_outputs():
     class MultiOutputModule(nn.Module):
         def forward(self, x):
@@ -128,6 +188,88 @@ def test_session_selects_one_gradient_from_multiple_module_outputs():
 
     assert captured.value is not None
     assert torch.equal(captured.value, torch.ones(2, 1))
+
+
+def test_session_captures_and_replaces_gradient_inputs_and_outputs():
+    model = nn.Linear(3, 2, bias=False)
+    with torch.no_grad():
+        model.weight.copy_(torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]))
+
+    grad_output_target = Target("", "gradient", -1, (1,), output_path=(0,))
+    first_input = torch.ones(1, 3, requires_grad=True)
+    with HookSession(model) as output_session:
+        captured_output = output_session.capture(grad_output_target, direction="bwd_pre")
+        output_session.replace(grad_output_target, 0, direction="bwd_pre")
+        model(first_input).sum().backward()
+
+    assert captured_output.value is not None
+    assert torch.equal(captured_output.value, torch.ones(1, 1))
+    assert torch.equal(first_input.grad, model.weight[0:1])
+    assert output_session.program == HookProgram(
+        (
+            HookSpec("", "capture", "bwd_pre", target=grad_output_target),
+            HookSpec("", "replace", "bwd_pre", target=grad_output_target),
+        )
+    )
+
+    grad_input_target = Target("", "gradient", -1, (1,), output_path=(0,))
+    second_input = torch.ones(1, 3, requires_grad=True)
+    with HookSession(model) as input_session:
+        captured_input = input_session.capture(grad_input_target, direction="bwd")
+        input_session.replace(grad_input_target, 0, direction="bwd")
+        model(second_input).sum().backward()
+
+    assert captured_input.value is not None
+    assert torch.equal(captured_input.value, torch.tensor([[7.0]]))
+    assert second_input.grad is not None
+    assert torch.equal(second_input.grad, torch.tensor([[5.0, 0.0, 9.0]]))
+    assert input_session.program == HookProgram(
+        (
+            HookSpec("", "capture", "bwd", target=grad_input_target),
+            HookSpec("", "replace", "bwd", target=grad_input_target),
+        )
+    )
+    assert not model._backward_hooks
+    assert not model._backward_pre_hooks
+
+
+def test_session_rejects_directions_that_do_not_match_the_target():
+    model = nn.Linear(3, 2)
+    activation = Target("", "activation", -1, (0,))
+    gradient = Target("", "gradient", -1, (0,))
+    parameter = Target("", "parameter", 0, (0,), parameter="weight")
+
+    with HookSession(model) as session:
+        with pytest.raises(ValueError, match="activation target"):
+            session.capture(activation, direction="bwd")
+        with pytest.raises(ValueError, match="gradient target"):
+            session.replace(gradient, 0, direction="fwd")
+        with pytest.raises(ValueError, match="parameter target"):
+            session.capture(parameter, direction="fwd")
+        assert session.program == HookProgram()
+
+
+def test_session_removes_input_and_gradient_hooks_after_hook_failures():
+    input_model = nn.Identity()
+    bad_input = Target("", "activation", -1, (0,), output_path=(2,))
+
+    with pytest.raises(ValueError, match="out of range"):
+        with HookSession(input_model) as session:
+            session.capture(bad_input, direction="fwd_pre_kwargs")
+            input_model(torch.ones(1))
+
+    assert not input_model._forward_pre_hooks
+
+    gradient_model = nn.Linear(2, 1)
+    bad_gradient = Target("", "gradient", -1, (0,), output_path=(1,))
+    value = torch.ones(1, 2, requires_grad=True)
+
+    with pytest.raises(ValueError, match="out of range"):
+        with HookSession(gradient_model) as session:
+            session.capture(bad_gradient, direction="bwd")
+            gradient_model(value).sum().backward()
+
+    assert not gradient_model._backward_hooks
 
 
 def test_session_structured_output_path_errors_are_specific():
