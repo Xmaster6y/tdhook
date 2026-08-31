@@ -130,6 +130,16 @@ Complete workflows
 
       Estimate and plot dimensions for chess activations.
 
+   .. grid-item-card:: Othello Research Reproduction
+      :link: notebooks/tutorials/othello-research-reproduction
+      :link-type: doc
+      :class-card: surface
+
+      :octicon:`beaker;2em;sd-text-primary`
+
+      Reproduce published behavior and linear-probe results, then validate
+      intervention parity.
+
 .. toctree::
    :hidden:
    :maxdepth: 2
@@ -146,3 +156,4 @@ Complete workflows
    notebooks/tutorials/chess-value-saliency
    notebooks/tutorials/concept-attribution
    notebooks/tutorials/chess-dimension-estimation
+   notebooks/tutorials/othello-research-reproduction
