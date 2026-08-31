@@ -99,6 +99,7 @@ class HookSession:
         *,
         direction: HookDirection | None = None,
         prepend: bool = False,
+        detach: bool = True,
     ) -> CapturedTarget:
         """Capture ``target`` while this session is active.
 
@@ -106,7 +107,10 @@ class HookSession:
         ``"bwd_pre"`` for gradient targets. Forward inputs use ``"fwd_pre"``;
         use ``"fwd_pre_kwargs"`` to expose ``(args, kwargs)`` as the hook value.
         Gradient inputs and outputs use ``"bwd"`` and ``"bwd_pre"``
-        respectively.
+        respectively. By default captures are detached clones. Set
+        ``detach=False`` when a later attribution objective must backpropagate
+        from the captured activation; the result then retains its autograd
+        history and is only valid for the lifetime of the surrounding graph.
         """
 
         model, builder = self._active_state()
@@ -118,32 +122,32 @@ class HookSession:
 
         if target.kind == "parameter":
             parameter = module.get_parameter(target.parameter)  # type: ignore[arg-type]
-            captured._record(target._select(parameter).detach().clone())
+            captured._record(self._captured_value(target._select(parameter), detach=detach))
             builder.record(spec)
         else:
 
             def forward_hook(_module: nn.Module, _args: tuple[object, ...], value: object):
-                captured._record(target.select_output(value).detach().clone())
+                captured._record(self._captured_value(target.select_output(value), detach=detach))
 
             def forward_pre_hook(_module: nn.Module, args: tuple[object, ...]):
-                captured._record(target.select_output(args).detach().clone())
+                captured._record(self._captured_value(target.select_output(args), detach=detach))
 
             def forward_pre_kwargs_hook(
                 _module: nn.Module,
                 args: tuple[object, ...],
                 kwargs: dict[str, object],
             ):
-                captured._record(target.select_output((args, kwargs)).detach().clone())
+                captured._record(self._captured_value(target.select_output((args, kwargs)), detach=detach))
 
             def backward_hook(
                 _module: nn.Module,
                 grad_input: tuple[Tensor | None, ...],
                 _grad_output: tuple[Tensor | None, ...],
             ):
-                captured._record(target.select_output(grad_input).detach().clone())
+                captured._record(self._captured_value(target.select_output(grad_input), detach=detach))
 
             def backward_pre_hook(_module: nn.Module, values: tuple[Tensor | None, ...]):
-                captured._record(target.select_output(values).detach().clone())
+                captured._record(self._captured_value(target.select_output(values), detach=detach))
 
             hooks = {
                 "fwd": forward_hook,
@@ -158,6 +162,10 @@ class HookSession:
             builder.register(module, hook, spec)
 
         return captured
+
+    @staticmethod
+    def _captured_value(value: Tensor, *, detach: bool) -> Tensor:
+        return value.detach().clone() if detach else value
 
     def replace(
         self,

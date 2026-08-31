@@ -13,6 +13,7 @@ dependencies = [
     "tensordict>=0.10",
     "torch>=2.7.1",
 ]
+
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Science/Research",
@@ -28,6 +29,12 @@ documentation = "https://tdhook.readthedocs.io/"
 source = "https://github.com/Xmaster6y/tdhook"
 issues = "https://github.com/Xmaster6y/tdhook/issues"
 releasenotes = "https://github.com/Xmaster6y/tdhook/releases"
+
+[project.optional-dependencies]
+circuit-lens = [
+    "circuit-tracer>=0.5.0",
+    "transformer-lens>=2.16.0",
+]
 
 [dependency-groups]
 dev = [
