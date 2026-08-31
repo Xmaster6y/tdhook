@@ -158,6 +158,8 @@ def test_session_stops_forward_execution_and_exposes_partial_results():
     model = nn.Sequential(RecordingLinear(3, 4), nn.ReLU(), RecordingLinear(4, 2))
     target = Target("0", "activation", -1, (0,))
     x = torch.randn(2, 3)
+    expected = torch.relu(model[0](x))
+    events.clear()
     session = HookSession(model)
 
     with session:
@@ -169,9 +171,9 @@ def test_session_stops_forward_execution_and_exposes_partial_results():
     assert isinstance(stopped, EarlyStopResult)
     assert stopped.reached
     assert stopped.output is not None
-    assert torch.equal(stopped.output, torch.relu(model[0](x)))
+    assert events == [4]
+    assert torch.equal(stopped.output, expected)
     assert captured.value is not None
-    assert events == [4, 4]
     assert session.program == HookProgram(
         (
             HookSpec("0", "capture", "fwd", target=target),
@@ -206,6 +208,81 @@ def test_session_validates_early_stop_location():
             session.stop(None)
         with pytest.raises(ValueError, match="Invalid submodule path"):
             session.stop("missing")
+
+
+def test_session_warns_when_early_stop_location_is_a_module_list():
+    class ModuleListModel(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.layers = nn.ModuleList([nn.Identity()])
+
+        def forward(self, x):
+            return self.layers[0](x)
+
+    model = ModuleListModel()
+    with HookSession(model) as session:
+        with pytest.warns(UserWarning, match="ModuleList"):
+            stopped = session.stop("layers")
+        output = model(torch.ones(1))
+
+    assert torch.equal(output, torch.ones(1))
+    assert not stopped.reached
+    assert session.program.stopped_at is None
+
+
+def test_session_stop_signal_bypasses_model_exception_handlers():
+    events = []
+
+    class CatchingModel(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.first = nn.Identity()
+            self.second = nn.Identity()
+
+        def forward(self, x):
+            try:
+                x = self.first(x)
+            except Exception:
+                events.append("caught")
+            events.append("continued")
+            return self.second(x)
+
+    model = CatchingModel()
+    with HookSession(model) as session:
+        stopped = session.stop("first")
+        model(torch.ones(1))
+
+    assert stopped.reached
+    assert events == []
+
+
+def test_session_rejects_gradient_operations_with_early_stopping_in_either_order():
+    model = nn.Sequential(nn.Linear(3, 2), nn.ReLU())
+    gradient = Target("0", "gradient", -1, (0,))
+    message = "cannot be combined with gradient operations"
+
+    with HookSession(model) as session:
+        session.capture(gradient)
+        with pytest.raises(ValueError, match=message):
+            session.stop("1")
+
+    with HookSession(model) as session:
+        session.stop("1")
+        with pytest.raises(ValueError, match=message):
+            session.replace(gradient, 0)
+
+
+def test_session_partial_output_remains_available_to_autograd_after_stop():
+    model = nn.Sequential(nn.Linear(3, 2), nn.ReLU(), nn.Linear(2, 1))
+    x = torch.randn(1, 3, requires_grad=True)
+
+    with HookSession(model) as session:
+        stopped = session.stop("1")
+        model(x)
+
+    assert isinstance(stopped.output, torch.Tensor)
+    stopped.output.sum().backward()
+    assert x.grad is not None
 
 
 def test_session_restores_temporary_state_after_early_stop():

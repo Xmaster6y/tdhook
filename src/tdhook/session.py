@@ -88,6 +88,7 @@ class HookSession:
 
         model, builder = self._active_state()
         module = target.validate(model)
+        self._validate_stop_compatibility(builder, target)
         captured = CapturedTarget()
         direction = self._direction(target)
         spec = HookSpec(target.module_path, "capture", direction, prepend, target)
@@ -117,6 +118,7 @@ class HookSession:
 
         model, builder = self._active_state()
         module = target.validate(model)
+        self._validate_stop_compatibility(builder, target)
         direction = self._direction(target)
         spec = HookSpec(target.module_path, "replace", direction, prepend, target)
 
@@ -150,13 +152,17 @@ class HookSession:
         Reaching the location exits the active session context without
         exposing TDHook's internal control-flow exception. Earlier captures
         and this module's exact output remain available through their result
-        objects; no final model output is synthesized.
+        objects; no final model output is synthesized. The partial output
+        preserves its autograd history, but session-managed gradient capture
+        and replacement cannot be combined with early stopping because those
+        hooks are cleaned up when the context exits.
         """
 
         model, builder = self._active_state()
         if not isinstance(module_path, str):
             raise TypeError("module_path must be a string")
-        module = builder.resolve_path(model, module_path)
+        if any(spec.direction in {"bwd", "bwd_pre"} for spec in builder.program.hooks):
+            raise ValueError("HookSession early stopping cannot be combined with gradient operations")
         result = EarlyStopResult()
         spec = HookSpec(module_path, "stop", "fwd", prepend)
 
@@ -168,8 +174,13 @@ class HookSession:
             self._stop_exception = exception
             raise exception
 
-        builder.register(module, stopping_hook, spec)
+        builder.register_path(model, stopping_hook, spec)
         return result
+
+    @staticmethod
+    def _validate_stop_compatibility(builder: HookProgramBuilder, target: Target) -> None:
+        if target.kind == "gradient" and any(spec.operation == "stop" for spec in builder.program.hooks):
+            raise ValueError("HookSession early stopping cannot be combined with gradient operations")
 
     def _active_state(self) -> tuple[nn.Module, HookProgramBuilder]:
         if self._builder is None:

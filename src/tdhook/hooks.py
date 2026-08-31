@@ -238,9 +238,12 @@ class CacheProxy:
         return cache.get(self._key)
 
 
-class EarlyStoppingException(Exception):
+class EarlyStoppingException(BaseException):
     """
-    Exception for early stopping.
+    Internal control-flow signal for early stopping.
+
+    This intentionally bypasses ordinary ``except Exception`` handlers in
+    model code so they cannot accidentally resume a stopped forward pass.
     """
 
     def __init__(self, key: str):
