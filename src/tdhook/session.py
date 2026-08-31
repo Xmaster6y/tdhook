@@ -93,14 +93,27 @@ class HookSession:
             self._stop_exception = None
         return suppress_stop
 
-    def capture(self, target: Target, *, prepend: bool = False) -> CapturedTarget:
-        """Capture ``target`` while this session is active."""
+    def capture(
+        self,
+        target: Target,
+        *,
+        direction: HookDirection | None = None,
+        prepend: bool = False,
+    ) -> CapturedTarget:
+        """Capture ``target`` while this session is active.
+
+        ``direction`` defaults to ``"fwd"`` for activation targets and
+        ``"bwd_pre"`` for gradient targets. Forward inputs use ``"fwd_pre"``;
+        use ``"fwd_pre_kwargs"`` to expose ``(args, kwargs)`` as the hook value.
+        Gradient inputs and outputs use ``"bwd"`` and ``"bwd_pre"``
+        respectively.
+        """
 
         model, builder = self._active_state()
         module = target.validate(model)
         self._validate_stop_compatibility(builder, target)
         captured = CapturedTarget()
-        direction = self._direction(target)
+        direction = self._direction(target, direction)
         spec = HookSpec(target.module_path, "capture", direction, prepend, target)
 
         if target.kind == "parameter":
@@ -112,24 +125,57 @@ class HookSession:
             def forward_hook(_module: nn.Module, _args: tuple[object, ...], value: object):
                 captured._record(target.select_output(value).detach().clone())
 
-            def gradient_hook(_module: nn.Module, values: tuple[Tensor | None, ...]):
+            def forward_pre_hook(_module: nn.Module, args: tuple[object, ...]):
+                captured._record(target.select_output(args).detach().clone())
+
+            def forward_pre_kwargs_hook(
+                _module: nn.Module,
+                args: tuple[object, ...],
+                kwargs: dict[str, object],
+            ):
+                captured._record(target.select_output((args, kwargs)).detach().clone())
+
+            def backward_hook(
+                _module: nn.Module,
+                grad_input: tuple[Tensor | None, ...],
+                _grad_output: tuple[Tensor | None, ...],
+            ):
+                captured._record(target.select_output(grad_input).detach().clone())
+
+            def backward_pre_hook(_module: nn.Module, values: tuple[Tensor | None, ...]):
                 captured._record(target.select_output(values).detach().clone())
 
-            builder.register(
-                module,
-                forward_hook if target.kind == "activation" else gradient_hook,
-                spec,
-            )
+            hooks = {
+                "fwd": forward_hook,
+                "fwd_pre": forward_pre_hook,
+                "fwd_pre_kwargs": forward_pre_kwargs_hook,
+                "bwd": backward_hook,
+                "bwd_pre": backward_pre_hook,
+            }
+            hook = hooks.get(direction)
+            if hook is None:  # pragma: no cover - guarded by _direction
+                raise RuntimeError(f"unsupported capture direction: {direction!r}")
+            builder.register(module, hook, spec)
 
         return captured
 
-    def replace(self, target: Target, value: Tensor | float | int, *, prepend: bool = False) -> None:
-        """Replace ``target`` until the session exits."""
+    def replace(
+        self,
+        target: Target,
+        value: Tensor | float | int,
+        *,
+        direction: HookDirection | None = None,
+        prepend: bool = False,
+    ) -> None:
+        """Replace ``target`` until the session exits.
+
+        Hook directions have the same target semantics as :meth:`capture`.
+        """
 
         model, builder = self._active_state()
         module = target.validate(model)
         self._validate_stop_compatibility(builder, target)
-        direction = self._direction(target)
+        direction = self._direction(target, direction)
         spec = HookSpec(target.module_path, "replace", direction, prepend, target)
 
         if target.kind == "parameter":
@@ -147,14 +193,37 @@ class HookSession:
             def forward_hook(_module: nn.Module, _args: tuple[object, ...], output: object):
                 return target.replace_output(output, value)
 
-            def gradient_hook(_module: nn.Module, values: tuple[Tensor | None, ...]):
+            def forward_pre_hook(_module: nn.Module, args: tuple[object, ...]):
+                return target.replace_output(args, value)
+
+            def forward_pre_kwargs_hook(
+                _module: nn.Module,
+                args: tuple[object, ...],
+                kwargs: dict[str, object],
+            ):
+                return target.replace_output((args, kwargs), value)
+
+            def backward_hook(
+                _module: nn.Module,
+                grad_input: tuple[Tensor | None, ...],
+                _grad_output: tuple[Tensor | None, ...],
+            ):
+                return target.replace_output(grad_input, value)
+
+            def backward_pre_hook(_module: nn.Module, values: tuple[Tensor | None, ...]):
                 return target.replace_output(values, value)
 
-            builder.register(
-                module,
-                forward_hook if target.kind == "activation" else gradient_hook,
-                spec,
-            )
+            hooks = {
+                "fwd": forward_hook,
+                "fwd_pre": forward_pre_hook,
+                "fwd_pre_kwargs": forward_pre_kwargs_hook,
+                "bwd": backward_hook,
+                "bwd_pre": backward_pre_hook,
+            }
+            hook = hooks.get(direction)
+            if hook is None:  # pragma: no cover - guarded by _direction
+                raise RuntimeError(f"unsupported replacement direction: {direction!r}")
+            builder.register(module, hook, spec)
 
     def stop(self, module_path: str, *, prepend: bool = False) -> EarlyStopResult:
         """Stop forward execution after ``module_path`` produces its output.
@@ -204,7 +273,16 @@ class HookSession:
         return model
 
     @staticmethod
-    def _direction(target: Target) -> HookDirection | None:
+    def _direction(target: Target, direction: HookDirection | None = None) -> HookDirection | None:
+        allowed: dict[str, set[HookDirection | None]] = {
+            "activation": {"fwd", "fwd_pre", "fwd_pre_kwargs"},
+            "gradient": {"bwd", "bwd_pre"},
+            "parameter": {None},
+        }
+        if direction is not None:
+            if direction not in allowed[target.kind]:
+                raise ValueError(f"direction {direction!r} is not valid for a {target.kind} target")
+            return direction
         if target.kind == "activation":
             return "fwd"
         if target.kind == "gradient":
