@@ -126,7 +126,7 @@ def select_projection_outliers(
     if labels is not None and len(labels) != scores.numel():
         raise ValueError("labels must contain one entry per score")
 
-    detached = scores.detach().to(dtype=torch.float64)
+    detached = scores.detach().to(device="cpu", dtype=torch.float64)
     if detached.numel() < 2:
         return ()
     if pool_size is None or pool_size >= detached.numel():
@@ -190,6 +190,7 @@ def validate_token_candidates(
     )
 
 
+@torch.no_grad()
 def analyze_input_invariant_feature(
     *,
     feature_layer: int,
@@ -203,7 +204,8 @@ def analyze_input_invariant_feature(
     token_pool_size: int | None = 1000,
     feature_pool_size: int | None = 100,
     max_candidates: int | None = None,
-    token_labels: Sequence[str] | None = None,
+    input_token_labels: Sequence[str] | None = None,
+    output_token_labels: Sequence[str] | None = None,
     token_validator: Callable[[Sequence[int]], torch.Tensor | Sequence[float]] | None = None,
     validation_threshold: float = 0.0,
 ) -> WeightLensArtifact:
@@ -212,7 +214,8 @@ def analyze_input_invariant_feature(
     Encoder matrices have shape ``[model, features]`` and decoder matrices
     shape ``[features, model]``.  The two sequences must describe the same
     ordered layers.  Only decoder dictionaries before ``feature_layer`` are
-    considered as possible upstream features.
+    considered as possible upstream features.  Input and output labels are
+    separate because the two vocabularies need not have the same size.
     """
 
     if feature_layer < 0 or feature_layer >= len(feature_encoders):
@@ -236,12 +239,19 @@ def analyze_input_invariant_feature(
         "threshold": token_outlier_threshold,
         "pool_size": token_pool_size,
         "max_candidates": max_candidates,
-        "labels": token_labels,
     }
-    embedding_positive = select_projection_outliers(embedding_scores, largest=True, **selection_kwargs)
-    embedding_negative = select_projection_outliers(embedding_scores, largest=False, **selection_kwargs)
-    output_positive = select_projection_outliers(output_scores, largest=True, **selection_kwargs)
-    output_negative = select_projection_outliers(output_scores, largest=False, **selection_kwargs)
+    embedding_positive = select_projection_outliers(
+        embedding_scores, largest=True, labels=input_token_labels, **selection_kwargs
+    )
+    embedding_negative = select_projection_outliers(
+        embedding_scores, largest=False, labels=input_token_labels, **selection_kwargs
+    )
+    output_positive = select_projection_outliers(
+        output_scores, largest=True, labels=output_token_labels, **selection_kwargs
+    )
+    output_negative = select_projection_outliers(
+        output_scores, largest=False, labels=output_token_labels, **selection_kwargs
+    )
 
     if token_validator is not None:
         embedding_positive = validate_token_candidates(
