@@ -9,12 +9,12 @@ import weakref
 import torch
 from torch import Tensor, nn
 
-from tdhook.hooks import HookDirection
+from tdhook.hooks import EarlyStoppingException, HookDirection
 from tdhook.runtime import HookProgram, HookProgramBuilder, HookSpec
 from tdhook.targets import OutputPathComponent, Target
 
 
-HookOperation = Literal["capture", "replace"]
+HookOperation = Literal["capture", "replace", "stop"]
 
 
 @dataclass
@@ -22,6 +22,20 @@ class CapturedTarget:
     """Mutable result populated when a capture hook observes its target."""
 
     value: Tensor | None = None
+
+
+@dataclass
+class EarlyStopResult:
+    """Outcome populated if execution reaches a session stop location.
+
+    ``output`` is the exact output of the module where execution stopped. It
+    is not a synthesized output for the model components that did not run.
+    ``reached`` distinguishes an unreached stop from a module that returned
+    ``None``.
+    """
+
+    reached: bool = False
+    output: object | None = None
 
 
 class HookSession:
@@ -38,6 +52,7 @@ class HookSession:
         self._model_ref = weakref.ref(model)
         self._builder: HookProgramBuilder | None = None
         self._program = HookProgram()
+        self._stop_exception: EarlyStoppingException | None = None
 
     @property
     def program(self) -> HookProgram:
@@ -50,6 +65,7 @@ class HookSession:
             raise RuntimeError("Cannot enter a HookSession twice")
         self._model()
         self._program = HookProgram()
+        self._stop_exception = None
         self._builder = HookProgramBuilder()
         return self
 
@@ -60,13 +76,19 @@ class HookSession:
         self._builder = None
         bound = builder.build()
         self._program = bound.program
-        bound.remove()
+        suppress_stop = exc_value is self._stop_exception
+        try:
+            bound.remove()
+        finally:
+            self._stop_exception = None
+        return suppress_stop
 
     def capture(self, target: Target, *, prepend: bool = False) -> CapturedTarget:
         """Capture ``target`` while this session is active."""
 
         model, builder = self._active_state()
         module = target.validate(model)
+        self._validate_stop_compatibility(builder, target)
         captured = CapturedTarget()
         direction = self._direction(target)
         spec = HookSpec(target.module_path, "capture", direction, prepend, target)
@@ -96,6 +118,7 @@ class HookSession:
 
         model, builder = self._active_state()
         module = target.validate(model)
+        self._validate_stop_compatibility(builder, target)
         direction = self._direction(target)
         spec = HookSpec(target.module_path, "replace", direction, prepend, target)
 
@@ -122,6 +145,42 @@ class HookSession:
                 forward_hook if target.kind == "activation" else gradient_hook,
                 spec,
             )
+
+    def stop(self, module_path: str, *, prepend: bool = False) -> EarlyStopResult:
+        """Stop forward execution after ``module_path`` produces its output.
+
+        Reaching the location exits the active session context without
+        exposing TDHook's internal control-flow exception. Earlier captures
+        and this module's exact output remain available through their result
+        objects; no final model output is synthesized. The partial output
+        preserves its autograd history, but session-managed gradient capture
+        and replacement cannot be combined with early stopping because those
+        hooks are cleaned up when the context exits.
+        """
+
+        model, builder = self._active_state()
+        if not isinstance(module_path, str):
+            raise TypeError("module_path must be a string")
+        if any(spec.direction in {"bwd", "bwd_pre"} for spec in builder.program.hooks):
+            raise ValueError("HookSession early stopping cannot be combined with gradient operations")
+        result = EarlyStopResult()
+        spec = HookSpec(module_path, "stop", "fwd", prepend)
+
+        def stopping_hook(_module: nn.Module, _args: tuple[object, ...], output: object):
+            result.reached = True
+            result.output = output
+            builder.mark_stopped(module_path)
+            exception = EarlyStoppingException(module_path)
+            self._stop_exception = exception
+            raise exception
+
+        builder.register_path(model, stopping_hook, spec)
+        return result
+
+    @staticmethod
+    def _validate_stop_compatibility(builder: HookProgramBuilder, target: Target) -> None:
+        if target.kind == "gradient" and any(spec.operation == "stop" for spec in builder.program.hooks):
+            raise ValueError("HookSession early stopping cannot be combined with gradient operations")
 
     def _active_state(self) -> tuple[nn.Module, HookProgramBuilder]:
         if self._builder is None:
@@ -170,4 +229,4 @@ class HookSession:
         return Target._replace_output_tensor(value, path, replacement)
 
 
-__all__ = ["CapturedTarget", "HookOperation", "HookProgram", "HookSession", "HookSpec"]
+__all__ = ["CapturedTarget", "EarlyStopResult", "HookOperation", "HookProgram", "HookSession", "HookSpec"]
