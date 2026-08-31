@@ -184,7 +184,7 @@ def test_managed_workflow_session_applies_operations_to_every_model_execution(de
         assert isinstance(session, WorkflowSession)
         session.replace(target, 0)
         captured = session.capture(target)
-        result = session.run(data)
+        result = session(data)
 
     assert result.plan.model_passes == 2
     assert result.program == HookProgram(
