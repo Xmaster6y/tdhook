@@ -111,6 +111,12 @@ def test_program_builder_rejects_invalid_specs_and_reuse():
     with pytest.raises(TypeError, match="cleanup"):
         builder.record(HookSpec("", "capture", None), cleanup=1)
 
+    builder = HookProgramBuilder()
+    with pytest.raises(TypeError, match="module_path"):
+        builder.mark_stopped(None)
+    builder.mark_stopped("layer")
+    assert builder.program.stopped_at == "layer"
+
 
 def test_temporary_module_state_rejects_hook_specs():
     with pytest.raises(ValueError, match="directionless"):

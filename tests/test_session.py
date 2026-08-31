@@ -6,7 +6,7 @@ import torch
 from tensordict import TensorDict
 from torch import nn
 
-from tdhook.session import HookProgram, HookSession, HookSpec
+from tdhook.session import EarlyStopResult, HookProgram, HookSession, HookSpec
 from tdhook.targets import Target
 
 
@@ -145,6 +145,80 @@ def test_session_removes_activation_hooks_after_failure(default_test_model):
             raise RuntimeError("boom")
 
     assert torch.allclose(default_test_model(x), baseline)
+
+
+def test_session_stops_forward_execution_and_exposes_partial_results():
+    events = []
+
+    class RecordingLinear(nn.Linear):
+        def forward(self, x):
+            events.append(self.out_features)
+            return super().forward(x)
+
+    model = nn.Sequential(RecordingLinear(3, 4), nn.ReLU(), RecordingLinear(4, 2))
+    target = Target("0", "activation", -1, (0,))
+    x = torch.randn(2, 3)
+    session = HookSession(model)
+
+    with session:
+        captured = session.capture(target)
+        stopped = session.stop("1")
+        model(x)
+        pytest.fail("execution after a managed early stop must be skipped")
+
+    assert isinstance(stopped, EarlyStopResult)
+    assert stopped.reached
+    assert stopped.output is not None
+    assert torch.equal(stopped.output, torch.relu(model[0](x)))
+    assert captured.value is not None
+    assert events == [4, 4]
+    assert session.program == HookProgram(
+        (
+            HookSpec("0", "capture", "fwd", target=target),
+            HookSpec("1", "stop", "fwd"),
+        ),
+        stopped_at="1",
+    )
+    assert len(model[0]._forward_hooks) == 0
+    assert len(model[1]._forward_hooks) == 0
+
+
+def test_session_leaves_unreached_stop_explicit_and_propagates_failures():
+    model = nn.Sequential(nn.Linear(3, 2), nn.ReLU())
+    session = HookSession(model)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        with session:
+            stopped = session.stop("1")
+            raise RuntimeError("boom")
+
+    assert not stopped.reached
+    assert stopped.output is None
+    assert session.program == HookProgram((HookSpec("1", "stop", "fwd"),))
+    assert len(model[1]._forward_hooks) == 0
+
+
+def test_session_validates_early_stop_location():
+    model = nn.Sequential(nn.Identity())
+
+    with HookSession(model) as session:
+        with pytest.raises(TypeError, match="module_path"):
+            session.stop(None)
+        with pytest.raises(ValueError, match="Invalid submodule path"):
+            session.stop("missing")
+
+
+def test_session_restores_temporary_state_after_early_stop():
+    model = nn.Sequential(nn.Linear(3, 2, bias=False), nn.Identity())
+    target = Target("0", "parameter", 0, (0,), parameter="weight")
+    original = model[0].weight.detach().clone()
+
+    with HookSession(model) as session:
+        session.replace(target, -3)
+        session.stop("1")
+        model(torch.randn(1, 3))
+
+    assert torch.equal(model[0].weight, original)
 
 
 def test_session_captures_channels_and_replaces_gradients():

@@ -50,6 +50,7 @@ class HookProgram:
     """Ordered, model-free description of installed hook operations."""
 
     hooks: tuple[HookSpec, ...] = ()
+    stopped_at: str | None = None
 
 
 class BoundHookProgram:
@@ -92,13 +93,22 @@ class HookProgramBuilder:
         self._specs: list[HookSpec] = []
         self._cleanups: list[Callable[[], Any]] = []
         self._hook_failure_handlers: list[list[Callable[[], Any] | None]] = []
+        self._stopped_at: str | None = None
         self._built = False
 
     @property
     def program(self) -> HookProgram:
         """Return the operations successfully registered so far."""
 
-        return HookProgram(tuple(self._specs))
+        return HookProgram(tuple(self._specs), self._stopped_at)
+
+    def mark_stopped(self, module_path: str) -> None:
+        """Record that execution reached a registered early-stop location."""
+
+        self._ensure_open()
+        if not isinstance(module_path, str):
+            raise TypeError("module_path must be a string")
+        self._stopped_at = module_path
 
     def register(self, module: nn.Module, hook: Callable, spec: HookSpec) -> None:
         """Install one hook and record ``spec`` only after registration succeeds."""
@@ -179,6 +189,7 @@ class HookProgramBuilder:
             self._cleanups.clear()
             self._hook_failure_handlers.clear()
             self._specs.clear()
+            self._stopped_at = None
 
     def __enter__(self) -> "HookProgramBuilder":
         self._ensure_open()
