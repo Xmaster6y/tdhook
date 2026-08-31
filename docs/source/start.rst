@@ -51,11 +51,40 @@ Gradients reads ``("baseline", "input")`` and writes
 ``("attr", "input")``. Here, ``attributions.shape`` is ``(1, 4)``, matching
 the input.
 
+Compose methods in a workflow
+-----------------------------
+
+:class:`~tdhook.workflow.Workflow` is TDHook's composition interface. It
+combines configured interpretability methods with ordinary TensorDict modules
+and validates their named inputs and outputs before running the model. For
+example, the attribution above can feed a native summary operation:
+
+.. code-block:: python
+
+   from tensordict.nn import TensorDictModule
+   from tdhook.workflow import Workflow
+
+   workflow = Workflow(
+       IntegratedGradients(init_attr_targets=select_score),
+       TensorDictModule(
+           lambda attribution: attribution.abs().sum(-1),
+           in_keys=[("attr", "input")],
+           out_keys=["attribution_mass"],
+       ),
+   )
+   result = workflow(model, data)
+
+The workflow returns one TensorDict containing both ``("attr", "input")`` and
+``"attribution_mass"``. Use :meth:`~tdhook.workflow.Workflow.plan` when you
+also need to inspect model-pass and compatibility decisions before execution.
+
 Where to go next
 ----------------
 
 * Continue with the full :doc:`Integrated Gradients notebook
   <notebooks/methods/integrated-gradients>`.
+* Learn imperative capture, intervention, cleanup, and early stopping in the
+  :doc:`HookSession notebook <notebooks/tutorials/hook-session>`.
 * Browse :doc:`tutorials` for attribution, probing, representation analysis,
   steering, and complete workflows.
 * Use the generated :doc:`api/index` for exact signatures and field

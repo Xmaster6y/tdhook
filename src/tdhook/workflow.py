@@ -16,6 +16,7 @@ from tdhook.contexts import HookingContext
 from tdhook.execution import AutogradLifetime, ExecutionSpec, GradientMode
 from tdhook.descriptions import ConfiguredStepDescription
 from tdhook.runtime import HookProgram
+from tdhook.session import HookSession
 
 
 @runtime_checkable
@@ -100,11 +101,13 @@ class WorkflowResult:
 
     Use :meth:`Workflow.run_with_plan` when consumers need execution metadata.
     :meth:`Workflow.run` continues to return only the TensorDict for existing
-    callers.
+    callers. ``program`` identifies the imperative operations that wrapped a
+    managed :class:`WorkflowSession` run and is ``None`` for direct execution.
     """
 
     data: TensorDictBase
     plan: WorkflowPlan
+    program: HookProgram | None = None
 
 
 @dataclass(frozen=True)
@@ -581,8 +584,40 @@ class Workflow:
 
         return self.run_with_plan(model, data).data
 
+    def session(self, model: nn.Module) -> "WorkflowSession":
+        """Bind this workflow and ``model`` to one managed hook session.
+
+        Operations registered on the returned session wrap the complete
+        workflow run without participating in planning or co-execution.
+        """
+
+        return WorkflowSession(self, model)
+
     def __call__(self, model: nn.Module, data: TensorDictBase) -> TensorDictBase:
         return self.run(model, data)
+
+
+class WorkflowSession(HookSession):
+    """A :class:`HookSession` whose operations wrap a complete workflow run."""
+
+    def __init__(self, workflow: Workflow, model: nn.Module):
+        super().__init__(model)
+        self._workflow = workflow
+
+    def run(self, data: TensorDictBase) -> WorkflowResult:
+        """Execute the bound workflow and associate its plan with this program.
+
+        The session must be active. Managed early stopping aborts the workflow
+        run and exits the surrounding context, leaving partial results on the
+        corresponding :class:`~tdhook.session.EarlyStopResult`.
+        """
+
+        self._active_state()
+        result = self._workflow.run_with_plan(self._model(), data)
+        return WorkflowResult(data=result.data, plan=result.plan, program=self.program)
+
+    def __call__(self, data: TensorDictBase) -> WorkflowResult:
+        return self.run(data)
 
 
 __all__ = [
@@ -593,5 +628,6 @@ __all__ = [
     "WorkflowMethod",
     "WorkflowPlan",
     "WorkflowResult",
+    "WorkflowSession",
     "WorkflowUpdate",
 ]

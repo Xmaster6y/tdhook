@@ -22,6 +22,7 @@ def test_session_captures_and_replaces_an_activation(default_test_model):
         program = session.program
 
     assert captured.value is not None
+    assert captured.values == [captured.value]
     assert captured.value.shape == (3, 1)
     assert not torch.allclose(modified, baseline)
     assert torch.allclose(default_test_model(x), baseline)
@@ -31,6 +32,20 @@ def test_session_captures_and_replaces_an_activation(default_test_model):
             HookSpec(target.module_path, "replace", "fwd", target=target),
         )
     )
+
+
+def test_session_preserves_repeated_captures_in_call_order(default_test_model):
+    target = Target("linear1", "activation", -1, (0,))
+    inputs = (torch.zeros(1, 10), torch.ones(1, 10))
+
+    with HookSession(default_test_model) as session:
+        captured = session.capture(target)
+        for value in inputs:
+            default_test_model(value)
+
+    assert len(captured.values) == 2
+    assert captured.value is captured.values[-1]
+    assert not torch.equal(captured.values[0], captured.values[1])
 
 
 def test_session_preserves_single_tensor_tuple_output():

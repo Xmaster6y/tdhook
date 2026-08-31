@@ -10,9 +10,16 @@ from tdhook.contexts import HookingContext, HookingContextFactory
 from tdhook.execution import AutogradLifetime, ExecutionSpec, GradientMode
 from tdhook.latent import ActivationCaching, Probing
 from tdhook.modules import HookedModule
-from tdhook.runtime import BoundHookProgram, HookProgramBuilder, HookSpec
+from tdhook.runtime import BoundHookProgram, HookProgram, HookProgramBuilder, HookSpec
 from tdhook.targets import Target
-from tdhook.workflow import PlannedExecution, Workflow, WorkflowResult, WorkflowUpdate, _DeferredAutogradCleanup
+from tdhook.workflow import (
+    PlannedExecution,
+    Workflow,
+    WorkflowResult,
+    WorkflowSession,
+    WorkflowUpdate,
+    _DeferredAutogradCleanup,
+)
 
 
 class CountingModel(nn.Module):
@@ -163,8 +170,75 @@ def test_workflow_returns_the_plan_used_by_execution(default_test_model):
 
     assert isinstance(result, WorkflowResult)
     assert result.plan.model_passes == 1
+    assert result.program is None
     assert result.data["output"].shape == (2, 5)
     assert workflow.run(default_test_model, data).shape == data.shape
+
+
+def test_managed_workflow_session_applies_operations_to_every_model_execution(default_test_model):
+    workflow = Workflow(CaptureOutput(), ReplaceOutput())
+    data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
+    target = Target("", "activation", -1, (0,))
+
+    with workflow.session(default_test_model) as session:
+        assert isinstance(session, WorkflowSession)
+        session.replace(target, 0)
+        captured = session.capture(target)
+        result = session(data)
+
+    assert result.plan.model_passes == 2
+    assert result.program == HookProgram(
+        (
+            HookSpec("", "replace", "fwd", target=target),
+            HookSpec("", "capture", "fwd", target=target),
+        )
+    )
+    assert len(captured.values) == 2
+    assert all(torch.equal(value, torch.zeros(2, 1)) for value in captured.values)
+    assert all(not module._forward_hooks for module in default_test_model.modules())
+
+
+def test_managed_workflow_session_early_stop_aborts_the_run_and_restores_hooks(default_test_model):
+    method = CaptureOutput()
+    workflow = Workflow(method)
+    data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
+
+    with workflow.session(default_test_model) as session:
+        stopped = session.stop("linear1")
+        session.run(data)
+        pytest.fail("managed early stopping must abort the workflow run")
+
+    assert stopped.reached
+    assert stopped.output is not None
+    assert method.values == []
+    assert session.program == HookProgram((HookSpec("linear1", "stop", "fwd"),), stopped_at="linear1")
+    assert all(not module._forward_hooks for module in default_test_model.modules())
+
+
+def test_managed_workflow_session_restores_state_after_workflow_failure(default_test_model):
+    def fail(value):
+        raise RuntimeError("workflow failed")
+
+    failing = TensorDictModule(fail, in_keys=["output"], out_keys=["unused"])
+    workflow = Workflow(CaptureOutput(), failing)
+    data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
+    target = Target("linear1", "parameter", 0, (0,), parameter="weight")
+    original = default_test_model.linear1.weight.detach().clone()
+
+    with pytest.raises(RuntimeError, match="workflow failed"):
+        with workflow.session(default_test_model) as session:
+            session.replace(target, -3)
+            session.run(data)
+
+    assert torch.equal(default_test_model.linear1.weight, original)
+    assert all(not module._forward_hooks for module in default_test_model.modules())
+
+
+def test_managed_workflow_session_requires_its_context(default_test_model):
+    session = Workflow().session(default_test_model)
+
+    with pytest.raises(RuntimeError, match="active context"):
+        session.run(TensorDict())
 
 
 def test_executed_plan_is_not_stale_after_a_preflight_plan(default_test_model):

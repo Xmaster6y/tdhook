@@ -4,6 +4,30 @@ Tutorials
 These notebooks are the maintained guides to TDHook. Start with one method or
 follow a complete workflow that combines methods with a model or domain.
 
+Core interfaces
+---------------
+
+.. grid:: 1 2 2 2
+   :gutter: 3
+
+   .. grid-item-card:: Interactive Hook Sessions
+      :link: notebooks/tutorials/hook-session
+      :link-type: doc
+      :class-card: surface
+
+      :octicon:`terminal;2em;sd-text-primary`
+
+      Capture and intervene imperatively with an explicit managed lifecycle.
+
+   .. grid-item-card:: Declared Workflows
+      :link: notebooks/tutorials/declared-workflows
+      :link-type: doc
+      :class-card: surface
+
+      :octicon:`workflow;2em;sd-text-primary`
+
+      Compose methods and TensorDict operations with an inspectable plan.
+
 Learn the methods
 -----------------
 
@@ -70,15 +94,6 @@ Complete workflows
 .. grid:: 1 2 2 2
    :gutter: 3
 
-   .. grid-item-card:: Declared Workflows
-      :link: notebooks/tutorials/declared-workflows
-      :link-type: doc
-      :class-card: surface
-
-      :octicon:`workflow;2em;sd-text-primary`
-
-      Run inspectable pipelines with named ``TensorDict`` values.
-
    .. grid-item-card:: TorchRL PPO Action Probing
       :link: notebooks/tutorials/torchrl-ppo
       :link-type: doc
@@ -125,6 +140,7 @@ Complete workflows
    notebooks/methods/bilinear-probing
    notebooks/methods/dimension-estimation
    notebooks/methods/representation-similarity
+   notebooks/tutorials/hook-session
    notebooks/tutorials/declared-workflows
    notebooks/tutorials/torchrl-ppo
    notebooks/tutorials/chess-value-saliency
