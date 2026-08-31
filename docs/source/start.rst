@@ -51,46 +51,40 @@ Gradients reads ``("baseline", "input")`` and writes
 ``("attr", "input")``. Here, ``attributions.shape`` is ``(1, 4)``, matching
 the input.
 
-Interactive operations across a workflow
-----------------------------------------
+Compose methods in a workflow
+-----------------------------
 
-Use :meth:`~tdhook.workflow.Workflow.session` when captures or interventions
-must wrap every model execution in a declared workflow. The managed object
-exposes the normal :class:`~tdhook.session.HookSession` operations and runs the
-bound workflow without requiring a second, manually nested context:
+:class:`~tdhook.workflow.Workflow` is TDHook's composition interface. It
+combines configured interpretability methods with ordinary TensorDict modules
+and validates their named inputs and outputs before running the model. For
+example, the attribution above can feed a native summary operation:
 
 .. code-block:: python
 
-   from tdhook.latent import ActivationCaching
-   from tdhook.targets import Target
+   from tensordict.nn import TensorDictModule
    from tdhook.workflow import Workflow
 
    workflow = Workflow(
-       ActivationCaching("0", cache_key=("activations", "first")),
-       ActivationCaching("2", cache_key=("activations", "second")),
+       IntegratedGradients(init_attr_targets=select_score),
+       TensorDictModule(
+           lambda attribution: attribution.abs().sum(-1),
+           in_keys=[("attr", "input")],
+           out_keys=["attribution_mass"],
+       ),
    )
+   result = workflow(model, data)
 
-   with workflow.session(model) as session:
-       observed = session.capture(Target("0", "activation", -1, (0,)))
-       execution = session.run(data)
-
-   execution.plan       # the exact WorkflowPlan that ran
-   execution.program    # the HookProgram applied around that plan
-   observed.values      # one entry per matching model execution, in call order
-
-Session operations wrap the complete run; they are not workflow steps and do
-not change planning or co-execution decisions. If
-:meth:`~tdhook.session.HookSession.stop` reaches its target, it aborts the
-workflow run, so no complete workflow result is returned. Its
-:class:`~tdhook.session.EarlyStopResult` still exposes the partial module
-output, and the surrounding managed context restores workflow hooks, session
-hooks, and temporary model state.
+The workflow returns one TensorDict containing both ``("attr", "input")`` and
+``"attribution_mass"``. Use :meth:`~tdhook.workflow.Workflow.plan` when you
+also need to inspect model-pass and compatibility decisions before execution.
 
 Where to go next
 ----------------
 
 * Continue with the full :doc:`Integrated Gradients notebook
   <notebooks/methods/integrated-gradients>`.
+* Learn imperative capture, intervention, cleanup, and early stopping in the
+  :doc:`HookSession notebook <notebooks/tutorials/hook-session>`.
 * Browse :doc:`tutorials` for attribution, probing, representation analysis,
   steering, and complete workflows.
 * Use the generated :doc:`api/index` for exact signatures and field

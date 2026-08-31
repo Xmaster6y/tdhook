@@ -9,6 +9,7 @@ from nbclient import NotebookClient
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEMO_DOCUMENTS = (
+    ("tutorials.rst", "notebooks/tutorials/hook-session.ipynb"),
     ("tutorials.rst", "notebooks/tutorials/declared-workflows.ipynb"),
     ("tutorials.rst", "notebooks/methods/representation-similarity.ipynb"),
 )
