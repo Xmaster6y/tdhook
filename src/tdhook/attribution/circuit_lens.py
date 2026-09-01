@@ -15,7 +15,7 @@ local attribution, not an intervention or a finite-difference causal effect.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from itertools import product
 from typing import Any
@@ -46,6 +46,8 @@ class FeatureSite:
             raise ValueError("layer must be non-negative")
         if self.target.kind != "activation":
             raise ValueError("FeatureSite.target must be an activation target")
+        if self.position is not None and any(index < 0 for index in self.position):
+            raise ValueError("FeatureSite.position indices must be non-negative")
 
     def gradient_target(self) -> Target:
         """Return the matching output-gradient target."""
@@ -85,6 +87,8 @@ class AttentionSite:
             raise ValueError("attention pattern and values must be activation targets")
         if self.output_gradient.kind != "gradient":
             raise ValueError("attention output_gradient must be a gradient target")
+        if self.pattern.indices != self.values.indices:
+            raise ValueError("attention pattern and values must select the same heads in the same order")
 
 
 @dataclass(frozen=True)
@@ -145,6 +149,13 @@ class CircuitLensArtifact:
         return asdict(self)
 
 
+@dataclass(frozen=True)
+class _GradientState:
+    tensor: Tensor
+    original: Tensor | None
+    value: Tensor | None
+
+
 def feature_contributions(
     activations: Tensor,
     gradients: Tensor,
@@ -157,6 +168,8 @@ def feature_contributions(
 
     if activations.shape != gradients.shape:
         raise ValueError("feature activations and gradients must have the same shape")
+    if layer < 0:
+        raise ValueError("layer must be non-negative")
     axis = _normalized_axis(feature_axis, activations.ndim)
     if activations.shape[axis] != len(feature_indices):
         raise ValueError("feature_indices must match the selected feature axis")
@@ -187,6 +200,8 @@ def attention_contributions(
     ``pattern[h, q, s] * <values[s, h] @ W_O[h], d target / d attn_out[q]>``.
     """
 
+    if layer < 0:
+        raise ValueError("layer must be non-negative")
     pattern = _without_singleton_batch("pattern", pattern, 3)
     values = _without_singleton_batch("values", values, 3)
     output_gradient = _without_singleton_batch("output_gradient", output_gradient, 2)
@@ -199,7 +214,7 @@ def attention_contributions(
         raise ValueError("output_weight head and head_dim axes do not match values")
     if output_gradient.shape != (queries, output_weight.shape[2]):
         raise ValueError("output_gradient must have shape [query, model]")
-    if target_position >= queries:
+    if target_position < 0 or target_position >= queries:
         raise IndexError("target_position is outside the attention query axis")
     if head_indices is None:
         head_indices = tuple(range(heads))
@@ -232,6 +247,8 @@ def logit_contributions(
     gradients = logit_gradients.detach().reshape(-1)
     if gradients.numel() != len(token_indices):
         raise ValueError("token_indices must contain one index per logit gradient")
+    if any(index < 0 for index in token_indices):
+        raise ValueError("token_indices must be non-negative")
     scores = (activation.reshape(()) * gradients).to(device="cpu", dtype=torch.float64)
     return tuple(
         LogitContributor(int(index), float(score)) for index, score in zip(token_indices, scores, strict=True)
@@ -254,8 +271,11 @@ def attribute_feature_circuit(
 
     ``output_logits`` extracts a one-dimensional logit tensor from the model
     output. Only ``logit_indices`` are differentiated, avoiding a full-vocab
-    Jacobian unless the caller explicitly requests it. Existing parameter
-    gradients are restored after the workflow.
+    Jacobian unless the caller explicitly requests it. Every configured site
+    must be reached exactly once: shared modules need distinct hook points so
+    forward activations cannot be paired with reverse-order gradients.
+    Existing gradients on model parameters and caller-owned leaf tensors are
+    restored after the workflow.
     """
 
     if not isinstance(model, nn.Module):
@@ -266,8 +286,10 @@ def attribute_feature_circuit(
         raise ValueError("top_k must be positive")
     if logit_indices and output_logits is None:
         raise ValueError("output_logits is required when logit_indices are requested")
+    if any(index < 0 for index in logit_indices):
+        raise ValueError("logit_indices must be non-negative")
     kwargs = {} if model_kwargs is None else dict(model_kwargs)
-    saved_gradients = _save_parameter_gradients(model)
+    saved_gradients = _save_gradients(model, model_args, kwargs)
 
     try:
         with HookSession(model) as session:
@@ -288,7 +310,8 @@ def attribute_feature_circuit(
             ]
 
             output = model(*model_args, **kwargs)
-            live_target = _site_scalar(_captured(target_activation, "target feature"), target_feature)
+            captured_target = _single_capture(target_activation, "target feature activation")
+            live_target = _site_scalar(captured_target, target_feature)
             retain_graph = bool(logit_indices)
             live_target.backward(retain_graph=retain_graph)
 
@@ -296,8 +319,8 @@ def attribute_feature_circuit(
                 contributor
                 for site, activations, gradients in upstream_captures
                 for contributor in feature_contributions(
-                    _captured(activations, "upstream activation"),
-                    _captured(gradients, "upstream gradient"),
+                    _single_capture(activations, "upstream activation"),
+                    _single_capture(gradients, "upstream gradient"),
                     layer=site.layer,
                     feature_indices=site.target.indices,
                     feature_axis=site.target.feature_axis,
@@ -307,10 +330,10 @@ def attribute_feature_circuit(
                 contributor
                 for site, pattern, values, gradient in attention_captures
                 for contributor in attention_contributions(
-                    _captured(pattern, "attention pattern"),
-                    _captured(values, "attention values"),
+                    _single_capture(pattern, "attention pattern"),
+                    _single_capture(values, "attention values"),
                     site.output_weight,
-                    _captured(gradient, "attention output gradient"),
+                    _single_capture(gradient, "attention output gradient"),
                     layer=site.layer,
                     target_position=site.target_position,
                     head_indices=site.pattern.indices,
@@ -319,28 +342,32 @@ def attribute_feature_circuit(
 
             logit_gradients: list[Tensor] = []
             if logit_indices:
-                logits = output_logits(output)  # type: ignore[misc]
+                assert output_logits is not None
+                logits = output_logits(output)
                 if not isinstance(logits, Tensor) or logits.ndim != 1:
                     raise ValueError("output_logits must return a one-dimensional tensor")
-                start = len(target_gradient.values)
                 for offset, token_index in enumerate(logit_indices):
-                    if token_index < -logits.numel() or token_index >= logits.numel():
+                    if token_index >= logits.numel():
                         raise IndexError(f"logit index {token_index} is out of bounds")
                     logits[token_index].backward(retain_graph=offset + 1 < len(logit_indices))
-                captured_logit_gradients = target_gradient.values[start:]
-                if len(captured_logit_gradients) != len(logit_indices):
-                    raise RuntimeError("target feature gradient was not captured once per output logit")
+                expected_captures = len(logit_indices)
+                if len(target_gradient.values) != expected_captures:
+                    raise RuntimeError(
+                        "target feature gradient must be captured exactly once per backward objective; "
+                        f"expected {expected_captures}, observed {len(target_gradient.values)}"
+                    )
+                captured_logit_gradients = target_gradient.values
                 logit_gradients = [
                     _site_scalar(gradient, target_feature).detach() for gradient in captured_logit_gradients
                 ]
 
-        target_value = _site_scalar(_captured(target_activation, "target feature"), target_feature).detach()
+        target_value = live_target.detach()
         logits_artifact = logit_contributions(
             target_value,
             torch.stack(logit_gradients) if logit_gradients else torch.empty(0),
             token_indices=logit_indices,
         )
-        target_position = _site_position(_captured(target_activation, "target feature"), target_feature)
+        target_position = _site_position(captured_target, target_feature)
         return CircuitLensArtifact(
             target_layer=target_feature.layer,
             target_feature_index=target_feature.target.indices[0],
@@ -351,36 +378,36 @@ def attribute_feature_circuit(
             output_logits=_rank(logits_artifact, top_k=top_k, positive_only=positive_only),
         )
     finally:
-        _restore_parameter_gradients(saved_gradients)
+        _restore_gradients(saved_gradients)
 
 
-def _captured(capture: CapturedTarget, name: str) -> Tensor:
-    if capture.value is None:
-        raise RuntimeError(f"{name} target was not reached during model execution")
-    return capture.value
+def _single_capture(capture: CapturedTarget, name: str) -> Tensor:
+    if len(capture.values) != 1:
+        raise RuntimeError(f"{name} target must be reached exactly once; observed {len(capture.values)} captures")
+    return capture.values[0]
 
 
 def _site_scalar(value: Tensor, site: FeatureSite) -> Tensor:
-    if value.numel() == 1:
-        return value.reshape(())
-    if site.position is None:
-        raise ValueError("FeatureSite.position is required when the selected target is not scalar")
     axis = _normalized_axis(site.target.feature_axis, value.ndim)
-    if len(site.position) != value.ndim - 1:
-        raise ValueError("FeatureSite.position must index every non-feature axis")
-    coordinate = list(site.position)
+    position = _site_position(value, site)
+    coordinate = list(position)
     coordinate.insert(axis, 0)
-    try:
-        return value[tuple(coordinate)]
-    except IndexError as exc:
-        raise IndexError("FeatureSite.position is outside the selected activation") from exc
+    return value[tuple(coordinate)]
 
 
 def _site_position(value: Tensor, site: FeatureSite) -> tuple[int, ...]:
-    if value.numel() == 1:
-        return tuple(0 for _ in range(value.ndim - 1)) if value.ndim > 1 else ()
-    assert site.position is not None  # validated by _site_scalar
-    return site.position
+    axis = _normalized_axis(site.target.feature_axis, value.ndim)
+    position_shape = value.shape[:axis] + value.shape[axis + 1 :]
+    position = site.position
+    if position is None:
+        if torch.Size(position_shape).numel() != 1:
+            raise ValueError("FeatureSite.position is required when the selected target is not scalar")
+        return tuple(0 for _ in position_shape)
+    if len(position) != len(position_shape):
+        raise ValueError("FeatureSite.position must index every non-feature axis")
+    if any(index >= size for index, size in zip(position, position_shape, strict=True)):
+        raise IndexError("FeatureSite.position is outside the selected activation")
+    return position
 
 
 def _rank(items: Sequence[Any], *, top_k: int | None, positive_only: bool) -> tuple[Any, ...]:
@@ -407,21 +434,35 @@ def _without_singleton_batch(name: str, value: Tensor, expected_ndim: int) -> Te
 
 
 def _coordinates(shape: torch.Size) -> tuple[tuple[int, ...], ...]:
-    if not shape:
-        return ((),)
     return tuple(product(*(range(size) for size in shape)))
 
 
-def _save_parameter_gradients(model: nn.Module) -> list[tuple[nn.Parameter, Tensor | None]]:
+def _save_gradients(model: nn.Module, *values: object) -> list[_GradientState]:
+    tensors = (*model.parameters(), *(tensor for value in values for tensor in _iter_tensors(value)))
+    unique_leaves = {id(tensor): tensor for tensor in tensors if tensor.is_leaf and tensor.requires_grad}
     return [
-        (parameter, None if parameter.grad is None else parameter.grad.detach().clone())
-        for parameter in model.parameters()
+        _GradientState(tensor, tensor.grad, None if tensor.grad is None else tensor.grad.detach().clone())
+        for tensor in unique_leaves.values()
     ]
 
 
-def _restore_parameter_gradients(saved: Sequence[tuple[nn.Parameter, Tensor | None]]) -> None:
-    for parameter, gradient in saved:
-        parameter.grad = gradient
+def _iter_tensors(value: object) -> Iterator[Tensor]:
+    if isinstance(value, Tensor):
+        yield value
+    elif isinstance(value, Mapping):
+        for item in value.values():
+            yield from _iter_tensors(item)
+    elif isinstance(value, (tuple, list)):
+        for item in value:
+            yield from _iter_tensors(item)
+
+
+def _restore_gradients(saved: Sequence[_GradientState]) -> None:
+    for state in saved:
+        if state.original is not None:
+            assert state.value is not None
+            state.original.copy_(state.value)
+        state.tensor.grad = state.original
 
 
 __all__ = [
