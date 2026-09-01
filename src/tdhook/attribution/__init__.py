@@ -24,6 +24,17 @@ from .circuit_lens import (
     feature_contributions,
     logit_contributions,
 )
+from .circuit_clustering import (
+    CircuitClusters,
+    CircuitContributor,
+    CircuitSignature,
+    build_circuit_signature,
+    cluster_circuit_artifacts,
+    dbscan_circuit_signatures,
+    filter_contributor_frequency,
+    jaccard_distances,
+    sample_activation_indices,
+)
 
 __all__ = [
     "LRP",
@@ -31,7 +42,10 @@ __all__ = [
     "AttentionContributor",
     "AttentionSite",
     "AttributionConventions",
+    "CircuitClusters",
+    "CircuitContributor",
     "CircuitLensArtifact",
+    "CircuitSignature",
     "FeatureContributor",
     "FeatureSite",
     "GradCAM",
@@ -41,8 +55,14 @@ __all__ = [
     "Saliency",
     "attention_contributions",
     "attribute_feature_circuit",
+    "build_circuit_signature",
+    "cluster_circuit_artifacts",
+    "dbscan_circuit_signatures",
     "feature_contributions",
+    "filter_contributor_frequency",
+    "jaccard_distances",
     "logit_contributions",
+    "sample_activation_indices",
 ]
 
 # TODO: Implement Occlusion
