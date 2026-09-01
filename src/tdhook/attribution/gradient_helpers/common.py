@@ -4,10 +4,11 @@ from typing import Callable, Optional, Tuple, List, Dict
 import torch
 from tensordict.nn import TensorDictModule, TensorDictSequential, TensorDictModuleBase
 from tensordict import TensorDict
+from tensordict.utils import NestedKey
 
 from tdhook.contexts import HookingContextFactory
 from tdhook.modules import FunctionModule, flatten_select_reshape_call, IntermediateKeysCleaner, ModuleCallWithCache
-from tdhook._types import UnraveledKey, join_keys
+from tdhook._types import join_keys
 from tdhook.modules import HookedModule
 from tdhook.hooks import HookFactory, MutableWeakRef, TensorDictRef
 from tdhook.execution import ExecutionSpec, GradientMode
@@ -29,9 +30,9 @@ class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
         init_attr_inputs: Optional[Callable[[TensorDict, TensorDict], TensorDict]] = None,
         init_attr_cache_in: Optional[Callable[[TensorDict, TensorDict], TensorDict]] = None,
         init_attr_grads: Optional[Callable[[TensorDict, TensorDict], TensorDict]] = None,
-        additional_init_keys: Optional[List[UnraveledKey]] = None,
+        additional_init_keys: Optional[List[NestedKey]] = None,
         output_grad_callbacks: Optional[Dict[str, Callable]] = None,
-        attribution_key: UnraveledKey = "attr",
+        attribution_key: NestedKey = "attr",
         clean_intermediate_keys: bool = True,
         cache_callback: Optional[Callable] = None,
     ):
@@ -62,8 +63,8 @@ class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
     def _prepare_module(
         self,
         module: TensorDictModuleBase,
-        in_keys: List[UnraveledKey],
-        out_keys: List[UnraveledKey],
+        in_keys: List[NestedKey],
+        out_keys: List[NestedKey],
         extra_relative_path: str,
     ) -> TensorDictModuleBase:
         register_in_keys = [("_register_in", in_key) for in_key in in_keys]
@@ -250,7 +251,7 @@ class GradientAttributionWithBaseline(GradientAttribution):
         self,
         *args,
         compute_convergence_delta: bool = False,
-        baseline_key: UnraveledKey = "baseline",
+        baseline_key: NestedKey = "baseline",
         multiply_by_inputs: bool = False,
         **kwargs,
     ):
@@ -262,8 +263,8 @@ class GradientAttributionWithBaseline(GradientAttribution):
     def _prepare_module(
         self,
         module: TensorDictModuleBase,
-        in_keys: List[UnraveledKey],
-        out_keys: List[UnraveledKey],
+        in_keys: List[NestedKey],
+        out_keys: List[NestedKey],
         extra_relative_path: str,
     ) -> TensorDictModuleBase:
         n_in_keys = len(in_keys)
@@ -307,7 +308,7 @@ class GradientAttributionWithBaseline(GradientAttribution):
         return TensorDictSequential(*modules)
 
     @abstractmethod
-    def _reduce_baselines_fn(self, td: TensorDict, in_keys: List[UnraveledKey]) -> TensorDict:
+    def _reduce_baselines_fn(self, td: TensorDict, in_keys: List[NestedKey]) -> TensorDict:
         pass
 
     @torch.no_grad()
@@ -320,8 +321,8 @@ class GradientAttributionWithBaseline(GradientAttribution):
     def _compute_convergence_delta_fn(
         self,
         td: TensorDict,
-        in_keys: List[UnraveledKey],
-        out_keys: List[UnraveledKey],
+        in_keys: List[NestedKey],
+        out_keys: List[NestedKey],
         module: TensorDictModuleBase,
     ) -> TensorDict:
         inputs = td.select(*in_keys)

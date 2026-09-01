@@ -1,6 +1,7 @@
 from typing import Callable, Optional, List
 
 from tensordict.nn import TensorDictModuleBase, TensorDictSequential
+from tensordict.utils import NestedKey
 
 from tdhook.contexts import HookingContextFactory
 from tdhook.execution import ExecutionSpec
@@ -9,7 +10,6 @@ from tdhook.latent._targets import activation_target
 from tdhook.modules import HookedModule, ModuleCallWithCache, IntermediateKeysCleaner, ModuleCall
 from tdhook.runtime import BoundHookProgram, HookProgramBuilder, HookSpec
 from tdhook.targets import Target
-from tdhook._types import UnraveledKey
 
 
 def _selected_output(value: object, target: Target | None):
@@ -32,7 +32,7 @@ class ActivationPatching(HookingContextFactory):
     def __init__(
         self,
         modules_to_patch: List[str | Target],
-        patch_key: UnraveledKey = "patched",
+        patch_key: NestedKey = "patched",
         clean_intermediate_keys: bool = True,
         patch_fn: Optional[Callable] = None,
         cache_callback: Optional[Callable] = None,
@@ -55,8 +55,8 @@ class ActivationPatching(HookingContextFactory):
     def _prepare_module(
         self,
         module: TensorDictModuleBase,
-        in_keys: List[UnraveledKey],
-        out_keys: List[UnraveledKey],
+        in_keys: List[NestedKey],
+        out_keys: List[NestedKey],
         extra_relative_path: str,
     ) -> TensorDictModuleBase:
         stored_keys = list(self._modules_to_patch)

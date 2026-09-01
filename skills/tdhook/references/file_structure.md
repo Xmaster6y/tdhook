@@ -17,7 +17,7 @@ src/tdhook/
 ├── contexts.py           # HookingContext, HookingContextFactory
 ├── metrics.py            # InfidelityMetric, SensitivityMetric
 ├── sources.py            # Baseline/source utilities
-├── _types.py             # UnraveledKey
+├── _types.py             # Nested-key validation and composition helpers
 └── _optional_deps.py     # Lazy imports (sklearn, captum, etc.)
 ```
 

@@ -6,7 +6,8 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, is_dataclass
 from enum import Enum
 
-from tdhook._types import UnraveledKey
+from tensordict.utils import NestedKey
+
 from tdhook.execution import ExecutionSpec
 from tdhook.targets import Target
 
@@ -27,12 +28,10 @@ class ConfiguredStepDescription:
     method_type: str
     parameters: FrozenDict
     execution: FrozenDict
-    in_keys: tuple[UnraveledKey, ...] = ()
-    out_keys: tuple[UnraveledKey, ...] = ()
+    in_keys: tuple[NestedKey, ...] = ()
+    out_keys: tuple[NestedKey, ...] = ()
 
-    def with_keys(
-        self, in_keys: Sequence[UnraveledKey], out_keys: Sequence[UnraveledKey]
-    ) -> "ConfiguredStepDescription":
+    def with_keys(self, in_keys: Sequence[NestedKey], out_keys: Sequence[NestedKey]) -> "ConfiguredStepDescription":
         """Return this description with its bound TensorDict interface."""
 
         return ConfiguredStepDescription(
@@ -100,7 +99,7 @@ def _freeze(value: object, identifiers: Mapping[Callable[..., object], str]) -> 
     raise TypeError(f"Configured value {type(value).__qualname__} is not JSON-compatible")
 
 
-def _key_list(keys: Sequence[UnraveledKey]) -> tuple[object, ...]:
+def _key_list(keys: Sequence[NestedKey]) -> tuple[object, ...]:
     return tuple(tuple(key) if isinstance(key, tuple) else key for key in keys)
 
 

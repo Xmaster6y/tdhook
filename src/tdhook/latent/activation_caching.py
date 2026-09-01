@@ -1,20 +1,21 @@
 from typing import Callable, Optional, List
 
 from tensordict import TensorDict, TensorDictBase
+from tensordict.utils import NestedKey
 
 from tdhook.modules import HookedModule
 from tdhook.contexts import HookingContextFactory, HookingContextWithCache
 from tdhook.hooks import MultiHookManager, HookFactory, HookDirection
 from tdhook.runtime import BoundHookProgram, HookProgramBuilder, HookSpec
 from tdhook.targets import Target
-from tdhook._types import UnraveledKey, is_nested_key
+from tdhook._types import is_nested_key
 
 
-def _key_path(key: UnraveledKey) -> tuple[str, ...]:
+def _key_path(key: NestedKey) -> tuple[str, ...]:
     return (key,) if isinstance(key, str) else key
 
 
-def _keys_overlap(left: UnraveledKey, right: UnraveledKey) -> bool:
+def _keys_overlap(left: NestedKey, right: NestedKey) -> bool:
     left_path = _key_path(left)
     right_path = _key_path(right)
     common = min(len(left_path), len(right_path))
@@ -24,7 +25,7 @@ def _keys_overlap(left: UnraveledKey, right: UnraveledKey) -> bool:
 class ActivationCachingModule(HookedModule):
     """A prepared capture method that publishes a stable cache snapshot."""
 
-    def __init__(self, *args, cache_key: UnraveledKey | None, **kwargs):
+    def __init__(self, *args, cache_key: NestedKey | None, **kwargs):
         super().__init__(*args, **kwargs)
         self.cache_key = cache_key
         if cache_key is not None:
@@ -57,7 +58,7 @@ class ActivationCaching(HookingContextFactory):
         directions: Optional[List[HookDirection]] = None,
         use_nested_keys: bool = False,
         clear_cache: bool = True,
-        cache_key: UnraveledKey | None = "cache",
+        cache_key: NestedKey | None = "cache",
     ):
         super().__init__()
         if isinstance(key_pattern, Target):
@@ -88,7 +89,7 @@ class ActivationCaching(HookingContextFactory):
         self._use_nested_keys = use_nested_keys or len(self._directions) > 1
 
     @property
-    def cache_key(self) -> UnraveledKey | None:
+    def cache_key(self) -> NestedKey | None:
         """Return the native TensorDict key used to publish captured activations."""
 
         return self._hooked_module_kwargs["cache_key"]

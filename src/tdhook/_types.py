@@ -1,10 +1,6 @@
 from tensordict.utils import NestedKey
 
 
-# Internal compatibility alias. TensorDict owns the public key model.
-UnraveledKey = NestedKey
-
-
 def is_nested_key(value: object) -> bool:
     """Return whether ``value`` is a valid runtime TensorDict nested key."""
 

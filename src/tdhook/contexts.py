@@ -7,10 +7,11 @@ from typing import Callable, List, Optional, Generator, Dict, Mapping
 from torch import nn
 from tensordict.nn import TensorDictModuleBase, TensorDictModule
 from tensordict import TensorDict
+from tensordict.utils import NestedKey
 
 from tdhook.modules import HookedModule
 from tdhook.hooks import MultiHookHandle, merge_paths
-from tdhook._types import UnraveledKey, is_nested_key
+from tdhook._types import is_nested_key
 from tdhook.execution import ExecutionSpec
 from tdhook.descriptions import ConfiguredStepDescription, configured_step_description
 from tdhook.runtime import BoundHookProgram, HookProgram
@@ -25,8 +26,8 @@ class HookingContext:
         self,
         factory: "HookingContextFactory",
         module: nn.Module,
-        in_keys: Optional[List[UnraveledKey] | Dict[UnraveledKey, str]] = None,
-        out_keys: Optional[List[UnraveledKey]] = None,
+        in_keys: Optional[List[NestedKey] | Dict[NestedKey, str]] = None,
+        out_keys: Optional[List[NestedKey]] = None,
         pre_factories: Optional[List["HookingContextFactory"]] = None,
     ):
         self._prepare = factory._prepare_module
@@ -126,13 +127,13 @@ class HookingContext:
         return self._hooked_module.td_module is self._module
 
     @property
-    def model_in_keys(self) -> tuple[UnraveledKey, ...]:
+    def model_in_keys(self) -> tuple[NestedKey, ...]:
         """Return the caller-owned model signature used by this binding."""
 
         return tuple(self._in_keys)
 
     @property
-    def model_out_keys(self) -> tuple[UnraveledKey, ...]:
+    def model_out_keys(self) -> tuple[NestedKey, ...]:
         """Return the caller-owned model outputs used by this binding."""
 
         return tuple(self._out_keys)
@@ -284,8 +285,8 @@ class HookingContextFactory:
     def prepare(
         self,
         module: nn.Module,
-        in_keys: Optional[List[UnraveledKey] | Dict[UnraveledKey, str]] = None,
-        out_keys: Optional[List[UnraveledKey]] = None,
+        in_keys: Optional[List[NestedKey] | Dict[NestedKey, str]] = None,
+        out_keys: Optional[List[NestedKey]] = None,
     ) -> "HookingContext":
         """Return the sole managed binding interface for ``module``."""
         if isinstance(module, TensorDictModuleBase):
@@ -309,8 +310,8 @@ class HookingContextFactory:
     def _prepare_module(
         self,
         module: TensorDictModuleBase,
-        in_keys: List[UnraveledKey],
-        out_keys: List[UnraveledKey],
+        in_keys: List[NestedKey],
+        out_keys: List[NestedKey],
         extra_relative_path: str,
     ) -> TensorDictModuleBase:
         return module
@@ -318,8 +319,8 @@ class HookingContextFactory:
     def _restore_module(
         self,
         module: TensorDictModuleBase,
-        in_keys: List[UnraveledKey],
-        out_keys: List[UnraveledKey],
+        in_keys: List[NestedKey],
+        out_keys: List[NestedKey],
         extra_relative_path: str,
     ) -> TensorDictModuleBase:
         return module

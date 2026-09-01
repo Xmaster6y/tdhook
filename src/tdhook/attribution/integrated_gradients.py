@@ -1,11 +1,11 @@
 import torch
 from typing import List, Optional, Callable, Dict
 from tensordict import TensorDict, merge_tensordicts
+from tensordict.utils import NestedKey
 
 from tdhook.attribution.gradient_helpers.helpers import approximation_parameters
 from tdhook.execution import ExecutionSpec, GradientMode
 from tdhook.attribution.gradient_helpers import GradientAttributionWithBaseline
-from tdhook._types import UnraveledKey
 
 
 class IntegratedGradients(GradientAttributionWithBaseline):
@@ -23,13 +23,13 @@ class IntegratedGradients(GradientAttributionWithBaseline):
         init_attr_inputs: Optional[Callable[[TensorDict, TensorDict], TensorDict]] = None,
         init_attr_cache_in: Optional[Callable[[TensorDict, TensorDict], TensorDict]] = None,
         init_attr_grads: Optional[Callable[[TensorDict, TensorDict], TensorDict]] = None,
-        additional_init_keys: Optional[List[UnraveledKey]] = None,
+        additional_init_keys: Optional[List[NestedKey]] = None,
         output_grad_callbacks: Optional[Dict[str, Callable]] = None,
-        attribution_key: UnraveledKey = "attr",
+        attribution_key: NestedKey = "attr",
         clean_intermediate_keys: bool = True,
         cache_callback: Optional[Callable] = None,
         compute_convergence_delta: bool = False,
-        baseline_key: UnraveledKey = "baseline",
+        baseline_key: NestedKey = "baseline",
         multiply_by_inputs: bool = False,
         method: str = "gausslegendre",
         n_steps: int = 50,
@@ -69,7 +69,7 @@ class IntegratedGradients(GradientAttributionWithBaseline):
             gradient_mode=GradientMode.REQUIRED,
         )
 
-    def _reduce_baselines_fn(self, td: TensorDict, in_keys: List[UnraveledKey]) -> TensorDict:
+    def _reduce_baselines_fn(self, td: TensorDict, in_keys: List[NestedKey]) -> TensorDict:
         inputs = td.select(*in_keys)
         baselines = td[self._baseline_key]
         additional_init_tensors = td.select(*self._additional_init_keys)
@@ -103,8 +103,8 @@ class IntegratedGradients(GradientAttributionWithBaseline):
     def init_attr_targets_with_labels(
         outputs: TensorDict,
         additional_init_tensors: TensorDict,
-        selected_out_keys: List[UnraveledKey],
-        label_key: UnraveledKey = "label",
+        selected_out_keys: List[NestedKey],
+        label_key: NestedKey = "label",
     ) -> TensorDict:
         targets = outputs.select(*selected_out_keys)
         labels = additional_init_tensors[label_key].unsqueeze(-1).expand(targets.shape)

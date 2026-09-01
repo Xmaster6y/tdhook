@@ -2,6 +2,7 @@ from typing import Callable, Optional, List
 
 from tensordict import TensorDict
 from tensordict.nn import TensorDictModuleBase, TensorDictSequential
+from tensordict.utils import NestedKey
 
 from tdhook.contexts import HookingContextFactory
 from tdhook.execution import ExecutionSpec
@@ -10,7 +11,6 @@ from tdhook.latent._targets import activation_target
 from tdhook.modules import HookedModule, IntermediateKeysCleaner, ModuleCallWithCache, FunctionModule
 from tdhook.runtime import BoundHookProgram, HookProgramBuilder, HookSpec
 from tdhook.targets import Target
-from tdhook._types import UnraveledKey
 
 
 def _selected_output(value: object, target: Target | None):
@@ -63,9 +63,9 @@ class ActivationAddition(HookingContextFactory):
     def __init__(
         self,
         modules_to_steer: List[str | Target],
-        positive_key: UnraveledKey = "positive",
-        negative_key: UnraveledKey = "negative",
-        steer_key: UnraveledKey = "steer",
+        positive_key: NestedKey = "positive",
+        negative_key: NestedKey = "negative",
+        steer_key: NestedKey = "steer",
         clean_intermediate_keys: bool = True,
         cache_callback: Optional[Callable] = None,
     ):
@@ -88,8 +88,8 @@ class ActivationAddition(HookingContextFactory):
     def _prepare_module(
         self,
         module: TensorDictModuleBase,
-        in_keys: List[UnraveledKey],
-        out_keys: List[UnraveledKey],
+        in_keys: List[NestedKey],
+        out_keys: List[NestedKey],
         extra_relative_path: str,
     ) -> TensorDictModuleBase:
         stored_keys = list(self._modules_to_steer)

@@ -2,12 +2,12 @@ import weakref
 from typing import Callable, Any, Optional, List, Literal, Protocol, Generic, TypeVar, Type, Tuple
 import inspect
 from tensordict import TensorDict
+from tensordict.utils import NestedKey
 import re
 from torch.utils.hooks import RemovableHandle
 from torch import nn
 import torch
 
-from tdhook._types import UnraveledKey
 from tdhook.paths import resolve_submodule_path as resolve_submodule_path
 from tdhook.paths import submodule_path_to_name as submodule_path_to_name
 
@@ -278,7 +278,7 @@ class HookFactory:
 
     @staticmethod
     def make_caching_hook(
-        key: UnraveledKey,
+        key: NestedKey,
         cache: TensorDict | MutableWeakRef,
         *,
         callback: Optional[Callable] = None,
