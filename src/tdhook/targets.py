@@ -25,6 +25,8 @@ class Target:
     ``feature_axis`` identifies the axis containing units, channels, rows, or
     columns.  For example, use ``-1`` for MLP output units, ``1`` for CNN
     output channels, and ``0``/``1`` for parameter rows/columns respectively.
+    ``occurrence`` optionally selects one zero-based activation or gradient
+    observation per root-model execution when a module is called repeatedly.
     """
 
     module_path: str
@@ -33,6 +35,7 @@ class Target:
     indices: tuple[int, ...]
     parameter: str | None = None
     output_path: tuple[OutputPathComponent, ...] = ()
+    occurrence: int | None = None
 
     def __post_init__(self) -> None:
         if self.kind not in {"activation", "gradient", "parameter"}:
@@ -51,6 +54,13 @@ class Target:
             raise TypeError("output_path components must be integer slots or string mapping keys")
         if self.kind == "parameter" and self.output_path:
             raise ValueError("output_path is only valid for activation and gradient targets")
+        if self.occurrence is not None:
+            if type(self.occurrence) is not int:
+                raise TypeError("occurrence must be an integer or None")
+            if self.occurrence < 0:
+                raise ValueError("occurrence must be non-negative")
+            if self.kind == "parameter":
+                raise ValueError("occurrence is only valid for activation and gradient targets")
 
     def to_dict(self) -> dict[str, object]:
         """Return a JSON-compatible representation of this target."""

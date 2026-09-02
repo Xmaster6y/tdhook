@@ -649,6 +649,84 @@ def test_session_captures_parameter_values():
     assert session.program == HookProgram((HookSpec(target.module_path, "capture", None, target=target),))
 
 
+def test_session_selects_and_resets_repeated_module_occurrences():
+    class RepeatedModule(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.shared = nn.Identity()
+
+        def forward(self, x):
+            return self.shared(x + 1) + self.shared(x + 2)
+
+    model = RepeatedModule()
+    target = Target("shared", "activation", -1, (0,), occurrence=1)
+
+    with HookSession(model) as session:
+        captured = session.capture(target)
+        session.replace(target, 10)
+        first = model(torch.zeros(1, 2))
+        second = model(torch.ones(1, 2))
+
+    assert len(captured.values) == 2
+    assert torch.equal(captured.values[0], torch.tensor([[2.0]]))
+    assert torch.equal(captured.values[1], torch.tensor([[3.0]]))
+    assert torch.equal(first, torch.tensor([[11.0, 3.0]]))
+    assert torch.equal(second, torch.tensor([[12.0, 5.0]]))
+
+
+def test_session_selects_root_pre_hook_occurrence_with_prepend():
+    model = nn.Identity()
+    target = Target("", "activation", -1, (0,), occurrence=0)
+
+    with HookSession(model) as session:
+        captured = session.capture(target, direction="fwd_pre", prepend=True)
+        model(torch.tensor([1.0, 2.0]))
+
+    assert len(captured.values) == 1
+    assert torch.equal(captured.value, torch.tensor([1.0]))
+
+
+def test_session_selects_repeated_gradient_occurrence():
+    class RepeatedModule(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.shared = nn.Identity()
+
+        def forward(self, x):
+            return self.shared(x * 2) + self.shared(x * 3)
+
+    model = RepeatedModule()
+    target = Target("shared", "gradient", -1, (0,), occurrence=1)
+    x = torch.ones(1, 2, requires_grad=True)
+
+    with HookSession(model) as session:
+        captured = session.capture(target)
+        session.replace(target, 0)
+        model(x).sum().backward()
+
+    assert len(captured.values) == 1
+    assert torch.equal(captured.value, torch.ones(1, 1))
+    assert torch.equal(x.grad, torch.tensor([[3.0, 5.0]]))
+
+
+@pytest.mark.parametrize("operation", ["capture", "replace"])
+def test_session_fails_when_requested_occurrence_is_not_reached(operation):
+    model = nn.Sequential(nn.Identity())
+    target = Target("0", "activation", -1, (0,), occurrence=1)
+
+    with (
+        pytest.raises(RuntimeError, match=rf"{operation} target '0' requested occurrence 1.*called 1 time"),
+        HookSession(model) as session,
+    ):
+        if operation == "capture":
+            session.capture(target)
+        else:
+            session.replace(target, 0)
+        model(torch.ones(1, 2))
+
+    assert all(not module._forward_hooks and not module._forward_pre_hooks for module in model.modules())
+
+
 @pytest.mark.parametrize("axis,indices", [(0, (0,)), (1, (1,))])
 def test_session_restores_parameters_after_success_and_failure(axis, indices):
     model = nn.Sequential(nn.Linear(3, 2, bias=False))
