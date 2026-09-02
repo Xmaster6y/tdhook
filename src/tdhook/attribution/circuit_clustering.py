@@ -82,7 +82,10 @@ def sample_activation_indices(
 
     quantiles = torch.linspace(0, 1, bins + 1, dtype=torch.float64)
     boundaries = torch.quantile(values, quantiles)
-    bin_indices = torch.bucketize(values, boundaries[1:-1], right=True)
+    # Put values equal to repeated boundaries in the lower bin.  Sparse/ReLU
+    # activations otherwise place the zero mass and positive tail together in
+    # the last bin, eliminating the intended inverse-frequency weighting.
+    bin_indices = torch.bucketize(values, boundaries[1:-1], right=False)
     counts = torch.bincount(bin_indices, minlength=bins).to(torch.float64)
     weights = counts[bin_indices].pow(-alpha)
     generator = torch.Generator(device="cpu").manual_seed(seed)

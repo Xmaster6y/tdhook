@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+import torch
 
 from tdhook.attribution import (
     AttentionContributor,
@@ -98,6 +99,21 @@ def test_activation_sampling_is_seeded_without_replacement():
 
     assert first == second
     assert len(set(first)) == 20
+
+
+def test_activation_sampling_separates_sparse_zero_mass_from_positive_tail(monkeypatch):
+    captured_weights = None
+
+    def capture_weights(weights, sample_size, replacement, *, generator):
+        nonlocal captured_weights
+        captured_weights = weights
+        return torch.arange(sample_size)
+
+    monkeypatch.setattr(torch, "multinomial", capture_weights)
+    sample_activation_indices([0.0] * 100 + [1.0] * 5, 2)
+
+    assert captured_weights is not None
+    assert captured_weights[100] > captured_weights[0]
 
 
 @pytest.mark.parametrize(
