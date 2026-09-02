@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "feature": {"layer": 0, "index": 24},
+  "evidence_slice_sha256": "b8bd6fda45dda1f6e18c8a283be1883af32dc5016ee9b2f859dc2b6ae01c62a4",
+  "provenance": {
+    "model": "google/gemma-2-2b",
+    "model_revision": "c5ebcd40d208330abc697524c919956e692655cf",
+    "transcoder_set": "mwhanna/gemma-scope-transcoders",
+    "transcoder_revision": "bd5773156dea09893636c801df1237d0410307d2",
+    "circuit_dataset": "egolimblevskaia/circuitlens-gemma-2-2b-transcoder-circuit-analysis",
+    "circuit_dataset_revision": "fcd78fd98c3de6cc869d7df9e7d0f4a864ffea50",
+    "circuit_file": "analysis_layer_0.jsonl",
+    "circuit_blob_sha256": "76f8ba7dba35222d366835f82f5557480bace71f89dc60ec16a8f946a7e20faf",
+    "weight_dataset": "egolimblevskaia/weightlens-gemma-2-2b-transcoder-descriptions",
+    "weight_dataset_revision": "aa51f4ee40784ac7af168932e2505fe3e4bab833",
+    "weight_file": "feature_analysis_layer_0.json",
+    "weight_blob_sha256": "9b3c26c6fbf969bd82a996d561b52df6bbbe63f96d615684f332e23fefc5c935",
+    "weightlens_revision": "93f820024034bb9b1829f7f09c1483ec3bc71f49",
+    "circuitlens_revision": "d24b7e3a71ea1fbce0800056eb7333d1a282303d"
+  },
+  "weightlens": {
+    "embedding_positive": [
+      {"token_id": 19538, "label": " accused", "score": 22.875},
+      {"token_id": 4818, "label": " saw", "score": 21.5}
+    ],
+    "embedding_negative": [
+      {"token_id": 115269, "label": " InputDecoration", "score": -35.0},
+      {"token_id": 143572, "label": "RegistryLite", "score": -34.25}
+    ],
+    "output_positive_labels": ["tvguidetime", " HasFactory"]
+  },
+  "samples": [
+    {"input_ids": [2, 1860, 783, 4818], "target_position": 3, "target_activation": 11.875, "reference_label": -1, "attention": []},
+    {"input_ids": [2, 1734, 4818], "target_position": 2, "target_activation": 11.375, "reference_label": -1, "attention": []},
+    {"input_ids": [2, 12496, 697, 235317, 235278, 235356, 10835, 10537, 591, 235356, 19709, 783, 4818], "target_position": 12, "target_activation": 10.625, "reference_label": 0, "attention": [{"head": 0, "source_token": 11, "score": 0.6783997416496277}, {"head": 5, "source_token": 11, "score": 0.6378770470619202}]},
+    {"input_ids": [2, 1596, 6572, 671, 19303, 3287, 604, 573, 978, 3311, 2196, 576, 218259, 235301, 78041, 235292, 235284, 235276, 235276, 235274, 9543, 1308, 948, 6246, 674, 573, 121036, 90835, 476, 8773, 23284, 4913, 235269, 2183, 573, 40286, 235269, 575, 3311, 235269, 603, 780, 1382], "target_position": 42, "target_activation": 5.65625, "reference_label": 0, "attention": [{"head": 0, "source_token": 41, "score": 0.5768008828163147}, {"head": 4, "source_token": 41, "score": 0.4945216774940491}]},
+    {"input_ids": [2, 1718, 1249, 614, 1382], "target_position": 4, "target_activation": 5.46875, "reference_label": -1, "attention": []},
+    {"input_ids": [2, 4038, 798, 1492, 2307], "target_position": 4, "target_activation": 5.34375, "reference_label": -1, "attention": []},
+    {"input_ids": [2, 39967, 736, 603, 1508, 2811], "target_position": 5, "target_activation": 5.03125, "reference_label": 0, "attention": [{"head": 4, "source_token": 4, "score": 0.9080231189727783}]},
+    {"input_ids": [2, 1636, 573, 4724, 6187, 665, 603, 2593, 13142], "target_position": 8, "target_activation": 4.96875, "reference_label": 0, "attention": [{"head": 0, "source_token": 7, "score": 0.866356372833252}]},
+    {"input_ids": [2, 886, 2252, 235269, 573, 40286, 603, 1170, 1382], "target_position": 8, "target_activation": 4.90625, "reference_label": 0, "attention": [{"head": 0, "source_token": 7, "score": 0.7586973905563354}]},
+    {"input_ids": [2, 2761, 1370, 12559, 974, 2613, 20627], "target_position": 6, "target_activation": 4.90625, "reference_label": 0, "attention": [{"head": 0, "source_token": 5, "score": 1.2371854782104492}]},
+    {"input_ids": [2, 2079, 731, 573, 3311, 6241, 576, 573, 3782, 235269, 736, 877, 5374, 577, 614, 1382], "target_position": 15, "target_activation": 4.71875, "reference_label": 0, "attention": [{"head": 0, "source_token": 14, "score": 0.8187710642814636}]},
+    {"input_ids": [2, 2169, 21840, 774, 573, 5658, 235349, 235256, 55367, 235269, 974, 576, 573, 17930, 5119, 948, 32987, 24035, 774, 26589, 31518, 603, 573, 2252, 674, 575, 573, 24035, 5566, 1089, 2173, 235290, 32280, 2329, 919, 476, 6239, 42563, 37179, 575, 8336, 6246, 235269, 2183, 736, 603, 793, 5543, 1382], "target_position": 48, "target_activation": 4.65625, "reference_label": 0, "attention": [{"head": 0, "source_token": 47, "score": 0.7159896492958069}, {"head": 4, "source_token": 46, "score": 0.3748765289783478}]}
+  ]
+}
