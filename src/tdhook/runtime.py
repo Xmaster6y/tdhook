@@ -21,6 +21,22 @@ HOOK_DIRECTIONS = frozenset({"fwd", "bwd", "fwd_pre", "bwd_pre", "fwd_kwargs", "
 
 
 @dataclass(frozen=True)
+class CaptureSource:
+    """Reference from an operation to an earlier capture in the program."""
+
+    hook_index: int
+    detach: bool
+
+    def __post_init__(self) -> None:
+        if type(self.hook_index) is not int:
+            raise TypeError("hook_index must be an integer")
+        if self.hook_index < 0:
+            raise ValueError("hook_index must be non-negative")
+        if not isinstance(self.detach, bool):
+            raise TypeError("detach must be a bool")
+
+
+@dataclass(frozen=True)
 class HookSpec:
     """Model-free description of one installed hook operation."""
 
@@ -29,6 +45,7 @@ class HookSpec:
     direction: HookDirection | None
     prepend: bool = False
     target: Target | None = None
+    source: CaptureSource | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.module_path, str):
@@ -43,6 +60,8 @@ class HookSpec:
             raise TypeError("prepend must be a bool")
         if self.target is not None and not isinstance(self.target, Target):
             raise TypeError("target must be a Target")
+        if self.source is not None and not isinstance(self.source, CaptureSource):
+            raise TypeError("source must be a CaptureSource")
 
 
 @dataclass(frozen=True)
@@ -51,6 +70,15 @@ class HookProgram:
 
     hooks: tuple[HookSpec, ...] = ()
     stopped_at: str | None = None
+
+    def __post_init__(self) -> None:
+        for index, spec in enumerate(self.hooks):
+            if spec.source is None:
+                continue
+            if spec.source.hook_index >= index:
+                raise ValueError("capture dependencies must refer to an earlier hook")
+            if self.hooks[spec.source.hook_index].operation != "capture":
+                raise ValueError("capture dependencies must refer to a capture hook")
 
 
 class BoundHookProgram:
@@ -227,6 +255,7 @@ def temporary_module_state(
 
 __all__ = [
     "BoundHookProgram",
+    "CaptureSource",
     "HookProgram",
     "HookProgramBuilder",
     "HookSpec",
