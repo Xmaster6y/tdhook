@@ -23,7 +23,11 @@ def _keys_overlap(left: NestedKey, right: NestedKey) -> bool:
 
 
 class ActivationCachingModule(HookedModule):
-    """A prepared capture method that publishes a stable cache snapshot."""
+    """A prepared capture method that publishes a shallow cache snapshot.
+
+    Tensor leaves retain their native storage. In particular, publishing a
+    caller-owned memory-mapped cache does not materialize its leaves in memory.
+    """
 
     def __init__(self, *args, cache_key: NestedKey | None, **kwargs):
         super().__init__(*args, **kwargs)
@@ -42,7 +46,13 @@ class ActivationCachingModule(HookedModule):
 
 
 class ActivationCaching(HookingContextFactory):
-    """
+    """Cache model activations in a caller-visible TensorDict.
+
+    A locked or memory-mapped ``cache`` must contain every captured key with
+    its final shape, dtype, and device, and must be paired with
+    ``clear_cache=False``. Captures then update that storage in place. TDHook
+    neither creates nor removes caller-owned memory-map paths.
+
     Maximally activating samples :cite:`Chen2020ConceptWF` and attention visualisation :cite:`Abnar2020QuantifyingAF`.
     """
 
@@ -75,6 +85,8 @@ class ActivationCaching(HookingContextFactory):
             raise TypeError("key_pattern must be a module pattern or Target")
         if cache_key is not None and not is_nested_key(cache_key):
             raise TypeError("cache_key must be a TensorDict nested key or None")
+        if cache is not None and cache.is_locked and clear_cache:
+            raise ValueError("locked or memory-mapped caches require clear_cache=False")
         self._hooking_context_kwargs["cache"] = cache
         self._hooking_context_kwargs["clear_cache"] = clear_cache
         self._hooked_module_kwargs["cache_key"] = cache_key

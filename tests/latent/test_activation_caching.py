@@ -2,11 +2,9 @@
 Tests for the activation caching functionality.
 """
 
-import torch
-import shutil
-from pathlib import Path
 import pytest
-from tensordict import TensorDict, MemoryMappedTensor
+import torch
+from tensordict import MemoryMappedTensor, TensorDict
 from tensordict.nn import TensorDictModule
 
 from tdhook.latent.activation_caching import ActivationCaching, ActivationCachingModule
@@ -171,22 +169,47 @@ class TestActivationCaching:
         assert output.device.type == "cpu"
         assert hooked_module.hooking_context.cache["linear2"].device.type == device.type
 
-    def test_memmap_cache(self, default_test_model):
-        """Test creating a ActivationCaching with memmap cache."""
+    @pytest.mark.parametrize("run_in_workflow", [False, True])
+    def test_preallocated_memmap_cache_is_published_without_materializing(
+        self, default_test_model, tmp_path, run_in_workflow
+    ):
+        path = tmp_path / "activation-cache"
+        cache = TensorDict({("fwd", "linear2"): torch.zeros(2, 20)}, batch_size=[]).memmap(path)
+        context = ActivationCaching(
+            "linear2",
+            cache=cache,
+            clear_cache=False,
+            use_nested_keys=True,
+            cache_key=("artifacts", "activations"),
+        )
+        data = TensorDict({"input": torch.randn(2, 10)}, batch_size=[2])
 
-        cache = TensorDict()
-        context = ActivationCaching("linear2", relative=True, cache=cache)
+        if run_in_workflow:
+            from tdhook.workflow import Workflow
 
-        inputs = torch.randn(2, 10)
-        with context.prepare(default_test_model) as hooked_module:
-            hooked_module(inputs)
-        path = "results/tests/test_memmap_cache.pt"
-        memmap_cache = cache.memmap(path, True)
-        assert isinstance(memmap_cache["linear2"], MemoryMappedTensor)
+            result = Workflow(context)(default_test_model, data)
+        else:
+            with context.prepare(default_test_model) as hooked_module:
+                result = hooked_module(data)
 
-        path_obj = Path(path)
-        if path_obj.exists():
-            if path_obj.is_dir():
-                shutil.rmtree(path_obj)
-            else:
-                path_obj.unlink()
+        published = result["artifacts", "activations", "fwd", "linear2"]
+        assert isinstance(published, MemoryMappedTensor)
+        assert published.data_ptr() == cache["fwd", "linear2"].data_ptr()
+        assert torch.count_nonzero(published)
+        reloaded = TensorDict.load_memmap(path)
+        torch.testing.assert_close(reloaded["fwd", "linear2"], published)
+
+    def test_memmap_cache_requires_explicit_lifetime_and_preallocated_keys(self, default_test_model, tmp_path):
+        path = tmp_path / "activation-cache"
+        cache = TensorDict({"other": torch.zeros(2, 20)}, batch_size=[]).memmap(path)
+
+        with pytest.raises(ValueError, match="clear_cache=False"):
+            ActivationCaching("linear2", cache=cache)
+
+        context = ActivationCaching("linear2", cache=cache, clear_cache=False)
+        data = TensorDict({"input": torch.randn(2, 10)}, batch_size=[2])
+        with (
+            context.prepare(default_test_model) as hooked_module,
+            pytest.raises(RuntimeError, match="preallocated entry.*linear2"),
+        ):
+            hooked_module(data)

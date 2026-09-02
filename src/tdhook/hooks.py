@@ -311,7 +311,16 @@ class HookFactory:
                     raise ValueError("Dead reference to cache")
             else:
                 _cache = cache
-            _cache[key] = value
+            if _cache.is_locked:
+                try:
+                    _cache.set_(key, value)
+                except KeyError as error:
+                    raise RuntimeError(
+                        f"Locked caches require a preallocated entry for {key!r}; "
+                        "create every cache key before locking or memory-mapping the TensorDict"
+                    ) from error
+            else:
+                _cache[key] = value
 
         return hook
 
