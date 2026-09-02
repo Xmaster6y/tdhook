@@ -126,7 +126,7 @@ class ActivationCaching(HookingContextFactory):
 
         with HookProgramBuilder() as program:
             if self._target is not None:
-                program.register_path(
+                program.register_target(
                     module,
                     hook_factory(self._target.module_path, "fwd"),
                     HookSpec(self._target.module_path, "capture", "fwd", target=self._target),

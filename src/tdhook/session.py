@@ -19,30 +19,6 @@ HookOperation = Literal["capture", "replace", "stop"]
 
 
 @dataclass
-class _OccurrenceState:
-    target: Target
-    operation: HookOperation
-    calls: int = 0
-
-    def selected(self) -> bool:
-        occurrence = self.target.occurrence
-        selected = occurrence is None or self.calls == occurrence
-        self.calls += 1
-        return selected
-
-    def reset(self) -> None:
-        self.calls = 0
-
-    def validate(self) -> None:
-        occurrence = self.target.occurrence
-        if occurrence is not None and self.calls <= occurrence:
-            raise RuntimeError(
-                f"{self.operation} target {self.target.module_path!r} requested occurrence {occurrence}, "
-                f"but the module was called {self.calls} time(s) in this root-model execution"
-            )
-
-
-@dataclass
 class CapturedTarget:
     """Mutable result populated whenever a capture hook observes its target.
 
@@ -178,19 +154,14 @@ class HookSession:
             captured._record(self._captured_value(target._select(parameter), detach=detach))
             builder.record(spec)
         else:
-            occurrence = _OccurrenceState(target, "capture")
 
             def forward_hook(_module: nn.Module, _args: tuple[object, ...], value: object):
-                if not occurrence.selected():
-                    return
                 captured._record(
                     self._captured_value(target.select_output(value), detach=detach),
                     self._executions["activation"],
                 )
 
             def forward_pre_hook(_module: nn.Module, args: tuple[object, ...]):
-                if not occurrence.selected():
-                    return
                 captured._record(
                     self._captured_value(target.select_output(args), detach=detach),
                     self._executions["activation"],
@@ -201,8 +172,6 @@ class HookSession:
                 args: tuple[object, ...],
                 kwargs: dict[str, object],
             ):
-                if not occurrence.selected():
-                    return
                 captured._record(
                     self._captured_value(target.select_output((args, kwargs)), detach=detach),
                     self._executions["activation"],
@@ -213,16 +182,12 @@ class HookSession:
                 grad_input: tuple[Tensor | None, ...],
                 _grad_output: tuple[Tensor | None, ...],
             ):
-                if not occurrence.selected():
-                    return
                 captured._record(
                     self._captured_value(target.select_output(grad_input), detach=detach),
                     self._executions["gradient"],
                 )
 
             def backward_pre_hook(_module: nn.Module, values: tuple[Tensor | None, ...]):
-                if not occurrence.selected():
-                    return
                 captured._record(
                     self._captured_value(target.select_output(values), detach=detach),
                     self._executions["gradient"],
@@ -238,8 +203,7 @@ class HookSession:
             hook = hooks.get(direction)
             if hook is None:  # pragma: no cover - guarded by _direction
                 raise RuntimeError(f"unsupported capture direction: {direction!r}")
-            builder.register(module, hook, spec)
-            self._track_occurrence(model, builder, target, occurrence)
+            builder.register_target(model, hook, spec)
 
         return captured
 
@@ -290,7 +254,6 @@ class HookSession:
                 raise
             builder.record(spec, lambda: self._restore_live_parameter(target, original))
         else:
-            occurrence = _OccurrenceState(target, "replace")
 
             def replacement_value() -> Tensor | float | int:
                 if source is None:
@@ -302,13 +265,9 @@ class HookSession:
                 return transform(replacement) if transform is not None else replacement
 
             def forward_hook(_module: nn.Module, _args: tuple[object, ...], output: object):
-                if not occurrence.selected():
-                    return None
                 return target.replace_output(output, replacement_value())
 
             def forward_pre_hook(_module: nn.Module, args: tuple[object, ...]):
-                if not occurrence.selected():
-                    return None
                 return target.replace_output(args, replacement_value())
 
             def forward_pre_kwargs_hook(
@@ -316,8 +275,6 @@ class HookSession:
                 args: tuple[object, ...],
                 kwargs: dict[str, object],
             ):
-                if not occurrence.selected():
-                    return None
                 return target.replace_output((args, kwargs), replacement_value())
 
             def backward_hook(
@@ -325,13 +282,9 @@ class HookSession:
                 grad_input: tuple[Tensor | None, ...],
                 _grad_output: tuple[Tensor | None, ...],
             ):
-                if not occurrence.selected():
-                    return None
                 return target.replace_output(grad_input, replacement_value())
 
             def backward_pre_hook(_module: nn.Module, values: tuple[Tensor | None, ...]):
-                if not occurrence.selected():
-                    return None
                 return target.replace_output(values, replacement_value())
 
             hooks = {
@@ -344,31 +297,7 @@ class HookSession:
             hook = hooks.get(direction)
             if hook is None:  # pragma: no cover - guarded by _direction
                 raise RuntimeError(f"unsupported replacement direction: {direction!r}")
-            builder.register(module, hook, spec)
-            self._track_occurrence(model, builder, target, occurrence)
-
-    @staticmethod
-    def _track_occurrence(
-        model: nn.Module,
-        builder: HookProgramBuilder,
-        target: Target,
-        state: _OccurrenceState,
-    ) -> None:
-        if target.occurrence is None:
-            return
-        begin_direction: HookDirection = "fwd_pre" if target.kind == "activation" else "bwd_pre"
-        end_direction: HookDirection = "fwd" if target.kind == "activation" else "bwd"
-
-        def begin_execution(_module: nn.Module, _values: object) -> None:
-            state.reset()
-
-        def end_execution(_module: nn.Module, _args: object, _output: object) -> None:
-            state.validate()
-
-        begin_handle = register_hook_to_module(model, begin_execution, begin_direction, prepend=True)
-        builder.add_cleanup(begin_handle.remove)
-        end_handle = register_hook_to_module(model, end_execution, end_direction)
-        builder.add_cleanup(end_handle.remove)
+            builder.register_target(model, hook, spec)
 
     def _validate_live_source(
         self,

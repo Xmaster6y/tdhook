@@ -61,6 +61,23 @@ class TestActivationCaching:
             (HookSpec("linear2", "capture", "fwd", target=target),)
         )
 
+    def test_target_occurrence_selects_one_repeated_module_call(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.shared = torch.nn.Identity()
+
+            def forward(self, value):
+                return self.shared(value + 1) + self.shared(value + 2)
+
+        target = Target("shared", "activation", -1, (0,), occurrence=0)
+        data = TensorDict({"input": torch.tensor([[1.0, 2.0]])}, batch_size=[1])
+
+        with ActivationCaching(target).prepare(Model()) as prepared:
+            result = prepared(data)
+
+        torch.testing.assert_close(result["cache", "shared"], torch.tensor([[2.0]]))
+
     def test_target_uses_the_shared_module_path_grammar(self):
         class Model(torch.nn.Module):
             def __init__(self):

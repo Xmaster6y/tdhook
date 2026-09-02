@@ -90,16 +90,14 @@ class ActivationPatching(HookingContextFactory):
                         output = self._cache_callback(**kwargs)
                     return _selected_output(output, _target)
 
-                program.register_path(
-                    module,
-                    HookFactory.make_caching_hook(
-                        module_key,
-                        cache_ref,
-                        callback=capture_callback if target is not None else self._cache_callback,
-                    ),
-                    HookSpec(module_key, "capture", "fwd", target=target),
-                    relative_path=module.relative_path,
+                capture_hook = HookFactory.make_caching_hook(
+                    module_key,
+                    cache_ref,
+                    callback=capture_callback if target is not None else self._cache_callback,
                 )
+                capture_spec = HookSpec(module_key, "capture", "fwd", target=target)
+                register = program.register_path if target is None else program.register_target
+                register(module, capture_hook, capture_spec, relative_path=module.relative_path)
 
                 def callback(*, _module_key=module_key, _target=target, **kwargs):
                     value = kwargs["value"]
@@ -118,10 +116,7 @@ class ActivationPatching(HookingContextFactory):
                         replacement = value
                     return _replace_selected_output(output, replacement, _target)
 
-                program.register_path(
-                    module,
-                    HookFactory.make_setting_hook(proxy, callback=callback),
-                    HookSpec(module_key, "replace", "fwd", prepend=True, target=target),
-                    relative_path=module.relative_path,
-                )
+                replace_hook = HookFactory.make_setting_hook(proxy, callback=callback)
+                replace_spec = HookSpec(module_key, "replace", "fwd", prepend=True, target=target)
+                register(module, replace_hook, replace_spec, relative_path=module.relative_path)
             return program.build()

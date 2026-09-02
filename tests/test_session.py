@@ -691,9 +691,15 @@ def test_session_selects_repeated_gradient_occurrence():
         def __init__(self):
             super().__init__()
             self.shared = nn.Identity()
+            self.branch_inputs = ()
 
         def forward(self, x):
-            return self.shared(x * 2) + self.shared(x * 3)
+            first_input = x * 2
+            second_input = x * 3
+            first_input.retain_grad()
+            second_input.retain_grad()
+            self.branch_inputs = (first_input, second_input)
+            return self.shared(first_input) + self.shared(second_input)
 
     model = RepeatedModule()
     target = Target("shared", "gradient", -1, (0,), occurrence=1)
@@ -706,7 +712,14 @@ def test_session_selects_repeated_gradient_occurrence():
 
     assert len(captured.values) == 1
     assert torch.equal(captured.value, torch.ones(1, 1))
-    assert torch.equal(x.grad, torch.tensor([[3.0, 5.0]]))
+    assert len(model.branch_inputs) == 2
+    branch_gradients = [branch_input.grad for branch_input in model.branch_inputs]
+    assert all(gradient is not None for gradient in branch_gradients)
+    assert sorted(gradient[0, 0].item() for gradient in branch_gradients) == [0.0, 1.0]
+    assert all(gradient[0, 1].item() == 1.0 for gradient in branch_gradients)
+    assert x.grad is not None
+    assert x.grad[0, 0].item() in {2.0, 3.0}
+    assert x.grad[0, 1].item() == 5.0
 
 
 @pytest.mark.parametrize("operation", ["capture", "replace"])

@@ -50,12 +50,10 @@ class SteeringVectors(HookingContextFactory):
                     replacement = self._steer_fn(module_key=_module_key, output=_selected_output(output, _target))
                     return _replace_selected_output(output, replacement, _target)
 
-                program.register_path(
-                    module,
-                    HookFactory.make_setting_hook(None, callback=callback),
-                    HookSpec(module_key, "replace", "fwd", target=target),
-                    relative_path=module.relative_path,
-                )
+                hook = HookFactory.make_setting_hook(None, callback=callback)
+                spec = HookSpec(module_key, "replace", "fwd", target=target)
+                register = program.register_path if target is None else program.register_target
+                register(module, hook, spec, relative_path=module.relative_path)
             return program.build()
 
 
@@ -140,16 +138,14 @@ class ActivationAddition(HookingContextFactory):
                         output = self._cache_callback(**kwargs)
                     return _selected_output(output, _target)
 
-                program.register_path(
-                    module,
-                    HookFactory.make_caching_hook(
-                        module_key,
-                        cache_ref,
-                        callback=capture_callback if target is not None else self._cache_callback,
-                    ),
-                    HookSpec(module_key, "capture", "fwd", target=target),
-                    relative_path=module.relative_path,
+                hook = HookFactory.make_caching_hook(
+                    module_key,
+                    cache_ref,
+                    callback=capture_callback if target is not None else self._cache_callback,
                 )
+                spec = HookSpec(module_key, "capture", "fwd", target=target)
+                register = program.register_path if target is None else program.register_target
+                register(module, hook, spec, relative_path=module.relative_path)
             return program.build()
 
     def _compute_steering_vectors(self, td: TensorDict) -> TensorDict:
