@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Literal, Self
 import weakref
@@ -9,8 +10,8 @@ import weakref
 import torch
 from torch import Tensor, nn
 
-from tdhook.hooks import EarlyStoppingException, HookDirection
-from tdhook.runtime import HookProgram, HookProgramBuilder, HookSpec
+from tdhook.hooks import EarlyStoppingException, HookDirection, register_hook_to_module
+from tdhook.runtime import CaptureSource, HookProgram, HookProgramBuilder, HookSpec
 from tdhook.targets import OutputPathComponent, Target
 
 
@@ -28,10 +29,16 @@ class CapturedTarget:
 
     value: Tensor | None = None
     values: list[Tensor] = field(default_factory=list)
+    _target: Target | None = field(default=None, repr=False, compare=False)
+    _session_token: object | None = field(default=None, repr=False, compare=False)
+    _hook_index: int | None = field(default=None, repr=False, compare=False)
+    _detach: bool = field(default=True, repr=False, compare=False)
+    _execution: int | None = field(default=None, repr=False, compare=False)
 
-    def _record(self, value: Tensor) -> None:
+    def _record(self, value: Tensor, execution: int | None = None) -> None:
         self.value = value
         self.values.append(value)
+        self._execution = execution
 
 
 @dataclass
@@ -63,6 +70,9 @@ class HookSession:
         self._builder: HookProgramBuilder | None = None
         self._program = HookProgram()
         self._stop_exception: EarlyStoppingException | None = None
+        self._session_token: object | None = None
+        self._executions = {"activation": 0, "gradient": 0}
+        self._tracked_executions: set[str] = set()
 
     @property
     def program(self) -> HookProgram:
@@ -76,6 +86,9 @@ class HookSession:
         self._model()
         self._program = HookProgram()
         self._stop_exception = None
+        self._session_token = object()
+        self._executions = {"activation": 0, "gradient": 0}
+        self._tracked_executions.clear()
         self._builder = HookProgramBuilder()
         return self
 
@@ -91,6 +104,7 @@ class HookSession:
             bound.remove()
         finally:
             self._stop_exception = None
+            self._session_token = None
         return suppress_stop
 
     def capture(
@@ -116,9 +130,17 @@ class HookSession:
         model, builder = self._active_state()
         module = target.validate(model)
         self._validate_stop_compatibility(builder, target)
-        captured = CapturedTarget()
+        if not isinstance(detach, bool):
+            raise TypeError("detach must be a bool")
         direction = self._direction(target, direction)
         spec = HookSpec(target.module_path, "capture", direction, prepend, target)
+        hook_index = len(builder.program.hooks)
+        captured = CapturedTarget(
+            _target=target,
+            _session_token=self._session_token,
+            _hook_index=hook_index,
+            _detach=detach,
+        )
 
         if target.kind == "parameter":
             parameter = module.get_parameter(target.parameter)  # type: ignore[arg-type]
@@ -127,27 +149,42 @@ class HookSession:
         else:
 
             def forward_hook(_module: nn.Module, _args: tuple[object, ...], value: object):
-                captured._record(self._captured_value(target.select_output(value), detach=detach))
+                captured._record(
+                    self._captured_value(target.select_output(value), detach=detach),
+                    self._executions["activation"],
+                )
 
             def forward_pre_hook(_module: nn.Module, args: tuple[object, ...]):
-                captured._record(self._captured_value(target.select_output(args), detach=detach))
+                captured._record(
+                    self._captured_value(target.select_output(args), detach=detach),
+                    self._executions["activation"],
+                )
 
             def forward_pre_kwargs_hook(
                 _module: nn.Module,
                 args: tuple[object, ...],
                 kwargs: dict[str, object],
             ):
-                captured._record(self._captured_value(target.select_output((args, kwargs)), detach=detach))
+                captured._record(
+                    self._captured_value(target.select_output((args, kwargs)), detach=detach),
+                    self._executions["activation"],
+                )
 
             def backward_hook(
                 _module: nn.Module,
                 grad_input: tuple[Tensor | None, ...],
                 _grad_output: tuple[Tensor | None, ...],
             ):
-                captured._record(self._captured_value(target.select_output(grad_input), detach=detach))
+                captured._record(
+                    self._captured_value(target.select_output(grad_input), detach=detach),
+                    self._executions["gradient"],
+                )
 
             def backward_pre_hook(_module: nn.Module, values: tuple[Tensor | None, ...]):
-                captured._record(self._captured_value(target.select_output(values), detach=detach))
+                captured._record(
+                    self._captured_value(target.select_output(values), detach=detach),
+                    self._executions["gradient"],
+                )
 
             hooks = {
                 "fwd": forward_hook,
@@ -170,21 +207,32 @@ class HookSession:
     def replace(
         self,
         target: Target,
-        value: Tensor | float | int,
+        value: Tensor | float | int | CapturedTarget,
         *,
         direction: HookDirection | None = None,
         prepend: bool = False,
+        transform: Callable[[Tensor], Tensor | float | int] | None = None,
     ) -> None:
         """Replace ``target`` until the session exits.
 
         Hook directions have the same target semantics as :meth:`capture`.
+        Pass a :class:`CapturedTarget` from this session to route each newly
+        observed live value to a later compatible target in the same model
+        execution. ``transform`` is applied to that value immediately before
+        replacement. Whether the routed value retains its graph is controlled
+        by the source capture's ``detach`` argument.
         """
 
         model, builder = self._active_state()
         module = target.validate(model)
         self._validate_stop_compatibility(builder, target)
         direction = self._direction(target, direction)
-        spec = HookSpec(target.module_path, "replace", direction, prepend, target)
+        source = self._validate_live_source(target, value, transform)
+        source_spec = None
+        if source is not None:
+            self._ensure_execution_tracking(model, builder, target.kind)
+            source_spec = CaptureSource(source._hook_index, source._detach)  # type: ignore[arg-type]
+        spec = HookSpec(target.module_path, "replace", direction, prepend, target, source_spec)
 
         if target.kind == "parameter":
             parameter = module.get_parameter(target.parameter)  # type: ignore[arg-type]
@@ -198,28 +246,37 @@ class HookSession:
             builder.record(spec, lambda: self._restore_live_parameter(target, original))
         else:
 
+            def replacement_value() -> Tensor | float | int:
+                if source is None:
+                    return value  # type: ignore[return-value]
+                execution = self._executions[target.kind]
+                if execution == 0 or source.value is None or source._execution != execution:
+                    raise RuntimeError("live replacement reached its target before a fresh source capture")
+                replacement = source.value
+                return transform(replacement) if transform is not None else replacement
+
             def forward_hook(_module: nn.Module, _args: tuple[object, ...], output: object):
-                return target.replace_output(output, value)
+                return target.replace_output(output, replacement_value())
 
             def forward_pre_hook(_module: nn.Module, args: tuple[object, ...]):
-                return target.replace_output(args, value)
+                return target.replace_output(args, replacement_value())
 
             def forward_pre_kwargs_hook(
                 _module: nn.Module,
                 args: tuple[object, ...],
                 kwargs: dict[str, object],
             ):
-                return target.replace_output((args, kwargs), value)
+                return target.replace_output((args, kwargs), replacement_value())
 
             def backward_hook(
                 _module: nn.Module,
                 grad_input: tuple[Tensor | None, ...],
                 _grad_output: tuple[Tensor | None, ...],
             ):
-                return target.replace_output(grad_input, value)
+                return target.replace_output(grad_input, replacement_value())
 
             def backward_pre_hook(_module: nn.Module, values: tuple[Tensor | None, ...]):
-                return target.replace_output(values, value)
+                return target.replace_output(values, replacement_value())
 
             hooks = {
                 "fwd": forward_hook,
@@ -232,6 +289,45 @@ class HookSession:
             if hook is None:  # pragma: no cover - guarded by _direction
                 raise RuntimeError(f"unsupported replacement direction: {direction!r}")
             builder.register(module, hook, spec)
+
+    def _validate_live_source(
+        self,
+        target: Target,
+        value: Tensor | float | int | CapturedTarget,
+        transform: Callable[[Tensor], Tensor | float | int] | None,
+    ) -> CapturedTarget | None:
+        if not isinstance(value, CapturedTarget):
+            if transform is not None:
+                raise ValueError("transform is only valid for a live CapturedTarget replacement")
+            return None
+        if value._session_token is None or value._session_token is not self._session_token:
+            raise ValueError("live replacements require a capture from the same active HookSession")
+        if value._target is None or value._hook_index is None:
+            raise ValueError("live replacements require a capture created by HookSession.capture")
+        if target.kind == "parameter" or value._target.kind not in {"activation", "gradient"}:
+            raise ValueError("live replacements support only activation or gradient targets")
+        if value._target.kind != target.kind:
+            raise ValueError("live capture and replacement targets must have the same kind")
+        if transform is not None and not callable(transform):
+            raise TypeError("transform must be callable")
+        return value
+
+    def _ensure_execution_tracking(
+        self,
+        model: nn.Module,
+        builder: HookProgramBuilder,
+        kind: str,
+    ) -> None:
+        if kind in self._tracked_executions:
+            return
+        direction: HookDirection = "fwd_pre" if kind == "activation" else "bwd_pre"
+
+        def begin_execution(_module: nn.Module, _values: object) -> None:
+            self._executions[kind] += 1
+
+        handle = register_hook_to_module(model, begin_execution, direction, prepend=True)
+        builder.add_cleanup(handle.remove)
+        self._tracked_executions.add(kind)
 
     def stop(self, module_path: str, *, prepend: bool = False) -> EarlyStopResult:
         """Stop forward execution after ``module_path`` produces its output.
@@ -325,4 +421,12 @@ class HookSession:
         return Target._replace_output_tensor(value, path, replacement)
 
 
-__all__ = ["CapturedTarget", "EarlyStopResult", "HookOperation", "HookProgram", "HookSession", "HookSpec"]
+__all__ = [
+    "CapturedTarget",
+    "CaptureSource",
+    "EarlyStopResult",
+    "HookOperation",
+    "HookProgram",
+    "HookSession",
+    "HookSpec",
+]

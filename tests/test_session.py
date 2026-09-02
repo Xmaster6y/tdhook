@@ -6,7 +6,7 @@ import torch
 from tensordict import TensorDict
 from torch import nn
 
-from tdhook.session import EarlyStopResult, HookProgram, HookSession, HookSpec
+from tdhook.session import CapturedTarget, CaptureSource, EarlyStopResult, HookProgram, HookSession, HookSpec
 from tdhook.targets import Target
 
 
@@ -46,6 +46,169 @@ def test_session_preserves_repeated_captures_in_call_order(default_test_model):
     assert len(captured.values) == 2
     assert captured.value is captured.values[-1]
     assert not torch.equal(captured.values[0], captured.values[1])
+
+
+def test_session_routes_each_live_capture_to_a_later_target():
+    model = nn.Sequential(nn.Identity(), nn.Identity())
+    source = Target("0", "activation", -1, (0,))
+    destination = Target("1", "activation", -1, (2,))
+    inputs = (torch.tensor([[2.0, 3.0, 4.0]]), torch.tensor([[5.0, 6.0, 7.0]]))
+
+    with HookSession(model) as session:
+        captured = session.capture(source)
+        session.replace(destination, captured, direction="fwd_pre", transform=lambda value: value * 10)
+        outputs = tuple(model(value) for value in inputs)
+
+    assert torch.equal(outputs[0], torch.tensor([[2.0, 3.0, 20.0]]))
+    assert torch.equal(outputs[1], torch.tensor([[5.0, 6.0, 50.0]]))
+    assert session.program == HookProgram(
+        (
+            HookSpec("0", "capture", "fwd", target=source),
+            HookSpec(
+                "1",
+                "replace",
+                "fwd_pre",
+                target=destination,
+                source=CaptureSource(hook_index=0, detach=True),
+            ),
+        )
+    )
+    assert not model[0]._forward_hooks
+    assert not model[1]._forward_pre_hooks
+
+
+@pytest.mark.parametrize(
+    "detach,expected",
+    [(True, torch.tensor([[0.0, 0.0, 0.0]])), (False, torch.tensor([[1.0, 0.0, 0.0]]))],
+)
+def test_session_live_replacement_makes_graph_retention_explicit(detach, expected):
+    model = nn.Sequential(nn.Identity(), nn.Identity())
+    source = Target("0", "activation", -1, (0,))
+    destination = Target("1", "activation", -1, (2,))
+    value = torch.tensor([[2.0, 3.0, 4.0]], requires_grad=True)
+
+    with HookSession(model) as session:
+        captured = session.capture(source, detach=detach)
+        session.replace(destination, captured, direction="fwd_pre")
+        model(value)[:, 2].sum().backward()
+
+    assert value.grad is not None
+    assert torch.equal(value.grad, expected)
+    assert session.program.hooks[1].source == CaptureSource(hook_index=0, detach=detach)
+
+
+def test_session_routes_a_live_gradient_to_a_later_backward_target():
+    model = nn.Sequential(nn.Identity(), nn.Identity())
+    source = Target("1", "gradient", -1, (0,))
+    destination = Target("0", "gradient", -1, (2,))
+    value = torch.ones(1, 3, requires_grad=True)
+
+    with HookSession(model) as session:
+        captured = session.capture(source, direction="bwd_pre")
+        session.replace(destination, captured, direction="bwd_pre", transform=lambda gradient: gradient * 4)
+        model(value).sum().backward()
+
+    assert captured.value is not None
+    assert torch.equal(value.grad, torch.tensor([[1.0, 1.0, 4.0]]))
+
+
+def test_session_rejects_stale_or_incompatible_live_captures():
+    class ReorderableModel(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.source = nn.Identity()
+            self.destination = nn.Identity()
+            self.reverse = False
+
+        def forward(self, value):
+            if self.reverse:
+                return self.source(self.destination(value))
+            return self.destination(self.source(value))
+
+    model = ReorderableModel()
+    source = Target("source", "activation", -1, (0,))
+    destination = Target("destination", "activation", -1, (1,))
+
+    with pytest.raises(RuntimeError, match="fresh source capture"):
+        with HookSession(model) as session:
+            captured = session.capture(source)
+            session.replace(destination, captured)
+            model(torch.ones(1, 2))
+            model.reverse = True
+            model(torch.ones(1, 2))
+
+    assert not model.source._forward_hooks
+    assert not model.destination._forward_hooks
+
+    gradient = Target("source", "gradient", -1, (0,))
+    with HookSession(model) as session:
+        captured = session.capture(source)
+        with pytest.raises(ValueError, match="same kind"):
+            session.replace(gradient, captured)
+        with pytest.raises(ValueError, match="only valid for a live"):
+            session.replace(destination, 0, transform=lambda value: value)
+
+    with HookSession(model) as session:
+        with pytest.raises(ValueError, match="same active HookSession"):
+            session.replace(destination, captured)
+
+
+def test_session_rejects_an_unconsumed_capture_from_an_earlier_execution():
+    class ConditionalModel(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.source = nn.Identity()
+            self.destination = nn.Identity()
+            self.use_source = True
+
+        def forward(self, value):
+            if self.use_source:
+                return self.source(value)
+            return self.destination(value)
+
+    model = ConditionalModel()
+    source = Target("source", "activation", -1, (0,))
+    destination = Target("destination", "activation", -1, (1,))
+
+    with pytest.raises(RuntimeError, match="fresh source capture"):
+        with HookSession(model) as session:
+            captured = session.capture(source)
+            session.replace(destination, captured)
+            model(torch.ones(1, 2))
+            model.use_source = False
+            model(torch.ones(1, 2))
+
+    assert not model._forward_pre_hooks
+    assert not model.source._forward_hooks
+    assert not model.destination._forward_hooks
+
+
+def test_session_validates_live_capture_options():
+    model = nn.Identity()
+    activation = Target("", "activation", -1, (0,))
+    parameter_model = nn.Linear(2, 2)
+    parameter = Target("", "parameter", 0, (0,), parameter="weight")
+
+    with HookSession(model) as session:
+        with pytest.raises(TypeError, match="detach must be a bool"):
+            session.capture(activation, detach=1)
+        forged = CapturedTarget(_session_token=session._session_token)
+        with pytest.raises(ValueError, match="created by HookSession.capture"):
+            session.replace(activation, forged)
+        captured = session.capture(activation)
+        with pytest.raises(TypeError, match="transform must be callable"):
+            session.replace(activation, captured, transform=1)
+        session.replace(activation, captured)
+        session.replace(activation, captured)
+        assert torch.equal(model(torch.ones(1)), torch.ones(1))
+
+    assert not model._forward_pre_hooks
+    assert not model._forward_hooks
+
+    with HookSession(parameter_model) as session:
+        captured = session.capture(parameter)
+        with pytest.raises(ValueError, match="only activation or gradient"):
+            session.replace(parameter, captured)
 
 
 def test_session_preserves_single_tensor_tuple_output():

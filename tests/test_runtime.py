@@ -3,7 +3,7 @@ import torch
 from torch import nn
 
 from tdhook.latent import ActivationCaching
-from tdhook.runtime import HookProgram, HookProgramBuilder, HookSpec, temporary_module_state
+from tdhook.runtime import CaptureSource, HookProgram, HookProgramBuilder, HookSpec, temporary_module_state
 from tdhook.session import HookSession
 from tdhook.targets import Target
 
@@ -94,6 +94,23 @@ def test_program_builder_rejects_invalid_specs_and_reuse():
         HookSpec("", "capture", "fwd", prepend=1)
     with pytest.raises(TypeError, match="target"):
         HookSpec("", "capture", "fwd", target=object())
+    with pytest.raises(TypeError, match="source"):
+        HookSpec("", "replace", "fwd", source=object())
+    with pytest.raises(TypeError, match="hook_index"):
+        CaptureSource(True, detach=True)
+    with pytest.raises(ValueError, match="hook_index"):
+        CaptureSource(-1, detach=True)
+    with pytest.raises(TypeError, match="detach"):
+        CaptureSource(0, detach=1)
+    with pytest.raises(ValueError, match="earlier hook"):
+        HookProgram((HookSpec("", "replace", "fwd", source=CaptureSource(0, detach=True)),))
+    with pytest.raises(ValueError, match="capture hook"):
+        HookProgram(
+            (
+                HookSpec("", "observe", "fwd"),
+                HookSpec("", "replace", "fwd", source=CaptureSource(0, detach=True)),
+            )
+        )
 
     builder = HookProgramBuilder()
     with pytest.raises(ValueError, match="require a direction"):
@@ -110,6 +127,8 @@ def test_program_builder_rejects_invalid_specs_and_reuse():
     builder = HookProgramBuilder()
     with pytest.raises(TypeError, match="cleanup"):
         builder.record(HookSpec("", "capture", None), cleanup=1)
+    with pytest.raises(TypeError, match="cleanup"):
+        builder.add_cleanup(1)
 
     builder = HookProgramBuilder()
     with pytest.raises(TypeError, match="module_path"):
