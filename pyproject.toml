@@ -35,6 +35,9 @@ circuit-lens = [
     "circuit-tracer>=0.5.0",
     "transformer-lens>=2.16.0",
 ]
+circuit-clustering = [
+    "scikit-learn>=1.7.1",
+]
 
 [dependency-groups]
 dev = [

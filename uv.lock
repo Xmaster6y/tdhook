@@ -3646,6 +3646,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+circuit-clustering = [
+    { name = "scikit-learn" },
+]
 circuit-lens = [
     { name = "circuit-tracer" },
     { name = "transformer-lens" },
@@ -3705,11 +3708,12 @@ scripts = [
 [package.metadata]
 requires-dist = [
     { name = "circuit-tracer", marker = "extra == 'circuit-lens'", specifier = ">=0.5.0" },
+    { name = "scikit-learn", marker = "extra == 'circuit-clustering'", specifier = ">=1.7.1" },
     { name = "tensordict", specifier = ">=0.10" },
     { name = "torch", specifier = ">=2.7.1" },
     { name = "transformer-lens", marker = "extra == 'circuit-lens'", specifier = ">=2.16.0" },
 ]
-provides-extras = ["circuit-lens"]
+provides-extras = ["circuit-lens", "circuit-clustering"]
 
 [package.metadata.requires-dev]
 dev = [
