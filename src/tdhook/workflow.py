@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Callable, Generator, Mapping, Protocol, Sequence, runtime_checkable
 
 import torch
+import torch.distributed as dist
 from tensordict import TensorDictBase
 from tensordict.nn import TensorDictModuleBase
 from tensordict.utils import NestedKey
@@ -42,6 +43,10 @@ class WorkflowUpdate:
 
 class WorkflowHandoffError(RuntimeError):
     """A workflow cannot safely preserve a process-handoff artifact."""
+
+
+class WorkflowArtifactError(RuntimeError):
+    """A TensorDict does not satisfy a distributed workflow artifact contract."""
 
 
 WorkflowStep = WorkflowMethod | TensorDictModuleBase | WorkflowUpdate
@@ -152,6 +157,134 @@ def _artifact_leaf_items(data: TensorDictBase):
 
 def _artifact_leaf_keys(data: TensorDictBase) -> frozenset[NestedKey]:
     return frozenset(key for key, _ in _artifact_leaf_items(data))
+
+
+@dataclass(frozen=True)
+class WorkflowArtifactTensorSpec:
+    """Expected metadata for one tensor in a distributed workflow artifact."""
+
+    key: NestedKey
+    shape: torch.Size
+    dtype: torch.dtype
+    device: torch.device
+
+
+@dataclass(frozen=True)
+class WorkflowArtifactSchema:
+    """Validate the fixed layout used by TensorDict-native distributed transport.
+
+    Create the same schema on sending and receiving ranks. Leaf order is part of
+    the contract because :meth:`TensorDictBase.send` and
+    :meth:`TensorDictBase.recv` assign communication tags in traversal order.
+    """
+
+    tensors: tuple[WorkflowArtifactTensorSpec, ...]
+    batch_size: torch.Size
+    device: torch.device | None
+
+    @classmethod
+    def from_tensordict(cls, data: TensorDictBase) -> "WorkflowArtifactSchema":
+        """Capture keys, shapes, dtypes, and devices from a TensorDict template."""
+
+        if not isinstance(data, TensorDictBase):
+            raise TypeError(f"Workflow artifact must be a TensorDict, got {type(data).__name__}")
+        tensors = []
+        for key, value in _artifact_leaf_items(data):
+            if not isinstance(value, Tensor):
+                raise WorkflowArtifactError(
+                    f"Workflow artifact key {key!r} must contain a Tensor, got {type(value).__name__}"
+                )
+            tensors.append(WorkflowArtifactTensorSpec(key, value.shape, value.dtype, value.device))
+        return cls(tuple(tensors), data.batch_size, data.device)
+
+    @property
+    def keys(self) -> tuple[NestedKey, ...]:
+        """Return the ordered tensor keys required by the transport."""
+
+        return tuple(tensor.key for tensor in self.tensors)
+
+    def validate(self, data: TensorDictBase) -> None:
+        """Fail before use when an artifact differs from this schema."""
+
+        if not isinstance(data, TensorDictBase):
+            raise TypeError(f"Workflow artifact must be a TensorDict, got {type(data).__name__}")
+        if data.batch_size != self.batch_size:
+            raise WorkflowArtifactError(
+                f"Workflow artifact batch size is {data.batch_size}, expected {self.batch_size}"
+            )
+        if data.device != self.device:
+            raise WorkflowArtifactError(f"Workflow artifact device is {data.device}, expected {self.device}")
+
+        items = tuple(_artifact_leaf_items(data))
+        keys = tuple(key for key, _ in items)
+        if keys != self.keys:
+            raise WorkflowArtifactError(f"Workflow artifact keys are {keys!r}, expected {self.keys!r}")
+        for expected, (key, value) in zip(self.tensors, items, strict=True):
+            if not isinstance(value, Tensor):
+                raise WorkflowArtifactError(
+                    f"Workflow artifact key {key!r} must contain a Tensor, got {type(value).__name__}"
+                )
+            if value.shape != expected.shape:
+                raise WorkflowArtifactError(
+                    f"Workflow artifact key {key!r} shape is {value.shape}, expected {expected.shape}"
+                )
+            if value.dtype != expected.dtype:
+                raise WorkflowArtifactError(
+                    f"Workflow artifact key {key!r} dtype is {value.dtype}, expected {expected.dtype}"
+                )
+            if value.device != expected.device:
+                raise WorkflowArtifactError(
+                    f"Workflow artifact key {key!r} device is {value.device}, expected {expected.device}"
+                )
+            if value.requires_grad:
+                raise WorkflowArtifactError(
+                    f"Workflow artifact key {key!r} requires gradients; detach it before transport"
+                )
+
+
+def _validate_distributed_artifact(data: TensorDictBase, schema: WorkflowArtifactSchema) -> None:
+    if not dist.is_available() or not dist.is_initialized():
+        raise WorkflowArtifactError("An externally managed torch.distributed process group must be initialized")
+    if not data.is_consolidated():
+        raise WorkflowArtifactError("Distributed workflow artifacts must use consolidated TensorDict storage")
+    schema.validate(data)
+
+
+def send_workflow_artifact(
+    data: TensorDictBase,
+    dst: int,
+    *,
+    schema: WorkflowArtifactSchema,
+    group: dist.ProcessGroup | None = None,
+    init_tag: int = 0,
+) -> None:
+    """Send only a validated, consolidated TensorDict through an existing group.
+
+    Process-group lifecycle, workflow execution, models, and hook sessions remain
+    local to the caller. Tensor values are transferred with TensorDict's native
+    point-to-point transport.
+    """
+
+    _validate_distributed_artifact(data, schema)
+    data.send(dst, group=group, init_tag=init_tag)
+
+
+def receive_workflow_artifact(
+    data: TensorDictBase,
+    src: int,
+    *,
+    schema: WorkflowArtifactSchema,
+    group: dist.ProcessGroup | None = None,
+    init_tag: int = 0,
+) -> TensorDictBase:
+    """Receive tensor values into a validated, preallocated artifact template."""
+
+    _validate_distributed_artifact(data, schema)
+    data.recv(src, group=group, init_tag=init_tag)
+    schema.validate(data)
+    if not data.is_consolidated():
+        raise WorkflowArtifactError("TensorDict transport changed consolidated artifact storage")
+    return data
 
 
 @dataclass(frozen=True)
@@ -789,6 +922,9 @@ __all__ = [
     "CompatibilityDecision",
     "MethodBinding",
     "PlannedExecution",
+    "WorkflowArtifactError",
+    "WorkflowArtifactSchema",
+    "WorkflowArtifactTensorSpec",
     "Workflow",
     "WorkflowHandoffError",
     "WorkflowMethod",
@@ -796,4 +932,6 @@ __all__ = [
     "WorkflowResult",
     "WorkflowSession",
     "WorkflowUpdate",
+    "receive_workflow_artifact",
+    "send_workflow_artifact",
 ]
