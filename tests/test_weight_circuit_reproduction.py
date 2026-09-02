@@ -21,7 +21,7 @@ def test_reproduction_is_linked_and_declares_its_resource_boundary():
     assert "notebooks/tutorials/weight-circuit-research-reproduction" in tutorials
     assert notebook.metadata["tdhook"] == {
         "ci": False,
-        "estimated_download_gb": 12,
+        "estimated_download_gb": 20,
         "estimated_vram_gb": 16,
         "network": True,
         "runtime": "cuda",
@@ -42,6 +42,8 @@ def test_reproduction_uses_public_tdhook_apis_and_all_code_cells_parse():
         assert public_api in code
     assert "--with jupyterlab" in "\n".join(cell.source for cell in notebook.cells if cell.cell_type == "markdown")
     assert str(REFERENCE.relative_to(REPO_ROOT)) in code
+    assert "AutoTokenizer.from_pretrained(model_snapshot)" in code
+    assert "tokenizer=tokenizer" in code
     for cell in notebook.cells:
         if cell.cell_type == "code":
             compile(cell.source, str(NOTEBOOK), "exec")
