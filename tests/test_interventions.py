@@ -196,7 +196,7 @@ def test_model_and_probe_state_are_restored_after_success_and_failure():
     assert not model.first._forward_hooks
 
 
-def test_seeded_optimization_is_deterministic_without_advancing_caller_rng():
+def test_seeded_optimization_is_deterministic_without_advancing_caller_rng(monkeypatch):
     model = nn.Sequential(nn.Dropout(0.5), nn.Identity())
     target = Target("1", "activation", -1, (0,))
     spec = InterventionSpec(
@@ -207,6 +207,11 @@ def test_seeded_optimization_is_deterministic_without_advancing_caller_rng():
     )
     inputs = torch.ones(2, 2)
     rng_state = torch.random.get_rng_state()
+
+    def reject_global_seed(_seed):
+        raise AssertionError("optimization must not seed unrelated accelerator generators")
+
+    monkeypatch.setattr(torch, "manual_seed", reject_global_seed)
 
     first = optimize_intervention(model, (inputs,), spec, seed=7)
     second = optimize_intervention(model, (inputs,), spec, seed=7)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Mapping, MutableMapping, Sequence
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from copy import copy
 from dataclasses import dataclass, field
 from hashlib import sha256
@@ -258,10 +258,10 @@ def optimize_interventions(
     with (
         _preserve_modules(protected_modules),
         _preserve_tensor_gradients(input_tensors),
-        torch.random.fork_rng(devices=_cuda_devices(protected_modules, input_tensors)),
+        _preserve_rng(protected_modules, input_tensors) as accelerator_devices,
     ):
         if seed is not None:
-            torch.manual_seed(seed)
+            _seed_rng(seed, accelerator_devices)
         for spec in specs:
             initial = spec.initial_value
             if initial is None:
@@ -432,17 +432,40 @@ def _tensor_sha256(value: Tensor) -> str:
     return sha256(contiguous.reshape(-1).view(torch.uint8).numpy().tobytes()).hexdigest()
 
 
-def _cuda_devices(modules: Sequence[nn.Module], tensors: Sequence[Tensor]) -> list[int]:
-    return sorted(
-        {
-            value.device.index
-            for value in (
-                *tensors,
-                *(item for module in modules for item in (*module.parameters(), *module.buffers())),
-            )
-            if value.device.type == "cuda" and value.device.index is not None
-        }
-    )
+def _accelerator_devices(modules: Sequence[nn.Module], tensors: Sequence[Tensor]) -> dict[str, list[int]]:
+    devices: dict[str, set[int]] = {}
+    values = (*tensors, *(item for module in modules for item in (*module.parameters(), *module.buffers())))
+    for value in values:
+        device_type = value.device.type
+        if device_type not in {"cuda", "mps", "xpu"}:
+            continue
+        index = value.device.index if value.device.index is not None else 0  # pragma: no cover - accelerator-specific
+        devices.setdefault(device_type, set()).add(index)  # pragma: no cover - accelerator-specific
+    return {device_type: sorted(indices) for device_type, indices in devices.items()}
+
+
+@contextmanager
+def _preserve_rng(modules: Sequence[nn.Module], tensors: Sequence[Tensor]):
+    accelerator_devices = _accelerator_devices(modules, tensors)
+    with ExitStack() as stack:
+        if accelerator_devices:  # pragma: no cover - requires accelerator hardware
+            for device_type, devices in accelerator_devices.items():
+                stack.enter_context(torch.random.fork_rng(devices=devices, device_type=device_type))
+        else:
+            stack.enter_context(torch.random.fork_rng(devices=[]))
+        yield accelerator_devices
+
+
+def _seed_rng(seed: int, accelerator_devices: Mapping[str, Sequence[int]]) -> None:
+    torch.random.default_generator.manual_seed(seed)
+    for device_type, devices in accelerator_devices.items():  # pragma: no cover - requires accelerator hardware
+        device_module = getattr(torch, device_type)
+        default_generators = getattr(device_module, "default_generators", None)
+        if default_generators is not None:
+            for device in devices:
+                default_generators[device].manual_seed(seed)
+        else:
+            device_module.manual_seed(seed)
 
 
 def _input_tensors(values: Sequence[object]) -> tuple[Tensor, ...]:
