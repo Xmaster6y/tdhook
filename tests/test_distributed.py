@@ -18,10 +18,11 @@ from tdhook.workflow import Workflow
 class _DistributedModel(nn.Module):
     def __init__(self):
         super().__init__()
+        self.module = nn.Identity()
         self.linear = nn.Linear(2, 2, bias=False)
 
     def forward(self, value):
-        return self.linear(value)
+        return self.linear(self.module(value))
 
 
 def _run_rank_local_sessions(rank: int, world_size: int, rendezvous: str, output_directory: str) -> None:
@@ -36,9 +37,12 @@ def _run_rank_local_sessions(rank: int, world_size: int, rendezvous: str, output
         with torch.no_grad():
             model.linear.weight.copy_(torch.eye(2))
         model = DistributedDataParallel(model)
-        target = Target("linear", "activation", -1, (0,))
+        target = Target("module", "activation", -1, (0,))
         value = torch.tensor([[float(rank + 1), float(rank + 2)]])
-        original_hook_count = len(model.module.linear._forward_hooks)
+        target_module = model.module.module
+        assert Target("", "activation", -1, (0,)).validate(model) is model.module
+        assert target.validate(model) is target_module
+        original_hook_count = len(target_module._forward_hooks)
 
         with HookSession(model) as session:
             captured = session.capture(target)
@@ -46,20 +50,20 @@ def _run_rank_local_sessions(rank: int, world_size: int, rendezvous: str, output
             replaced = model(value)
 
         assert captured.value is not None
-        assert len(model.module.linear._forward_hooks) == original_hook_count
+        assert len(target_module._forward_hooks) == original_hook_count
 
         workflow = Workflow(ActivationCaching(target, cache_key="activations"))
         workflow_result = workflow(model, TensorDict({"input": value}, batch_size=[1]))
-        workflow_capture = workflow_result["activations", "linear"]
-        assert len(model.module.linear._forward_hooks) == original_hook_count
+        workflow_capture = workflow_result["activations", "module"]
+        assert len(target_module._forward_hooks) == original_hook_count
 
         with HookSession(model) as session:
-            stopped = session.stop("linear")
+            stopped = session.stop("module")
             model(value)
 
         assert stopped.reached
         assert isinstance(stopped.output, torch.Tensor)
-        assert len(model.module.linear._forward_hooks) == original_hook_count
+        assert len(target_module._forward_hooks) == original_hook_count
 
         result = {
             "rank": rank,

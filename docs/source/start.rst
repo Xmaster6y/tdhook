@@ -126,8 +126,8 @@ Run on DistributedDataParallel ranks
 each process creates its own session or runs its own workflow, and target
 resolution, capture, replacement, early stopping, and cleanup affect only that
 rank's model replica. Use the same underlying model path whether the model is
-wrapped or not; TDHook resolves PyTorch's ordinary ``module`` wrapper
-transparently.
+wrapped or not; TDHook resolves DDP's ``module`` wrapper transparently, even
+when the underlying model itself has a first path segment named ``module``.
 
 Captured values, ``EarlyStopResult`` objects, workflow plans, programs, and
 result TensorDicts belong to the rank that produced them. TDHook does not mark

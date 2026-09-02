@@ -65,7 +65,7 @@ class HookSession:
     When ``model`` is a ``DistributedDataParallel`` instance, the session is
     rank-local: it neither communicates nor aggregates results. Create and use
     one session per rank. Targets keep their underlying model paths because
-    TDHook resolves ordinary ``module`` wrappers transparently.
+    TDHook resolves DDP's ``module`` wrapper transparently.
     """
 
     def __init__(self, model: nn.Module):
