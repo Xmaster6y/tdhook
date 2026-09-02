@@ -118,6 +118,24 @@ raise :class:`~tdhook.workflow.WorkflowHandoffError` before TDHook can silently
 replace or materialize artifact storage. Process creation and transport remain
 caller-owned; pass the TensorDict directly through native multiprocessing APIs.
 
+Run on DistributedDataParallel ranks
+------------------------------------
+
+``HookSession`` and ``Workflow`` also accept a caller-owned
+``DistributedDataParallel`` model. Their behavior is deliberately rank-local:
+each process creates its own session or runs its own workflow, and target
+resolution, capture, replacement, early stopping, and cleanup affect only that
+rank's model replica. Use the same underlying model path whether the model is
+wrapped or not; TDHook resolves PyTorch's ordinary ``module`` wrapper
+transparently.
+
+Captured values, ``EarlyStopResult`` objects, workflow plans, programs, and
+result TensorDicts belong to the rank that produced them. TDHook does not mark
+them as aggregated and performs no collectives for them. Keep the rank beside
+each result or aggregate explicitly with ``torch.distributed`` when needed.
+Process-group initialization, worker launch, aggregation, elasticity, fault
+tolerance, and FSDP remain caller responsibilities.
+
 Where to go next
 ----------------
 

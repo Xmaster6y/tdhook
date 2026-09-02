@@ -61,6 +61,11 @@ class HookSession:
     The session keeps only a weak reference to the caller-owned model. Hooks
     and parameter replacements are active inside the context and are removed
     or restored in reverse registration order on every exit path.
+
+    When ``model`` is a ``DistributedDataParallel`` instance, the session is
+    rank-local: it neither communicates nor aggregates results. Create and use
+    one session per rank. Targets keep their underlying model paths because
+    TDHook resolves ordinary ``module`` wrappers transparently.
     """
 
     def __init__(self, model: nn.Module):
