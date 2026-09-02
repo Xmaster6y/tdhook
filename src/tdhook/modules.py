@@ -1,5 +1,6 @@
 from tensordict.nn import TensorDictModuleWrapper, TensorDictModuleBase
 from tensordict import NonTensorData, TensorDict, TensorDictBase
+from tensordict.utils import NestedKey
 from typing import Callable, Optional, TYPE_CHECKING, List
 import torch
 from textwrap import indent
@@ -8,7 +9,6 @@ from tdhook.hooks import (
     MutableWeakRef,
     TensorDictRef,
 )
-from tdhook._types import UnraveledKey
 
 if TYPE_CHECKING:
     from tdhook.contexts import HookingContext
@@ -38,9 +38,7 @@ class FunctionModule(TensorDictModuleBase):
     Wrapper for a function to be used as a module.
     """
 
-    def __init__(
-        self, td_fn: Callable[[TensorDict], TensorDict], in_keys: List[UnraveledKey], out_keys: List[UnraveledKey]
-    ):
+    def __init__(self, td_fn: Callable[[TensorDict], TensorDict], in_keys: List[NestedKey], out_keys: List[NestedKey]):
         super().__init__()
         self.in_keys = in_keys
         self.out_keys = out_keys
@@ -65,8 +63,8 @@ class ModuleCall(TensorDictModuleBase):
     def __init__(
         self,
         td_module: TensorDictModuleBase,
-        in_key: Optional[UnraveledKey] = None,
-        out_key: Optional[UnraveledKey] = None,
+        in_key: Optional[NestedKey] = None,
+        out_key: Optional[NestedKey] = None,
         flatten: bool = True,
     ):
         super().__init__()
@@ -109,10 +107,10 @@ class ModuleCallWithCache(TensorDictModuleBase):
     def __init__(
         self,
         td_module: TensorDictModuleBase,
-        stored_keys: List[UnraveledKey],
-        cache_key: Optional[UnraveledKey] = None,
-        in_key: Optional[UnraveledKey] = None,
-        out_key: Optional[UnraveledKey] = None,
+        stored_keys: List[NestedKey],
+        cache_key: Optional[NestedKey] = None,
+        in_key: Optional[NestedKey] = None,
+        out_key: Optional[NestedKey] = None,
         cache_ref: Optional[MutableWeakRef | TensorDictRef] = None,
         flatten: bool = True,
         cache_as_output: bool = True,
@@ -181,8 +179,8 @@ class PGDModule(TensorDictModuleBase):
         n_steps: int = 10,
         min_value: float = -float("Inf"),
         max_value: float = float("Inf"),
-        grad_key: UnraveledKey = "_grad",
-        working_key: UnraveledKey = "_working",
+        grad_key: NestedKey = "_grad",
+        working_key: NestedKey = "_working",
         ascent: bool = False,
         use_sign: bool = True,
     ):
@@ -232,7 +230,7 @@ class IntermediateKeysCleaner(TensorDictModuleBase):
     Wrapper to clean intermediate keys.
     """
 
-    def __init__(self, intermediate_keys: List[UnraveledKey]):
+    def __init__(self, intermediate_keys: List[NestedKey]):
         super().__init__()
         self.in_keys = intermediate_keys
         self.out_keys = []

@@ -2,8 +2,8 @@ from typing import Callable, Tuple, Type, Optional, List, Dict
 import torch
 from torch import nn
 from tensordict import TensorDict
+from tensordict.utils import NestedKey
 
-from tdhook._types import UnraveledKey
 from tdhook.modules import HookedModule
 from tdhook.hooks import MultiHookManager, HookFactory, DIRECTION_TO_RETURN
 from tdhook.attribution.gradient_helpers import GradientAttribution
@@ -25,9 +25,9 @@ class GuidedBackpropagation(GradientAttribution):
         init_attr_inputs: Optional[Callable[[TensorDict, TensorDict], TensorDict]] = None,
         init_attr_cache_in: Optional[Callable[[TensorDict, TensorDict], TensorDict]] = None,
         init_attr_grads: Optional[Callable[[TensorDict, TensorDict], TensorDict]] = None,
-        additional_init_keys: Optional[List[UnraveledKey]] = None,
+        additional_init_keys: Optional[List[NestedKey]] = None,
         output_grad_callbacks: Optional[Dict[str, Callable]] = None,
-        attribution_key: UnraveledKey = "attr",
+        attribution_key: NestedKey = "attr",
         clean_intermediate_keys: bool = True,
         cache_callback: Optional[Callable] = None,
         multiply_by_inputs: bool = False,

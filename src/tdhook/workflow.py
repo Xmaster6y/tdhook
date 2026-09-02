@@ -9,9 +9,9 @@ from typing import Callable, Generator, Mapping, Protocol, Sequence, runtime_che
 import torch
 from tensordict import TensorDictBase
 from tensordict.nn import TensorDictModuleBase
+from tensordict.utils import NestedKey
 from torch import Tensor, nn
 
-from tdhook._types import UnraveledKey
 from tdhook.contexts import HookingContext
 from tdhook.execution import AutogradLifetime, ExecutionSpec, GradientMode
 from tdhook.descriptions import ConfiguredStepDescription
@@ -46,8 +46,8 @@ WorkflowStep = WorkflowMethod | TensorDictModuleBase | WorkflowUpdate
 class MethodBinding(Protocol):
     """Prepared method surface used for execution after facts are validated."""
 
-    in_keys: list[UnraveledKey]
-    out_keys: list[UnraveledKey]
+    in_keys: list[NestedKey]
+    out_keys: list[NestedKey]
 
     @property
     def td_module(self) -> TensorDictModuleBase: ...
@@ -63,8 +63,8 @@ class PlannedExecution:
 
     steps: tuple[str, ...]
     kind: str
-    in_keys: tuple[UnraveledKey, ...]
-    out_keys: tuple[UnraveledKey, ...]
+    in_keys: tuple[NestedKey, ...]
+    out_keys: tuple[NestedKey, ...]
     model_passes: int
     gradient_mode: GradientMode | None
     autograd_lifetime: AutogradLifetime | None = None
@@ -115,10 +115,10 @@ class _BoundMethodNode:
     index: int
     name: str
     method: WorkflowMethod
-    in_keys: tuple[UnraveledKey, ...]
-    out_keys: tuple[UnraveledKey, ...]
-    model_in_keys: tuple[UnraveledKey, ...]
-    model_out_keys: tuple[UnraveledKey, ...]
+    in_keys: tuple[NestedKey, ...]
+    out_keys: tuple[NestedKey, ...]
+    model_in_keys: tuple[NestedKey, ...]
+    model_out_keys: tuple[NestedKey, ...]
     execution_spec: ExecutionSpec
     program: HookProgram | None
     direct_execution: bool
@@ -130,8 +130,8 @@ class _OperatorNode:
     index: int
     name: str
     operator: TensorDictModuleBase
-    in_keys: tuple[UnraveledKey, ...]
-    out_keys: tuple[UnraveledKey, ...]
+    in_keys: tuple[NestedKey, ...]
+    out_keys: tuple[NestedKey, ...]
     allow_output_overwrite: bool = False
 
 
@@ -221,7 +221,7 @@ def _coexecution_incompatibility(
         return "a prepared method did not expose its bound hook program"
     if any(not node.program.hooks for node in group if node.program is not None):
         return "an empty hook program is not evidence of shared execution compatibility"
-    method_outputs: list[UnraveledKey] = []
+    method_outputs: list[NestedKey] = []
     for node in group:
         owned = [key for key in node.out_keys if key not in node.model_out_keys]
         if any(_key_paths_overlap(key, existing) for key in owned for existing in method_outputs):
@@ -259,15 +259,15 @@ def _same_bound_facts(planned: _BoundMethodNode, rebound: _BoundMethodNode) -> b
     )
 
 
-def _available_keys(data: TensorDictBase) -> set[UnraveledKey]:
+def _available_keys(data: TensorDictBase) -> set[NestedKey]:
     return set(data.keys(include_nested=True, leaves_only=False))
 
 
-def _key_path(key: UnraveledKey) -> tuple[str, ...]:
+def _key_path(key: NestedKey) -> tuple[str, ...]:
     return (key,) if isinstance(key, str) else key
 
 
-def _key_paths_overlap(left: UnraveledKey, right: UnraveledKey) -> bool:
+def _key_paths_overlap(left: NestedKey, right: NestedKey) -> bool:
     left_path = _key_path(left)
     right_path = _key_path(right)
     common = min(len(left_path), len(right_path))
@@ -294,7 +294,7 @@ class _DeferredAutogradCleanup:
         self._queued = False
         self._closed = False
 
-    def arm(self, data: TensorDictBase, keys: Sequence[UnraveledKey]) -> None:
+    def arm(self, data: TensorDictBase, keys: Sequence[NestedKey]) -> None:
         tensors = []
         for key in keys:
             value = data.get(key)
@@ -332,7 +332,7 @@ class _DeferredAutogradCleanup:
             raise cleanup_error
 
 
-def _provided_namespace_covers(provided: UnraveledKey, required: UnraveledKey) -> bool:
+def _provided_namespace_covers(provided: NestedKey, required: NestedKey) -> bool:
     provided_path = _key_path(provided)
     required_path = _key_path(required)
     return len(provided_path) < len(required_path) and required_path[: len(provided_path)] == provided_path
@@ -340,8 +340,8 @@ def _provided_namespace_covers(provided: UnraveledKey, required: UnraveledKey) -
 
 def _validate_dependencies(nodes: Sequence[_ExecutionNode], data: TensorDictBase) -> None:
     available = _available_keys(data)
-    provided_namespaces: set[UnraveledKey] = set()
-    owned_outputs: set[UnraveledKey] = set()
+    provided_namespaces: set[NestedKey] = set()
+    owned_outputs: set[NestedKey] = set()
     for node in nodes:
         missing = tuple(
             key

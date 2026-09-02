@@ -3,6 +3,7 @@ from typing import Callable, Optional, List, Any, Type, Protocol
 from tensordict import TensorDict
 import torch.nn as nn
 from tensordict.nn import TensorDictModuleBase
+from tensordict.utils import NestedKey
 
 from tdhook.contexts import HookingContextFactory
 from tdhook.hooks import (
@@ -14,7 +15,7 @@ from tdhook.hooks import (
 )
 from tdhook.modules import HookedModule
 from tdhook.runtime import BoundHookProgram, HookProgramBuilder, HookSpec
-from tdhook._types import UnraveledKey, is_nested_key
+from tdhook._types import is_nested_key
 
 
 class Probe(Protocol):
@@ -24,7 +25,7 @@ class Probe(Protocol):
 class _ProbingHookedModule(HookedModule):
     """Expose probe metadata as native inputs without mutating the model contract."""
 
-    def __init__(self, *args, additional_keys: list[UnraveledKey], **kwargs):
+    def __init__(self, *args, additional_keys: list[NestedKey], **kwargs):
         super().__init__(*args, **kwargs)
         self._probing_in_keys = list(dict.fromkeys([*self.td_module.in_keys, *additional_keys]))
 
@@ -48,7 +49,7 @@ class Probing(HookingContextFactory):
         probe_factory: Callable[[str, str], Probe],
         relative: bool = True,
         directions: Optional[List[HookDirection]] = None,
-        additional_keys: Optional[List[UnraveledKey]] = None,
+        additional_keys: Optional[List[NestedKey]] = None,
         classes_to_hook: Optional[List[Type[nn.Module]]] = None,
         classes_to_skip: Optional[List[Type[nn.Module]]] = None,
     ):

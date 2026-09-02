@@ -1,11 +1,11 @@
 from typing import List, Optional, Callable
 from tensordict import TensorDict
 from tensordict.nn import TensorDictModuleBase, TensorDictModule, TensorDictSequential
+from tensordict.utils import NestedKey
 
 from tdhook.attribution import Saliency
 from tdhook.contexts import HookingContextFactory
 from tdhook.modules import PGDModule, IntermediateKeysCleaner
-from tdhook._types import UnraveledKey
 from tdhook.execution import ExecutionSpec, GradientMode
 
 
@@ -23,8 +23,8 @@ class ActivationMaximisation(HookingContextFactory):
         max_value: float = float("Inf"),
         init_attr_targets: Optional[Callable[[TensorDict, TensorDict], TensorDict]] = None,
         init_attr_grads: Optional[Callable[[TensorDict, TensorDict], TensorDict]] = None,
-        additional_init_keys: Optional[List[UnraveledKey]] = None,
-        attribution_key: UnraveledKey = "attr",
+        additional_init_keys: Optional[List[NestedKey]] = None,
+        attribution_key: NestedKey = "attr",
         clean_intermediate_keys: bool = True,
     ):
         super().__init__()
@@ -62,8 +62,8 @@ class ActivationMaximisation(HookingContextFactory):
     def _prepare_module(
         self,
         module: TensorDictModuleBase,
-        in_keys: List[UnraveledKey],
-        out_keys: List[UnraveledKey],
+        in_keys: List[NestedKey],
+        out_keys: List[NestedKey],
         extra_relative_path: str,
     ) -> TensorDictModuleBase:
         working_in_keys = [("_working", in_key) for in_key in in_keys]

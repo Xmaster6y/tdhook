@@ -2,9 +2,9 @@ from typing import Callable, Optional, List, Tuple, Dict
 from dataclasses import dataclass
 
 from tensordict import TensorDict
+from tensordict.utils import NestedKey
 import torch
 
-from tdhook._types import UnraveledKey
 from tdhook.attribution.gradient_helpers import GradientAttribution
 
 
@@ -30,9 +30,9 @@ class GradCAM(GradientAttribution):
         init_attr_inputs: Optional[Callable[[TensorDict, TensorDict], TensorDict]] = None,
         init_attr_cache_in: Optional[Callable[[TensorDict, TensorDict], TensorDict]] = None,
         init_attr_grads: Optional[Callable[[TensorDict, TensorDict], TensorDict]] = None,
-        additional_init_keys: Optional[List[UnraveledKey]] = None,
+        additional_init_keys: Optional[List[NestedKey]] = None,
         output_grad_callbacks: Optional[Dict[str, Callable]] = None,
-        attribution_key: UnraveledKey = "attr",
+        attribution_key: NestedKey = "attr",
         clean_intermediate_keys: bool = True,
         cache_callback: Optional[Callable] = None,
         absolute: bool = False,
