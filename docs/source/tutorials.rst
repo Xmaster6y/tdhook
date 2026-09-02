@@ -28,6 +28,22 @@ Core interfaces
 
       Compose methods and TensorDict operations with an inspectable plan.
 
+Advanced execution
+------------------
+
+.. grid:: 1 2 2 2
+   :gutter: 3
+
+   .. grid-item-card:: Process Handoff and DDP
+      :link: notebooks/tutorials/process-and-distributed-workflows
+      :link-type: doc
+      :class-card: surface
+
+      :octicon:`server;2em;sd-text-primary`
+
+      Preserve local shared artifacts and keep hook execution rank-local under
+      DistributedDataParallel.
+
 Learn the methods
 -----------------
 
@@ -162,6 +178,7 @@ Complete workflows
    notebooks/methods/representation-similarity
    notebooks/tutorials/hook-session
    notebooks/tutorials/declared-workflows
+   notebooks/tutorials/process-and-distributed-workflows
    notebooks/tutorials/torchrl-ppo
    notebooks/tutorials/chess-value-saliency
    notebooks/tutorials/concept-attribution
