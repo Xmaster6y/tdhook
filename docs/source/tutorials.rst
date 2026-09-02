@@ -140,6 +140,16 @@ Complete workflows
       Reproduce published behavior and linear-probe results, then validate
       intervention parity.
 
+   .. grid-item-card:: WeightLens and CircuitLens Reproduction
+      :link: notebooks/tutorials/weight-circuit-research-reproduction
+      :link-type: doc
+      :class-card: surface
+
+      :octicon:`git-compare;2em;sd-text-primary`
+
+      Reproduce bounded Gemma-2-2B WeightLens candidates and CircuitLens
+      contributors, then cluster circuit signatures.
+
 .. toctree::
    :hidden:
    :maxdepth: 2
@@ -157,3 +167,4 @@ Complete workflows
    notebooks/tutorials/concept-attribution
    notebooks/tutorials/chess-dimension-estimation
    notebooks/tutorials/othello-research-reproduction
+   notebooks/tutorials/weight-circuit-research-reproduction
