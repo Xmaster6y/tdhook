@@ -1,6 +1,8 @@
+import multiprocessing as mp
+from contextlib import ExitStack
+
 import pytest
 import torch
-from contextlib import ExitStack
 from tensordict import TensorDict
 from tensordict.nn import TensorDictModule, TensorDictModuleBase
 from torch import nn
@@ -15,6 +17,7 @@ from tdhook.targets import Target
 from tdhook.workflow import (
     PlannedExecution,
     Workflow,
+    WorkflowHandoffError,
     WorkflowResult,
     WorkflowSession,
     WorkflowUpdate,
@@ -135,6 +138,95 @@ class PublishingModule(HookedModule):
 
 class PublishingMethod(HookingContextFactory):
     _hooked_module_class = PublishingModule
+
+
+def _double(value):
+    return value * 2
+
+
+def _run_handoff_workflow(data, results, release):
+    operator = TensorDictModule(_double, in_keys=["input"], out_keys=[("result", "doubled")])
+    result = Workflow(operator)(nn.Identity(), data)
+    results.put(result)
+    release.wait(timeout=30)
+
+
+@pytest.mark.parametrize("storage", ["shared", "consolidated"])
+def test_workflow_preserves_native_handoff_storage_across_processes(storage):
+    context = mp.get_context("spawn")
+    data = TensorDict(
+        {"input": torch.ones(2), "result": {"doubled": torch.zeros(2)}},
+        batch_size=[2],
+        device="cpu",
+    )
+    if storage == "shared":
+        data.share_memory_()
+    else:
+        data = data.consolidate(metadata=True)
+
+    results = context.Queue()
+    release = context.Event()
+    process = context.Process(target=_run_handoff_workflow, args=(data, results, release))
+    process.start()
+    try:
+        result = results.get(timeout=30)
+        assert result.batch_size == torch.Size([2])
+        assert result.device == torch.device("cpu")
+        assert set(result.keys(include_nested=True, leaves_only=True)) == {"input", ("result", "doubled")}
+        assert result.is_shared() is (storage == "shared")
+        assert result.is_consolidated() is (storage == "consolidated")
+        assert torch.equal(result["result", "doubled"], torch.full((2,), 2.0))
+        if storage == "shared":
+            assert torch.equal(data["result", "doubled"], torch.full((2,), 2.0))
+    finally:
+        release.set()
+        process.join(timeout=30)
+        if process.is_alive():
+            process.terminate()
+            process.join(timeout=30)
+    assert process.exitcode == 0
+
+
+def test_workflow_handoff_requires_preallocated_outputs():
+    data = TensorDict({"input": torch.ones(2)}, batch_size=[2]).share_memory_()
+    operator = TensorDictModule(_double, in_keys=["input"], out_keys=[("result", "doubled")])
+
+    with pytest.raises(WorkflowHandoffError, match="preallocated.*result.*doubled"):
+        Workflow(operator)(nn.Identity(), data)
+
+
+def test_workflow_handoff_rejects_incompatible_output_metadata():
+    data = TensorDict(
+        {"input": torch.ones(2), "output": torch.zeros(2, dtype=torch.int64)}, batch_size=[2]
+    ).share_memory_()
+    operator = TensorDictModule(_double, in_keys=["input"], out_keys=["output"])
+
+    with pytest.raises(WorkflowHandoffError, match="shape/dtype/device"):
+        Workflow(operator)(nn.Identity(), data)
+
+
+def test_workflow_handoff_rejects_autograd_inputs():
+    data = TensorDict(
+        {"input": torch.ones(2, requires_grad=True), "output": torch.zeros(2)}, batch_size=[2]
+    ).share_memory_()
+    operator = TensorDictModule(_double, in_keys=["input"], out_keys=["output"])
+
+    with pytest.raises(WorkflowHandoffError, match="requires gradients.*detach"):
+        Workflow(operator)(nn.Identity(), data)
+
+
+def test_workflow_method_preserves_shared_artifact_storage(default_test_model):
+    data = TensorDict(
+        {"input": torch.ones(2, 10), "output": torch.zeros(2, 5)}, batch_size=[2], device="cpu"
+    ).share_memory_()
+
+    result = Workflow(CaptureOutput())(default_test_model, data)
+
+    assert result is data
+    assert result.is_shared()
+    assert result.device == torch.device("cpu")
+    assert result.batch_size == torch.Size([2])
+    assert torch.count_nonzero(result["output"]) > 0
 
 
 def test_workflow_composes_a_method_and_native_tensordict_operator(default_test_model):

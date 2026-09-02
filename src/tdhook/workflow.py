@@ -40,6 +40,10 @@ class WorkflowUpdate:
     step: WorkflowMethod | TensorDictModuleBase
 
 
+class WorkflowHandoffError(RuntimeError):
+    """A workflow cannot safely preserve a process-handoff artifact."""
+
+
 WorkflowStep = WorkflowMethod | TensorDictModuleBase | WorkflowUpdate
 
 
@@ -136,6 +140,137 @@ class _OperatorNode:
 
 
 _ExecutionNode = _BoundMethodNode | _OperatorNode
+
+
+@dataclass(frozen=True)
+class _HandoffArtifact:
+    """Storage facts for a shared or consolidated TensorDict."""
+
+    data: TensorDictBase
+    keys: frozenset[NestedKey]
+    batch_size: torch.Size
+    device: torch.device | None
+    shared: bool
+    consolidated: bool
+
+    @classmethod
+    def inspect(cls, data: TensorDictBase) -> "_HandoffArtifact | None":
+        shared = data.is_shared()
+        consolidated = data.is_consolidated()
+        if not (shared or consolidated):
+            return None
+
+        for key, value in data.items(include_nested=True, leaves_only=True):
+            if not isinstance(value, Tensor):
+                raise WorkflowHandoffError(
+                    f"Workflow handoff artifact key {key!r} must contain a Tensor, got {type(value).__name__}"
+                )
+            if value.device.type != "cpu":
+                raise WorkflowHandoffError(
+                    f"Workflow handoff artifact key {key!r} is on {value.device}; local process handoff requires CPU tensors"
+                )
+            if value.requires_grad:
+                raise WorkflowHandoffError(
+                    f"Workflow handoff artifact key {key!r} requires gradients; detach tensors before process handoff"
+                )
+
+        return cls(
+            data=data,
+            keys=frozenset(data.keys(include_nested=True, leaves_only=True)),
+            batch_size=data.batch_size,
+            device=data.device,
+            shared=shared,
+            consolidated=consolidated,
+        )
+
+    def working_copy(self, plan: WorkflowPlan) -> TensorDictBase:
+        if any(execution.autograd_lifetime is AutogradLifetime.BACKWARD for execution in plan.executions):
+            raise WorkflowHandoffError(
+                "Workflow handoff artifacts cannot retain an autograd graph for deferred backward execution"
+            )
+        missing = tuple(
+            key for execution in plan.executions for key in execution.out_keys if key != "_" and key not in self.keys
+        )
+        if missing:
+            raise WorkflowHandoffError(
+                "Workflow handoff artifact storage requires every output to be preallocated; "
+                f"missing output keys: {list(dict.fromkeys(missing))!r}"
+            )
+        # Clone only the TensorDict containers. Tensor leaves retain their native
+        # shared or consolidated storage until a declared output is committed.
+        return self.data.clone(recurse=False)
+
+    def commit(self, current: TensorDictBase, working: TensorDictBase, execution: PlannedExecution) -> None:
+        if current is not working:
+            raise WorkflowHandoffError(
+                f"Workflow step {execution.steps!r} returned a different TensorDict; "
+                "handoff workflows must mutate their input TensorDict in place"
+            )
+        if current.batch_size != self.batch_size or current.device != self.device:
+            raise WorkflowHandoffError(
+                f"Workflow step {execution.steps!r} changed artifact batch size or device metadata"
+            )
+        if frozenset(current.keys(include_nested=True, leaves_only=True)) != self.keys:
+            raise WorkflowHandoffError(f"Workflow step {execution.steps!r} changed artifact keys")
+
+        for key in execution.out_keys:
+            if key == "_":
+                continue
+            source = current.get(key)
+            destination = self.data.get(key)
+            if not isinstance(source, Tensor) or not isinstance(destination, Tensor):
+                raise WorkflowHandoffError(f"Workflow handoff output {key!r} must remain a Tensor")
+            if (source.shape, source.dtype, source.device) != (
+                destination.shape,
+                destination.dtype,
+                destination.device,
+            ):
+                raise WorkflowHandoffError(
+                    f"Workflow handoff output {key!r} has shape/dtype/device "
+                    f"{(source.shape, source.dtype, source.device)!r}, expected "
+                    f"{(destination.shape, destination.dtype, destination.device)!r}"
+                )
+            with torch.no_grad():
+                destination.copy_(source.detach())
+                if self.consolidated:
+                    self._consolidated_destination(key, destination).copy_(source.detach())
+
+    def _consolidated_destination(self, key: NestedKey, destination: Tensor) -> Tensor:
+        """Return the canonical consolidated-storage view for ``key``.
+
+        TensorDict multiprocessing reconstruction can leave leaf objects detached
+        from its canonical consolidated buffer. Updating the buffer as well keeps
+        subsequent native TensorDict handoffs consistent.
+        """
+
+        key = (key,) if isinstance(key, str) else key
+        consolidated = getattr(self.data, "_consolidated", None)
+        if not isinstance(consolidated, Mapping):
+            raise WorkflowHandoffError("TensorDict reported consolidated storage without storage metadata")
+        metadata = consolidated.get("metadata")
+        storage = consolidated.get("storage")
+        if not isinstance(metadata, Mapping) or not isinstance(storage, Tensor):
+            raise WorkflowHandoffError("Consolidated TensorDict storage metadata is unavailable")
+        for part in key[:-1]:
+            metadata = metadata.get(part)
+            if not isinstance(metadata, Mapping):
+                raise WorkflowHandoffError(f"Consolidated storage metadata is missing output {key!r}")
+        leaves = metadata.get("leaves")
+        if not isinstance(leaves, Mapping) or key[-1] not in leaves:
+            raise WorkflowHandoffError(f"Consolidated storage metadata is missing output {key!r}")
+        _, _, start, stop, _ = leaves[key[-1]]
+        return storage[start:stop].view(destination.dtype)[: destination.numel()].view(destination.shape)
+
+    def result(self) -> TensorDictBase:
+        if (
+            self.data.batch_size != self.batch_size
+            or self.data.device != self.device
+            or self.data.is_shared() != self.shared
+            or self.data.is_consolidated() != self.consolidated
+            or frozenset(self.data.keys(include_nested=True, leaves_only=True)) != self.keys
+        ):
+            raise WorkflowHandoffError("Workflow changed native handoff artifact storage or metadata")
+        return self.data
 
 
 def _step_name(index: int, step: WorkflowStep) -> str:
@@ -518,14 +653,22 @@ class Workflow:
         return tuple(descriptions)
 
     def run_with_plan(self, model: nn.Module, data: TensorDictBase) -> WorkflowResult:
-        """Execute the workflow and return its TensorDict with the executed plan."""
+        """Execute the workflow and return its TensorDict with the executed plan.
+
+        TensorDicts prepared with :meth:`TensorDict.share_memory_` or
+        :meth:`TensorDictBase.consolidate` retain their native storage. Their
+        output keys must already exist with the expected tensor metadata, and
+        each workflow step must use in-place TensorDict semantics.
+        """
 
         if not isinstance(data, TensorDictBase):
             raise TypeError(f"Workflow data must be a TensorDict, got {type(data).__name__}")
         nodes = self._inspect(model)
         _validate_dependencies(nodes, data)
         plan = self._build_plan(nodes)
-        current = data
+        handoff = _HandoffArtifact.inspect(data)
+        current = handoff.working_copy(plan) if handoff is not None else data
+        working = current
         by_name = {node.name: node for node in nodes}
         for execution in plan.executions:
             execution_nodes = [by_name[name] for name in execution.steps]
@@ -537,6 +680,8 @@ class Workflow:
                     raise TypeError(
                         f"Workflow operator {first.name!r} must return a TensorDict, got {type(current).__name__}"
                     )
+                if handoff is not None:
+                    handoff.commit(current, working, execution)
                 continue
 
             with ExitStack() as stack:
@@ -574,6 +719,10 @@ class Workflow:
                         assert prepared.hooking_context is not None
                         prepared.hooking_context.on_hook_failure(cleanup.close)
                     cleanup.arm(current, first.model_out_keys)
+            if handoff is not None:
+                handoff.commit(current, working, execution)
+        if handoff is not None:
+            current = handoff.result()
         return WorkflowResult(data=current, plan=plan)
 
     def run(self, model: nn.Module, data: TensorDictBase) -> TensorDictBase:
@@ -625,6 +774,7 @@ __all__ = [
     "MethodBinding",
     "PlannedExecution",
     "Workflow",
+    "WorkflowHandoffError",
     "WorkflowMethod",
     "WorkflowPlan",
     "WorkflowResult",
