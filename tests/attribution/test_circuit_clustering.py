@@ -117,14 +117,29 @@ def test_activation_sampling_separates_sparse_zero_mass_from_positive_tail(monke
 
 
 @pytest.mark.parametrize(
-    ("call", "message"),
+    ("call", "error", "message"),
     [
-        (lambda: sample_activation_indices([1.0], 2), "cannot exceed"),
-        (lambda: sample_activation_indices([float("nan")], 1), "finite"),
-        (lambda: filter_contributor_frequency((), min_frequency=1.1), "between 0 and 1"),
-        (lambda: build_circuit_signature(artifact(), min_abs_score=-1), "non-negative"),
+        (lambda: sample_activation_indices([1.0], 1.5), TypeError, "sample_size must be an int"),
+        (lambda: sample_activation_indices([1.0], -1), ValueError, "sample_size must be non-negative"),
+        (lambda: sample_activation_indices([1.0], 1, bins=1.5), TypeError, "bins must be an int"),
+        (lambda: sample_activation_indices([1.0], 1, bins=0), ValueError, "bins must be positive"),
+        (lambda: sample_activation_indices([1.0], 1, alpha=-1), ValueError, "alpha must be finite"),
+        (lambda: sample_activation_indices([[1.0]], 1), ValueError, "one-dimensional"),
+        (lambda: sample_activation_indices([1.0], 2), ValueError, "cannot exceed"),
+        (lambda: sample_activation_indices([float("nan")], 1), ValueError, "finite"),
+        (lambda: filter_contributor_frequency((), min_frequency=1.1), ValueError, "between 0 and 1"),
+        (lambda: build_circuit_signature(artifact(), min_abs_score=-1), ValueError, "non-negative"),
+        (lambda: dbscan_circuit_signatures((), eps=0), ValueError, "eps must be finite and positive"),
+        (lambda: dbscan_circuit_signatures((), min_samples=1.5), TypeError, "min_samples must be an int"),
+        (lambda: dbscan_circuit_signatures((), min_samples=0), ValueError, "min_samples must be positive"),
     ],
 )
-def test_invalid_clustering_inputs_are_rejected(call, message):
-    with pytest.raises(ValueError, match=message):
+def test_invalid_clustering_inputs_are_rejected(call, error, message):
+    with pytest.raises(error, match=message):
         call()
+
+
+def test_empty_clustering_inputs_return_empty_results():
+    assert sample_activation_indices([], 0) == ()
+    assert filter_contributor_frequency((), min_frequency=0.5) == ()
+    assert dbscan_circuit_signatures(()) == ()
