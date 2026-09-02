@@ -312,13 +312,12 @@ class HookFactory:
             else:
                 _cache = cache
             if _cache.is_locked:
-                try:
-                    _cache.set_(key, value)
-                except KeyError as error:
+                if key not in _cache.keys(include_nested=True):
                     raise RuntimeError(
                         f"Locked caches require a preallocated entry for {key!r}; "
                         "create every cache key before locking or memory-mapping the TensorDict"
-                    ) from error
+                    )
+                _cache.set_(key, value)
             else:
                 _cache[key] = value
 

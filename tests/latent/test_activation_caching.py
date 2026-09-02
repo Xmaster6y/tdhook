@@ -213,3 +213,28 @@ class TestActivationCaching:
             pytest.raises(RuntimeError, match="preallocated entry.*linear2"),
         ):
             hooked_module(data)
+
+    def test_cache_locked_after_configuration_is_rejected_at_context_entry(self, default_test_model, tmp_path):
+        cache = TensorDict({"linear2": torch.zeros(2, 20)}, batch_size=[])
+        context = ActivationCaching("linear2", cache=cache)
+        cache.memmap_(tmp_path / "activation-cache")
+
+        with pytest.raises(ValueError, match="clear_cache=False"):
+            with context.prepare(default_test_model):
+                pass
+
+    def test_locked_cache_reports_missing_nested_parent(self, default_test_model, tmp_path):
+        cache = TensorDict({"other": torch.zeros(2, 20)}, batch_size=[]).memmap(tmp_path / "activation-cache")
+        context = ActivationCaching(
+            "linear2",
+            cache=cache,
+            clear_cache=False,
+            use_nested_keys=True,
+        )
+        data = TensorDict({"input": torch.randn(2, 10)}, batch_size=[2])
+
+        with (
+            context.prepare(default_test_model) as hooked_module,
+            pytest.raises(RuntimeError, match=r"preallocated entry.*fwd.*linear2"),
+        ):
+            hooked_module(data)
