@@ -186,3 +186,83 @@ def test_workflow_artifact_schema_rejects_incompatible_artifacts(artifact, messa
 
     with pytest.raises(WorkflowArtifactError, match=message):
         schema.validate(artifact)
+
+
+def test_workflow_artifact_schema_rejects_invalid_values_and_shapes():
+    with pytest.raises(TypeError, match="must be a TensorDict"):
+        WorkflowArtifactSchema.from_tensordict(object())
+    with pytest.raises(WorkflowArtifactError, match="label.*must contain a Tensor"):
+        WorkflowArtifactSchema.from_tensordict(TensorDict({"label": "unsafe"}, batch_size=[]))
+
+    schema = WorkflowArtifactSchema.from_tensordict(
+        TensorDict({"input": torch.zeros(2, 3)}, batch_size=[2], device="cpu")
+    )
+    with pytest.raises(TypeError, match="must be a TensorDict"):
+        schema.validate(object())
+    scalar_schema = WorkflowArtifactSchema.from_tensordict(TensorDict({"label": torch.zeros(())}, batch_size=[]))
+    with pytest.raises(WorkflowArtifactError, match="label.*must contain a Tensor"):
+        scalar_schema.validate(TensorDict({"label": "unsafe"}, batch_size=[]))
+    with pytest.raises(WorkflowArtifactError, match="shape"):
+        schema.validate(TensorDict({"input": torch.zeros(2, 4)}, batch_size=[2], device="cpu"))
+    mixed_device_schema = WorkflowArtifactSchema.from_tensordict(TensorDict({"input": torch.zeros(2)}, batch_size=[2]))
+    with pytest.raises(WorkflowArtifactError, match="device"):
+        mixed_device_schema.validate(TensorDict({"input": torch.zeros(2, device="meta")}, batch_size=[2]))
+    with pytest.raises(WorkflowArtifactError, match="requires gradients"):
+        schema.validate(
+            TensorDict(
+                {"input": torch.zeros(2, 3, requires_grad=True)},
+                batch_size=[2],
+                device="cpu",
+            )
+        )
+
+
+def test_workflow_artifact_transport_requires_external_group_and_consolidated_storage(monkeypatch):
+    artifact = TensorDict({"input": torch.zeros(2)}, batch_size=[2], device="cpu")
+    schema = WorkflowArtifactSchema.from_tensordict(artifact)
+
+    monkeypatch.setattr(dist, "is_initialized", lambda: False)
+    with pytest.raises(WorkflowArtifactError, match="externally managed.*process group"):
+        send_workflow_artifact(artifact.consolidate(), 1, schema=schema)
+
+    monkeypatch.setattr(dist, "is_initialized", lambda: True)
+    with pytest.raises(WorkflowArtifactError, match="consolidated TensorDict storage"):
+        send_workflow_artifact(artifact, 1, schema=schema)
+
+
+def test_workflow_artifact_transport_delegates_to_tensordict(monkeypatch):
+    artifact = TensorDict({"input": torch.zeros(2)}, batch_size=[2], device="cpu").consolidate()
+    schema = WorkflowArtifactSchema.from_tensordict(artifact)
+    calls = []
+
+    monkeypatch.setattr(dist, "is_initialized", lambda: True)
+    monkeypatch.setattr(
+        TensorDict,
+        "send",
+        lambda self, dst, *, group, init_tag: calls.append(("send", self, dst, group, init_tag)),
+    )
+    monkeypatch.setattr(
+        TensorDict,
+        "recv",
+        lambda self, src, *, group, init_tag: calls.append(("recv", self, src, group, init_tag)),
+    )
+
+    send_workflow_artifact(artifact, 3, schema=schema, group=None, init_tag=10)
+    result = receive_workflow_artifact(artifact, 4, schema=schema, group=None, init_tag=20)
+
+    assert result is artifact
+    assert calls == [
+        ("send", artifact, 3, None, 10),
+        ("recv", artifact, 4, None, 20),
+    ]
+
+
+def test_workflow_artifact_receive_rejects_storage_changes(monkeypatch):
+    artifact = TensorDict({"input": torch.zeros(2)}, batch_size=[2], device="cpu").consolidate()
+    schema = WorkflowArtifactSchema.from_tensordict(artifact)
+
+    monkeypatch.setattr(dist, "is_initialized", lambda: True)
+    monkeypatch.setattr(TensorDict, "recv", lambda self, *args, **kwargs: self.unlock_())
+
+    with pytest.raises(WorkflowArtifactError, match="changed consolidated artifact storage"):
+        receive_workflow_artifact(artifact, 1, schema=schema)
