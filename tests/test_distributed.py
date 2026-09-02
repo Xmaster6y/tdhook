@@ -230,12 +230,40 @@ def test_workflow_artifact_transport_requires_external_group_and_consolidated_st
         send_workflow_artifact(artifact, 1, schema=schema)
 
 
+@pytest.mark.parametrize("transport", [send_workflow_artifact, receive_workflow_artifact])
+def test_workflow_artifact_transport_type_errors_precede_process_group_validation(transport):
+    schema = WorkflowArtifactSchema.from_tensordict(TensorDict({"input": torch.zeros(2)}, batch_size=[2]))
+
+    with pytest.raises(TypeError, match="must be a TensorDict"):
+        transport(object(), 1, schema=schema)
+
+
+@pytest.mark.parametrize("transport", [send_workflow_artifact, receive_workflow_artifact])
+@pytest.mark.parametrize("group", [None, object()])
+def test_workflow_artifact_transport_rejects_nccl_groups(monkeypatch, transport, group):
+    artifact = TensorDict({"input": torch.zeros(2)}, batch_size=[2], device="cpu").consolidate()
+    schema = WorkflowArtifactSchema.from_tensordict(artifact)
+    selected_groups = []
+
+    def nccl_backend(selected_group):
+        selected_groups.append(selected_group)
+        return dist.Backend.NCCL
+
+    monkeypatch.setattr(dist, "is_initialized", lambda: True)
+    monkeypatch.setattr(dist, "get_backend", nccl_backend)
+
+    with pytest.raises(WorkflowArtifactError, match="NCCL.*does not support.*tags"):
+        transport(artifact, 1, schema=schema, group=group, init_tag=10)
+    assert selected_groups == [group]
+
+
 def test_workflow_artifact_transport_delegates_to_tensordict(monkeypatch):
     artifact = TensorDict({"input": torch.zeros(2)}, batch_size=[2], device="cpu").consolidate()
     schema = WorkflowArtifactSchema.from_tensordict(artifact)
     calls = []
 
     monkeypatch.setattr(dist, "is_initialized", lambda: True)
+    monkeypatch.setattr(dist, "get_backend", lambda group: dist.Backend.GLOO)
     monkeypatch.setattr(
         TensorDict,
         "send",
@@ -262,6 +290,7 @@ def test_workflow_artifact_receive_rejects_storage_changes(monkeypatch):
     schema = WorkflowArtifactSchema.from_tensordict(artifact)
 
     monkeypatch.setattr(dist, "is_initialized", lambda: True)
+    monkeypatch.setattr(dist, "get_backend", lambda group: dist.Backend.GLOO)
     monkeypatch.setattr(TensorDict, "recv", lambda self, *args, **kwargs: self.unlock_())
 
     with pytest.raises(WorkflowArtifactError, match="changed consolidated artifact storage"):
