@@ -6,13 +6,20 @@ import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 from tensordict import TensorDict
+from tensordict.nn import TensorDictModule
 from torch import nn
 from torch.nn.parallel import DistributedDataParallel
 
 from tdhook.latent import ActivationCaching
 from tdhook.session import HookSession
 from tdhook.targets import Target
-from tdhook.workflow import Workflow
+from tdhook.workflow import (
+    Workflow,
+    WorkflowArtifactError,
+    WorkflowArtifactSchema,
+    receive_workflow_artifact,
+    send_workflow_artifact,
+)
 
 
 class _DistributedModel(nn.Module):
@@ -96,3 +103,195 @@ def test_hook_sessions_and_workflows_are_rank_local_under_ddp(tmp_path):
     assert [result["replaced"] for result in results] == [[[10.0, 2.0]], [[11.0, 3.0]]]
     assert [result["workflow_capture"] for result in results] == [[[1.0]], [[2.0]]]
     assert [result["stopped"] for result in results] == [[[1.0, 2.0]], [[2.0, 3.0]]]
+
+
+def _exchange_workflow_artifacts(rank: int, world_size: int, rendezvous: str, output_path: str) -> None:
+    dist.init_process_group(
+        backend="gloo",
+        init_method=f"file://{rendezvous}",
+        rank=rank,
+        world_size=world_size,
+    )
+    try:
+        group = dist.group.WORLD
+        schema = WorkflowArtifactSchema.from_tensordict(
+            TensorDict(
+                {"input": torch.zeros(2), "result": {"doubled": torch.zeros(2)}},
+                batch_size=[2],
+                device="cpu",
+            ).consolidate()
+        )
+        if rank == 0:
+            artifact = TensorDict(
+                {"input": torch.tensor([1.0, 2.0]), "result": {"doubled": torch.zeros(2)}},
+                batch_size=[2],
+                device="cpu",
+            ).consolidate()
+            send_workflow_artifact(artifact, 1, schema=schema, group=group, init_tag=10)
+            receive_workflow_artifact(artifact, 1, schema=schema, group=group, init_tag=20)
+            Path(output_path).write_text(json.dumps(artifact["result", "doubled"].tolist()))
+        else:
+            artifact = TensorDict(
+                {"input": torch.zeros(2), "result": {"doubled": torch.zeros(2)}},
+                batch_size=[2],
+                device="cpu",
+            ).consolidate()
+            receive_workflow_artifact(artifact, 0, schema=schema, group=group, init_tag=10)
+            workflow = Workflow(
+                TensorDictModule(
+                    lambda value: value * 2,
+                    in_keys=["input"],
+                    out_keys=[("result", "doubled")],
+                )
+            )
+            workflow(nn.Identity(), artifact)
+            send_workflow_artifact(artifact, 0, schema=schema, group=group, init_tag=20)
+    finally:
+        dist.destroy_process_group()
+
+
+@pytest.mark.skipif(not dist.is_available() or not dist.is_gloo_available(), reason="Gloo is unavailable")
+def test_exchange_consolidated_workflow_artifacts_over_external_process_group(tmp_path):
+    """Round-trip inputs and results without transferring a model or live hooks."""
+
+    world_size = 2
+    rendezvous = tmp_path / "artifact-rendezvous"
+    output_path = tmp_path / "artifact-result.json"
+    mp.spawn(
+        _exchange_workflow_artifacts,
+        args=(world_size, str(rendezvous), str(output_path)),
+        nprocs=world_size,
+        join=True,
+    )
+
+    assert json.loads(output_path.read_text()) == [2.0, 4.0]
+
+
+@pytest.mark.parametrize(
+    ("artifact", "message"),
+    [
+        (TensorDict({"other": torch.zeros(2)}, batch_size=[2], device="cpu"), "keys"),
+        (TensorDict({"input": torch.zeros(1)}, batch_size=[1], device="cpu"), "batch size"),
+        (
+            TensorDict({"input": torch.zeros(2, dtype=torch.float64)}, batch_size=[2], device="cpu"),
+            "dtype",
+        ),
+        (TensorDict({"input": torch.zeros(2, device="meta")}, batch_size=[2], device="meta"), "device"),
+    ],
+)
+def test_workflow_artifact_schema_rejects_incompatible_artifacts(artifact, message):
+    schema = WorkflowArtifactSchema.from_tensordict(
+        TensorDict({"input": torch.zeros(2)}, batch_size=[2], device="cpu").consolidate()
+    )
+
+    with pytest.raises(WorkflowArtifactError, match=message):
+        schema.validate(artifact)
+
+
+def test_workflow_artifact_schema_rejects_invalid_values_and_shapes():
+    with pytest.raises(TypeError, match="must be a TensorDict"):
+        WorkflowArtifactSchema.from_tensordict(object())
+    with pytest.raises(WorkflowArtifactError, match="label.*must contain a Tensor"):
+        WorkflowArtifactSchema.from_tensordict(TensorDict({"label": "unsafe"}, batch_size=[]))
+
+    schema = WorkflowArtifactSchema.from_tensordict(
+        TensorDict({"input": torch.zeros(2, 3)}, batch_size=[2], device="cpu")
+    )
+    with pytest.raises(TypeError, match="must be a TensorDict"):
+        schema.validate(object())
+    scalar_schema = WorkflowArtifactSchema.from_tensordict(TensorDict({"label": torch.zeros(())}, batch_size=[]))
+    with pytest.raises(WorkflowArtifactError, match="label.*must contain a Tensor"):
+        scalar_schema.validate(TensorDict({"label": "unsafe"}, batch_size=[]))
+    with pytest.raises(WorkflowArtifactError, match="shape"):
+        schema.validate(TensorDict({"input": torch.zeros(2, 4)}, batch_size=[2], device="cpu"))
+    mixed_device_schema = WorkflowArtifactSchema.from_tensordict(TensorDict({"input": torch.zeros(2)}, batch_size=[2]))
+    with pytest.raises(WorkflowArtifactError, match="device"):
+        mixed_device_schema.validate(TensorDict({"input": torch.zeros(2, device="meta")}, batch_size=[2]))
+    with pytest.raises(WorkflowArtifactError, match="requires gradients"):
+        schema.validate(
+            TensorDict(
+                {"input": torch.zeros(2, 3, requires_grad=True)},
+                batch_size=[2],
+                device="cpu",
+            )
+        )
+
+
+def test_workflow_artifact_transport_requires_external_group_and_consolidated_storage(monkeypatch):
+    artifact = TensorDict({"input": torch.zeros(2)}, batch_size=[2], device="cpu")
+    schema = WorkflowArtifactSchema.from_tensordict(artifact)
+
+    monkeypatch.setattr(dist, "is_initialized", lambda: False)
+    with pytest.raises(WorkflowArtifactError, match="externally managed.*process group"):
+        send_workflow_artifact(artifact.consolidate(), 1, schema=schema)
+
+    monkeypatch.setattr(dist, "is_initialized", lambda: True)
+    with pytest.raises(WorkflowArtifactError, match="consolidated TensorDict storage"):
+        send_workflow_artifact(artifact, 1, schema=schema)
+
+
+@pytest.mark.parametrize("transport", [send_workflow_artifact, receive_workflow_artifact])
+def test_workflow_artifact_transport_type_errors_precede_process_group_validation(transport):
+    schema = WorkflowArtifactSchema.from_tensordict(TensorDict({"input": torch.zeros(2)}, batch_size=[2]))
+
+    with pytest.raises(TypeError, match="must be a TensorDict"):
+        transport(object(), 1, schema=schema)
+
+
+@pytest.mark.parametrize("transport", [send_workflow_artifact, receive_workflow_artifact])
+@pytest.mark.parametrize("group", [None, object()])
+def test_workflow_artifact_transport_rejects_nccl_groups(monkeypatch, transport, group):
+    artifact = TensorDict({"input": torch.zeros(2)}, batch_size=[2], device="cpu").consolidate()
+    schema = WorkflowArtifactSchema.from_tensordict(artifact)
+    selected_groups = []
+
+    def nccl_backend(selected_group):
+        selected_groups.append(selected_group)
+        return dist.Backend.NCCL
+
+    monkeypatch.setattr(dist, "is_initialized", lambda: True)
+    monkeypatch.setattr(dist, "get_backend", nccl_backend)
+
+    with pytest.raises(WorkflowArtifactError, match="NCCL.*does not support.*tags"):
+        transport(artifact, 1, schema=schema, group=group, init_tag=10)
+    assert selected_groups == [group]
+
+
+def test_workflow_artifact_transport_delegates_to_tensordict(monkeypatch):
+    artifact = TensorDict({"input": torch.zeros(2)}, batch_size=[2], device="cpu").consolidate()
+    schema = WorkflowArtifactSchema.from_tensordict(artifact)
+    calls = []
+
+    monkeypatch.setattr(dist, "is_initialized", lambda: True)
+    monkeypatch.setattr(dist, "get_backend", lambda group: dist.Backend.GLOO)
+    monkeypatch.setattr(
+        TensorDict,
+        "send",
+        lambda self, dst, *, group, init_tag: calls.append(("send", self, dst, group, init_tag)),
+    )
+    monkeypatch.setattr(
+        TensorDict,
+        "recv",
+        lambda self, src, *, group, init_tag: calls.append(("recv", self, src, group, init_tag)),
+    )
+
+    send_workflow_artifact(artifact, 3, schema=schema, group=None, init_tag=10)
+    result = receive_workflow_artifact(artifact, 4, schema=schema, group=None, init_tag=20)
+
+    assert result is artifact
+    assert calls == [
+        ("send", artifact, 3, None, 10),
+        ("recv", artifact, 4, None, 20),
+    ]
+
+
+def test_workflow_artifact_receive_rejects_storage_changes(monkeypatch):
+    artifact = TensorDict({"input": torch.zeros(2)}, batch_size=[2], device="cpu").consolidate()
+    schema = WorkflowArtifactSchema.from_tensordict(artifact)
+
+    monkeypatch.setattr(dist, "is_initialized", lambda: True)
+    monkeypatch.setattr(dist, "get_backend", lambda group: dist.Backend.GLOO)
+    monkeypatch.setattr(TensorDict, "recv", lambda self, *args, **kwargs: self.unlock_())
+
+    with pytest.raises(WorkflowArtifactError, match="changed consolidated artifact storage"):
+        receive_workflow_artifact(artifact, 1, schema=schema)
