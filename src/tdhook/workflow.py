@@ -529,6 +529,10 @@ class Workflow:
     Methods are bound temporarily to ``model`` so the planner can use their
     actual TensorDict signatures and installed hook programs. Unknown method
     compatibility always produces separate model executions.
+
+    Execution is rank-local when ``model`` is a ``DistributedDataParallel``
+    instance. TDHook does not initialize process groups, launch workers, or
+    aggregate the returned plans, programs, TensorDicts, or captured values.
     """
 
     def __init__(self, *steps: WorkflowStep):

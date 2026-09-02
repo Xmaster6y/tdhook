@@ -78,46 +78,6 @@ The workflow returns one TensorDict containing both ``("attr", "input")`` and
 ``"attribution_mass"``. Use :meth:`~tdhook.workflow.Workflow.plan` when you
 also need to inspect model-pass and compatibility decisions before execution.
 
-Hand workflow artifacts to a local process
-------------------------------------------
-
-Workflow inputs and results can use TensorDict's native process-handoff
-storage. Preallocate every declared output before calling ``share_memory_()``
-or ``consolidate()`` because those operations lock the artifact's structure:
-
-.. code-block:: python
-
-   handoff_workflow = Workflow(
-       TensorDictModule(
-           torch.neg,
-           in_keys=["input"],
-           out_keys=[("result", "negated")],
-       )
-   )
-   artifact = TensorDict(
-       {
-           "input": torch.ones(1, 4),
-           ("result", "negated"): torch.zeros(1, 4),
-       },
-       batch_size=[1],
-       device="cpu",
-   ).share_memory_()
-
-   # Pass artifact directly to a multiprocessing worker, then run there.
-   result = handoff_workflow(nn.Identity(), artifact)
-
-The returned object is the original TensorDict. Its nested keys, batch size,
-device metadata, and shared or consolidated storage are preserved, while
-declared output tensors are detached and updated in place, making them visible
-to processes that share the storage. Any other in-place mutation to an existing
-leaf is likewise caller-visible. CPU input leaves must be detached, output keys
-must already exist with matching shape, dtype, and device, and workflow steps
-must retain in-place TensorDict semantics. Deferred-backward workflows cannot
-use a handoff artifact because their graph cannot cross processes. Violations
-raise :class:`~tdhook.workflow.WorkflowHandoffError` before TDHook can silently
-replace or materialize artifact storage. Process creation and transport remain
-caller-owned; pass the TensorDict directly through native multiprocessing APIs.
-
 Where to go next
 ----------------
 

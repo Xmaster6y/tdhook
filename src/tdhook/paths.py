@@ -7,6 +7,7 @@ import inspect
 import re
 
 from torch import nn
+from torch.nn.parallel import DistributedDataParallel
 
 
 def resolve_submodule_path(root: nn.Module, path: str):
@@ -19,14 +20,17 @@ def resolve_submodule_path(root: nn.Module, path: str):
     literals, or integer slices such as ``[1:3]``. A path may also start with
     an index. Calls, operators, comprehensions, and arbitrary expressions are
     rejected while parsing, before any attribute or item lookup is attempted.
+
+    A root ``DistributedDataParallel`` wrapper is transparent: paths, including
+    the empty path, resolve from its rank-local wrapped module.
     """
     if not isinstance(path, str):
         raise TypeError("submodule paths must be strings")
+    current = root.module if isinstance(root, DistributedDataParallel) else root
     if not path:
-        return root
+        return current
 
     operations = _parse_submodule_path(path)
-    current = root
     try:
         for operation, value in operations:
             current = (
