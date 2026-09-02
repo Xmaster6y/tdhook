@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping, MutableMapping, Sequence
 from contextlib import contextmanager
+from copy import copy
 from dataclasses import dataclass, field
 from hashlib import sha256
 from typing import Literal
 
 import torch
+from tensordict import TensorDictBase
 from torch import Tensor, nn
 
 from tdhook.hooks import HookDirection
@@ -252,7 +254,12 @@ def optimize_interventions(
     model_pass_budget = 1 + sum((spec.initial_value is None) + spec.max_steps for spec in specs)
 
     protected_modules = (model, *frozen_modules)
-    with _preserve_modules(protected_modules), torch.random.fork_rng(devices=_cuda_devices(protected_modules)):
+    input_tensors = _input_tensors((model_args, kwargs))
+    with (
+        _preserve_modules(protected_modules),
+        _preserve_tensor_gradients(input_tensors),
+        torch.random.fork_rng(devices=_cuda_devices(protected_modules, input_tensors)),
+    ):
         if seed is not None:
             torch.manual_seed(seed)
         for spec in specs:
@@ -320,7 +327,13 @@ def optimize_interventions(
                 if value.grad is None or not torch.isfinite(value.grad).all():
                     status = "non_finite"
                     break
+                last_finite_value = value.detach().clone()
                 optimizer.step()
+                if not torch.isfinite(value).all():
+                    with torch.no_grad():
+                        value.copy_(last_finite_value)
+                    status = "non_finite"
+                    break
 
             final_value = value.detach().clone()
             optimized.append(OptimizedIntervention(spec.target, final_value, spec.direction))
@@ -344,7 +357,7 @@ def optimize_interventions(
 
         with torch.no_grad(), HookSession(model) as session:
             _install_interventions(session, optimized)
-            output = model(*model_args, **kwargs)
+            output = _materialize_output(model(*model_args, **kwargs))
         model_passes += 1
 
     return OptimizedInterventionResult(
@@ -416,18 +429,68 @@ def _install_interventions(session: HookSession, interventions: Sequence[Optimiz
 
 def _tensor_sha256(value: Tensor) -> str:
     contiguous = value.detach().cpu().contiguous()
-    return sha256(contiguous.view(torch.uint8).numpy().tobytes()).hexdigest()
+    return sha256(contiguous.reshape(-1).view(torch.uint8).numpy().tobytes()).hexdigest()
 
 
-def _cuda_devices(modules: Sequence[nn.Module]) -> list[int]:
+def _cuda_devices(modules: Sequence[nn.Module], tensors: Sequence[Tensor]) -> list[int]:
     return sorted(
         {
             value.device.index
-            for module in modules
-            for value in (*module.parameters(), *module.buffers())
+            for value in (
+                *tensors,
+                *(item for module in modules for item in (*module.parameters(), *module.buffers())),
+            )
             if value.device.type == "cuda" and value.device.index is not None
         }
     )
+
+
+def _input_tensors(values: Sequence[object]) -> tuple[Tensor, ...]:
+    tensors: list[Tensor] = []
+    stack = list(values)
+    seen: set[int] = set()
+    while stack:
+        value = stack.pop()
+        if id(value) in seen:
+            continue
+        seen.add(id(value))
+        if isinstance(value, Tensor):
+            tensors.append(value)
+        elif isinstance(value, Mapping):
+            stack.extend(value.values())
+        elif isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+            stack.extend(value)
+    return tuple(tensors)
+
+
+@contextmanager
+def _preserve_tensor_gradients(tensors: Sequence[Tensor]):
+    gradients = tuple(
+        (tensor, None if tensor.grad is None else tensor.grad.detach().clone()) for tensor in tensors if tensor.is_leaf
+    )
+    try:
+        yield
+    finally:
+        for tensor, gradient in gradients:
+            tensor.grad = gradient
+
+
+def _materialize_output(value: object) -> object:
+    if isinstance(value, Tensor):
+        return value.detach().clone()
+    if isinstance(value, TensorDictBase):
+        return value.clone()
+    if isinstance(value, MutableMapping):
+        result = copy(value)
+        for key, item in value.items():
+            result[key] = _materialize_output(item)
+        return result
+    if isinstance(value, tuple):
+        items = tuple(_materialize_output(item) for item in value)
+        return type(value)(*items) if hasattr(value, "_fields") else items
+    if isinstance(value, list):
+        return [_materialize_output(item) for item in value]
+    return value
 
 
 @contextmanager

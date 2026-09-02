@@ -1,7 +1,9 @@
 import json
+from collections import namedtuple
 
 import pytest
 import torch
+from tensordict import TensorDict
 from torch import nn
 
 from tdhook.interventions import (
@@ -208,9 +210,11 @@ def test_seeded_optimization_is_deterministic_without_advancing_caller_rng():
 
     first = optimize_intervention(model, (inputs,), spec, seed=7)
     second = optimize_intervention(model, (inputs,), spec, seed=7)
+    different_seed = optimize_intervention(model, (inputs,), spec, seed=8)
 
     assert torch.equal(first.interventions[0].value, second.interventions[0].value)
     assert first.to_dict() == second.to_dict()
+    assert not torch.equal(first.interventions[0].value, different_seed.interventions[0].value)
     assert torch.equal(torch.random.get_rng_state(), rng_state)
 
 
@@ -246,6 +250,104 @@ def test_non_finite_intervention_gradient_is_an_explicit_outcome():
 
     assert result.stages[0].status == "non_finite"
     assert result.stages[0].steps_completed == 1
+
+
+def test_non_finite_optimizer_update_restores_last_finite_value():
+    model = nn.Identity()
+    target = Target("", "activation", -1, (0,))
+    spec = InterventionSpec(
+        target,
+        lambda _output, value: -value.sum() * 1e38,
+        "overflowing update",
+        max_steps=1,
+        initial_value=torch.zeros(1, 1),
+        optimizer=OptimizerConfig("sgd", 10.0),
+    )
+
+    result = optimize_intervention(model, (torch.zeros(1, 1),), spec)
+
+    assert result.stages[0].status == "non_finite"
+    assert torch.equal(result.interventions[0].value, torch.zeros(1, 1))
+    assert torch.equal(result.output, torch.zeros(1, 1))
+
+
+def test_caller_input_gradient_is_restored_and_nested_inputs_are_discovered():
+    class KeywordIdentity(nn.Module):
+        def forward(self, value, *, duplicate):
+            assert duplicate is value
+            return value
+
+    model = KeywordIdentity()
+    value = torch.ones(1, 2, requires_grad=True)
+    value.grad = torch.full_like(value, 7)
+    target = Target("", "activation", -1, (0,))
+    spec = InterventionSpec(target, lambda output, _value: output.sum(), "input gradient", max_steps=1)
+
+    optimize_intervention(model, (value,), spec, model_kwargs={"duplicate": value})
+
+    assert torch.equal(value.grad, torch.full_like(value, 7))
+
+
+def test_scalar_intervention_value_has_serializable_provenance():
+    class ScalarModel(nn.Module):
+        def forward(self):
+            return torch.ones(1)
+
+    model = ScalarModel()
+    target = Target("", "activation", 0, (0,))
+    spec = InterventionSpec(
+        target,
+        lambda output, _value: output.sum(),
+        "scalar intervention",
+        max_steps=1,
+        initial_value=torch.ones(()),
+    )
+
+    result = optimize_intervention(model, (), spec)
+
+    assert result.stages[0].value_shape == ()
+    assert len(result.stages[0].value_sha256) == 64
+
+
+def test_final_structured_output_does_not_alias_restored_module_state():
+    Aliases = namedtuple("Aliases", ("parameter", "buffers"))
+
+    class AliasingModel(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.weight = nn.Parameter(torch.ones(1))
+            self.register_buffer("running", torch.ones(1))
+
+        def forward(self, value):
+            with torch.no_grad():
+                self.weight.add_(1)
+                self.running.add_(1)
+            return {
+                "value": value,
+                "aliases": Aliases(self.weight, [self.running]),
+                "tensor_dict": TensorDict({"buffer": self.running}, batch_size=[]),
+                "metadata": "kept",
+            }
+
+    model = AliasingModel()
+    target = Target("", "activation", -1, (0,), output_path=("value",))
+    spec = InterventionSpec(
+        target,
+        lambda output, _value: output["value"].sum(),
+        "aliasing output",
+        max_steps=1,
+        initial_value=torch.ones(1),
+    )
+
+    result = optimize_intervention(model, (torch.ones(1),), spec)
+
+    assert torch.equal(model.weight, torch.ones(1))
+    assert torch.equal(model.running, torch.ones(1))
+    assert isinstance(result.output["aliases"], Aliases)
+    assert torch.equal(result.output["aliases"].parameter, torch.full((1,), 3.0))
+    assert torch.equal(result.output["aliases"].buffers[0], torch.full((1,), 3.0))
+    assert torch.equal(result.output["tensor_dict"]["buffer"], torch.full((1,), 3.0))
+    assert result.output["metadata"] == "kept"
 
 
 @pytest.mark.parametrize(

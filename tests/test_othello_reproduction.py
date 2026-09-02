@@ -25,6 +25,7 @@ def test_othello_reproduction_uses_the_public_optimized_intervention_api():
     assert "optimization_artifact = optimized.to_dict()" in code
     assert "50-game layer/game-length sweep" in markdown
     assert "issue #107" in markdown
+    assert "MPS path may produce silently incorrect results" in markdown
 
 
 def test_othello_reproduction_code_cells_parse():
