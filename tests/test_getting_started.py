@@ -53,3 +53,18 @@ def test_getting_started_workflow_example_executes_after_the_first_example():
     result = namespace["result"]
     assert ("attr", "input") in result
     assert "attribution_mass" in result
+
+
+def test_getting_started_handoff_example_is_self_contained():
+    blocks = _rst_python_blocks((REPO_ROOT / "docs/source/start.rst").read_text())
+    namespace = {}
+
+    exec(blocks[0], namespace)
+    exec(blocks[1], namespace)
+    exec(blocks[2], namespace)
+
+    artifact = namespace["artifact"]
+    result = namespace["result"]
+    assert result is artifact
+    assert result.is_shared()
+    assert result["result", "negated"].equal(-namespace["torch"].ones(1, 4))
