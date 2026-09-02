@@ -153,6 +153,36 @@ def test_session_rejects_stale_or_incompatible_live_captures():
             session.replace(destination, captured)
 
 
+def test_session_rejects_an_unconsumed_capture_from_an_earlier_execution():
+    class ConditionalModel(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.source = nn.Identity()
+            self.destination = nn.Identity()
+            self.use_source = True
+
+        def forward(self, value):
+            if self.use_source:
+                return self.source(value)
+            return self.destination(value)
+
+    model = ConditionalModel()
+    source = Target("source", "activation", -1, (0,))
+    destination = Target("destination", "activation", -1, (1,))
+
+    with pytest.raises(RuntimeError, match="fresh source capture"):
+        with HookSession(model) as session:
+            captured = session.capture(source)
+            session.replace(destination, captured)
+            model(torch.ones(1, 2))
+            model.use_source = False
+            model(torch.ones(1, 2))
+
+    assert not model._forward_pre_hooks
+    assert not model.source._forward_hooks
+    assert not model.destination._forward_hooks
+
+
 def test_session_validates_live_capture_options():
     model = nn.Identity()
     activation = Target("", "activation", -1, (0,))

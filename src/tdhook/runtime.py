@@ -198,6 +198,14 @@ class HookProgramBuilder:
             self._cleanups.append(cleanup)
         self._specs.append(spec)
 
+    def add_cleanup(self, cleanup: Callable[[], Any]) -> None:
+        """Add lifecycle cleanup for internal state that is not a program operation."""
+
+        self._ensure_open()
+        if not callable(cleanup):
+            raise TypeError("cleanup must be callable")
+        self._cleanups.append(cleanup)
+
     def build(self) -> BoundHookProgram:
         """Seal and return the installed program."""
 

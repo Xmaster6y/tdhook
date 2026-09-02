@@ -127,6 +127,8 @@ def test_program_builder_rejects_invalid_specs_and_reuse():
     builder = HookProgramBuilder()
     with pytest.raises(TypeError, match="cleanup"):
         builder.record(HookSpec("", "capture", None), cleanup=1)
+    with pytest.raises(TypeError, match="cleanup"):
+        builder.add_cleanup(1)
 
     builder = HookProgramBuilder()
     with pytest.raises(TypeError, match="module_path"):
