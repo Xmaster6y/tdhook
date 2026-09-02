@@ -138,10 +138,13 @@ def _inverse_map(
         loss = F.cross_entropy(logits.flatten(0, -2), desired_board.flatten())
         loss.backward()
         optimizer.step()
-        final_loss = float(loss.detach().cpu())
-        if step % 10 == 0 and torch.equal(logits.argmax(-1), desired_board):
-            return value.detach(), step + 1, final_loss
-    return value.detach(), max_steps, final_loss
+        with torch.no_grad():
+            updated_logits = _probe_logits(value, probe)
+            updated_loss = F.cross_entropy(updated_logits.flatten(0, -2), desired_board.flatten())
+            final_loss = float(updated_loss.cpu())
+            if step % 10 == 0 and torch.equal(updated_logits.argmax(-1), desired_board):
+                return value.detach(), step + 1, final_loss
+    raise RuntimeError(f"inverse map did not converge within {max_steps} optimizer steps (loss={final_loss:.6g})")
 
 
 def _cosine(left: torch.Tensor, right: torch.Tensor) -> torch.Tensor:
@@ -410,7 +413,7 @@ def run_figure4_reproduction(
         **behavior["gates"],
         "tdhook_reference_parity": parity_max_abs_difference <= 1e-5,
         "sham_identity": sham_max_abs_error <= 1e-6,
-        "middle_over_late_ordering": float(np.nanmean(ordering_difference)) > 0,
+        "middle_over_late_ordering": float(ordering_lower[0]) > 0,
     }
 
     artifact = {
