@@ -78,47 +78,6 @@ The workflow returns one TensorDict containing both ``("attr", "input")`` and
 ``"attribution_mass"``. Use :meth:`~tdhook.workflow.Workflow.plan` when you
 also need to inspect model-pass and compatibility decisions before execution.
 
-Keep activation caches on disk
-------------------------------
-
-Activation caching can publish TensorDict-native memory-mapped storage without
-an in-memory copy. Preallocate every captured key with its final shape, dtype,
-and device, then let TensorDict create the memory map:
-
-.. code-block:: python
-
-   from pathlib import Path
-
-   import torch
-   from tensordict import TensorDict
-   from tdhook.latent import ActivationCaching
-   from tdhook.workflow import Workflow
-
-   cache_path = Path("/tmp/my-activation-cache")
-   cache = TensorDict(
-       {("fwd", "0"): torch.empty(1, 8)},
-       batch_size=[],
-   ).memmap(cache_path)
-   caching = ActivationCaching(
-       "0",
-       cache=cache,
-       clear_cache=False,
-       use_nested_keys=True,
-       cache_key=("activations", "cache"),
-   )
-   result = Workflow(caching)(model, data)
-
-   # This leaf still references cache_path rather than an in-memory clone.
-   activations = result["activations", "cache", "fwd", "0"]
-   reloaded = TensorDict.load_memmap(cache_path)
-
-Memory-mapped TensorDicts have a fixed, locked structure. Captures update the
-preallocated leaves in place, so later executions with the same cache also
-change previously published views. The caller owns ``cache_path`` and decides
-its lifetime: TDHook never deletes it. Remove it only after published views and
-any TensorDicts loaded from the path are no longer in use. Use a separate path
-when an immutable snapshot is required.
-
 Where to go next
 ----------------
 

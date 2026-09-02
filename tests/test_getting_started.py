@@ -45,7 +45,7 @@ def test_getting_started_examples_match_and_execute():
 
 def test_getting_started_workflow_example_executes_after_the_first_example():
     blocks = _rst_python_blocks((REPO_ROOT / "docs/source/start.rst").read_text())
-    assert len(blocks) == 3
+    assert len(blocks) == 2
     namespace = {}
 
     exec(blocks[0], namespace)
@@ -54,21 +54,3 @@ def test_getting_started_workflow_example_executes_after_the_first_example():
     result = namespace["result"]
     assert ("attr", "input") in result
     assert "attribution_mass" in result
-
-
-def test_getting_started_memmap_example_executes_with_caller_owned_path(tmp_path):
-    blocks = _rst_python_blocks((REPO_ROOT / "docs/source/start.rst").read_text())
-    namespace = {}
-
-    exec(blocks[0], namespace)
-    memmap_example = blocks[2].replace(
-        'Path("/tmp/my-activation-cache")',
-        f"Path({str(tmp_path / 'activation-cache')!r})",
-    )
-    exec(memmap_example, namespace)
-
-    activations = namespace["activations"]
-    cache = namespace["cache"]
-    reloaded = namespace["reloaded"]
-    assert activations.data_ptr() == cache["fwd", "0"].data_ptr()
-    namespace["torch"].testing.assert_close(reloaded["fwd", "0"], activations)

@@ -26,7 +26,8 @@ Core interfaces
 
       :octicon:`workflow;2em;sd-text-primary`
 
-      Compose methods and TensorDict operations with an inspectable plan.
+      Compose methods and TensorDict operations with an inspectable plan, and
+      keep activation caches on caller-owned disk storage.
 
 Advanced execution
 ------------------
