@@ -81,6 +81,30 @@ class HookProgram:
                 raise ValueError("capture dependencies must refer to a capture hook")
 
 
+@dataclass
+class _TargetOccurrence:
+    target: Target
+    operation: str
+    calls: int = 0
+
+    def selected(self) -> bool:
+        occurrence = self.target.occurrence
+        selected = occurrence is None or self.calls == occurrence
+        self.calls += 1
+        return selected
+
+    def reset(self) -> None:
+        self.calls = 0
+
+    def validate(self) -> None:
+        occurrence = self.target.occurrence
+        if occurrence is not None and self.calls <= occurrence:
+            raise RuntimeError(
+                f"{self.operation} target {self.target.module_path!r} requested occurrence {occurrence}, "
+                f"but the module was called {self.calls} time(s) in this root-model execution"
+            )
+
+
 class BoundHookProgram:
     """An installed hook program with deterministic reverse-order cleanup."""
 
@@ -177,6 +201,48 @@ class HookProgramBuilder:
                 stacklevel=2,
             )
         self.register(module, hook, spec)
+
+    def register_target(
+        self,
+        root: nn.Module,
+        hook: Callable,
+        spec: HookSpec,
+        *,
+        relative_path: str = "",
+    ) -> None:
+        """Install an occurrence-aware target hook below one execution root."""
+
+        if spec.target is None:
+            raise ValueError("target hook registration requires a Target")
+        if spec.target.kind == "parameter" or spec.direction is None:
+            raise ValueError("target hook registration requires an activation or gradient hook")
+        target_module = self.resolve_path(root, spec.module_path, relative_path=relative_path)
+        occurrence = _TargetOccurrence(spec.target, spec.operation)
+
+        @wraps(hook)
+        def selected_hook(*args: Any, **kwargs: Any) -> Any:
+            if occurrence.selected():
+                return hook(*args, **kwargs)
+            return None
+
+        self.register(target_module, selected_hook, spec)
+        if spec.target.occurrence is None:
+            return
+
+        execution_root = self.resolve_path(root, "", relative_path=relative_path)
+        begin_direction: HookDirection = "fwd_pre" if spec.target.kind == "activation" else "bwd_pre"
+        end_direction: HookDirection = "fwd" if spec.target.kind == "activation" else "bwd"
+
+        def begin_execution(_module: nn.Module, _values: object) -> None:
+            occurrence.reset()
+
+        def end_execution(_module: nn.Module, _args: object, _output: object) -> None:
+            occurrence.validate()
+
+        begin_handle = register_hook_to_module(execution_root, begin_execution, begin_direction, prepend=True)
+        self.add_cleanup(begin_handle.remove)
+        end_handle = register_hook_to_module(execution_root, end_execution, end_direction)
+        self.add_cleanup(end_handle.remove)
 
     def resolve_path(self, root: nn.Module, module_path: str, *, relative_path: str = "") -> nn.Module:
         """Resolve one executable module path without installing a hook."""

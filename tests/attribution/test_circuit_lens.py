@@ -249,6 +249,14 @@ def test_feature_site_rejects_invalid_metadata(factory, message):
         factory()
 
 
+def test_feature_site_gradient_target_preserves_occurrence():
+    target = Target("upstream", "activation", -1, (0,), output_path=(0,), occurrence=2)
+
+    assert FeatureSite(0, target).gradient_target() == Target(
+        "upstream", "gradient", -1, (0,), output_path=(0,), occurrence=2
+    )
+
+
 @pytest.mark.parametrize(
     ("overrides", "message"),
     [

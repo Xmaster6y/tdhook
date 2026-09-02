@@ -92,6 +92,30 @@ class TestActivationPatching:
         torch.testing.assert_close(result["output"], torch.tensor([[1.0, 2.0, 3.0]]))
         torch.testing.assert_close(result["patched", "output"], torch.tensor([[1.0, 20.0, 30.0]]))
 
+    def test_target_occurrence_patches_one_repeated_module_call(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.shared = torch.nn.Identity()
+
+            def forward(self, value):
+                return self.shared(value + 1) + self.shared(value + 2)
+
+        target = Target("shared", "activation", -1, (0,), occurrence=0)
+        data = TensorDict(
+            {
+                "input": torch.tensor([[1.0, 2.0]]),
+                ("patched", "input"): torch.tensor([[10.0, 20.0]]),
+            },
+            batch_size=[1],
+        )
+
+        with ActivationPatching([target]).prepare(Model()) as prepared:
+            result = prepared(data)
+
+        torch.testing.assert_close(result["output"], torch.tensor([[5.0, 7.0]]))
+        torch.testing.assert_close(result["patched", "output"], torch.tensor([[14.0, 43.0]]))
+
     @pytest.mark.parametrize(
         "value,exception",
         [

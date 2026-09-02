@@ -70,6 +70,25 @@ class TestSteeringVectors:
 
         torch.testing.assert_close(result["output"], torch.tensor([[1.0, 0.0, 3.0]]))
 
+    def test_target_occurrence_steers_one_repeated_module_call(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.shared = torch.nn.Identity()
+
+            def forward(self, value):
+                return self.shared(value + 1) + self.shared(value + 2)
+
+        target = Target("shared", "activation", -1, (0,), occurrence=0)
+        data = TensorDict({"input": torch.tensor([[1.0, 2.0]])}, batch_size=[1])
+
+        with SteeringVectors([target], steer_fn=lambda module_key, output: torch.zeros_like(output)).prepare(
+            Model()
+        ) as prepared:
+            result = prepared(data)
+
+        torch.testing.assert_close(result["output"], torch.tensor([[3.0, 7.0]]))
+
 
 class TestActivationAddition:
     """Test the ActivationAddition class."""
@@ -126,3 +145,26 @@ class TestActivationAddition:
 
         torch.testing.assert_close(result["steer", "linear"], torch.tensor([4.0]))
         assert ("steer", "linear") in prepared.out_keys
+
+    def test_target_occurrence_extracts_one_repeated_module_call(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.shared = torch.nn.Identity()
+
+            def forward(self, value):
+                return self.shared(value * 2) + self.shared(value * 3)
+
+        target = Target("shared", "activation", -1, (0,), occurrence=1)
+        data = TensorDict(
+            {
+                ("positive", "input"): torch.tensor([[2.0, 0.0]]),
+                ("negative", "input"): torch.tensor([[1.0, 0.0]]),
+            },
+            batch_size=[1],
+        )
+
+        with ActivationAddition([target]).prepare(Model()) as prepared:
+            result = prepared(data)
+
+        torch.testing.assert_close(result["steer", "shared"], torch.tensor([3.0]))

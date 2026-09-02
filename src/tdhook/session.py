@@ -130,6 +130,8 @@ class HookSession:
         ``detach=False`` when a later attribution objective must backpropagate
         from the captured activation; the result then retains its autograd
         history and is only valid for the lifetime of the surrounding graph.
+        A target with ``occurrence`` set captures only that zero-based module
+        call in each root-model execution.
         """
 
         model, builder = self._active_state()
@@ -201,7 +203,7 @@ class HookSession:
             hook = hooks.get(direction)
             if hook is None:  # pragma: no cover - guarded by _direction
                 raise RuntimeError(f"unsupported capture direction: {direction!r}")
-            builder.register(module, hook, spec)
+            builder.register_target(model, hook, spec)
 
         return captured
 
@@ -225,7 +227,9 @@ class HookSession:
         observed live value to a later compatible target in the same model
         execution. ``transform`` is applied to that value immediately before
         replacement. Whether the routed value retains its graph is controlled
-        by the source capture's ``detach`` argument.
+        by the source capture's ``detach`` argument. A target with
+        ``occurrence`` set replaces only that zero-based module call in each
+        root-model execution.
         """
 
         model, builder = self._active_state()
@@ -293,7 +297,7 @@ class HookSession:
             hook = hooks.get(direction)
             if hook is None:  # pragma: no cover - guarded by _direction
                 raise RuntimeError(f"unsupported replacement direction: {direction!r}")
-            builder.register(module, hook, spec)
+            builder.register_target(model, hook, spec)
 
     def _validate_live_source(
         self,

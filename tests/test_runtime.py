@@ -137,6 +137,23 @@ def test_program_builder_rejects_invalid_specs_and_reuse():
     assert builder.program.stopped_at == "layer"
 
 
+def test_program_builder_rejects_invalid_target_hook_specs():
+    module = nn.Identity()
+
+    def hook(_module, _args, output):
+        return output
+
+    builder = HookProgramBuilder()
+
+    with pytest.raises(ValueError, match="requires a Target"):
+        builder.register_target(module, hook, HookSpec("", "capture", "fwd"))
+    parameter = Target("", "parameter", 0, (0,), parameter="weight")
+    with pytest.raises(ValueError, match="activation or gradient"):
+        builder.register_target(module, hook, HookSpec("", "capture", "fwd", target=parameter))
+
+    builder.remove()
+
+
 def test_temporary_module_state_rejects_hook_specs():
     with pytest.raises(ValueError, match="directionless"):
         with temporary_module_state(nn.Identity(), None, HookSpec("", "state", "fwd")):
