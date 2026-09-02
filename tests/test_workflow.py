@@ -140,6 +140,24 @@ class PublishingMethod(HookingContextFactory):
     _hooked_module_class = PublishingModule
 
 
+class HandoffMutation(TensorDictModuleBase):
+    in_keys = ["input"]
+    out_keys = ["output"]
+
+    def __init__(self, mutation):
+        super().__init__()
+        self.mutation = mutation
+
+    def forward(self, data):
+        if self.mutation == "metadata":
+            data.batch_size = []
+        elif self.mutation == "keys":
+            data.set("extra", torch.zeros(2))
+        elif self.mutation == "non_tensor":
+            data.set("output", "invalid")
+        return data
+
+
 def _double(value):
     return value * 2
 
@@ -212,6 +230,99 @@ def test_workflow_handoff_rejects_autograd_inputs():
     operator = TensorDictModule(_double, in_keys=["input"], out_keys=["output"])
 
     with pytest.raises(WorkflowHandoffError, match="requires gradients.*detach"):
+        Workflow(operator)(nn.Identity(), data)
+
+
+def test_workflow_handoff_rejects_non_tensor_artifacts():
+    data = TensorDict({"label": "unsafe"}, batch_size=[]).consolidate()
+
+    with pytest.raises(WorkflowHandoffError, match="label.*must contain a Tensor"):
+        Workflow()(nn.Identity(), data)
+
+
+def test_workflow_handoff_rejects_non_cpu_artifacts(monkeypatch):
+    data = TensorDict({"input": torch.empty(2, device="meta")}, batch_size=[2])
+    monkeypatch.setattr(TensorDict, "is_shared", lambda _self: True)
+
+    with pytest.raises(WorkflowHandoffError, match="local process handoff requires CPU"):
+        Workflow()(nn.Identity(), data)
+
+
+def test_workflow_handoff_rejects_deferred_backward(default_test_model):
+    data = TensorDict({"input": torch.ones(2, 10), "output": torch.zeros(2, 5)}, batch_size=[2]).share_memory_()
+
+    with pytest.raises(WorkflowHandoffError, match="deferred backward"):
+        Workflow(BackwardCapture())(default_test_model, data)
+
+
+def test_workflow_handoff_requires_in_place_step_semantics():
+    data = TensorDict({"input": torch.ones(2), "output": torch.zeros(2)}, batch_size=[2]).share_memory_()
+    operator = TensorDictModule(_double, in_keys=["input"], out_keys=["output"], inplace=False)
+
+    with pytest.raises(WorkflowHandoffError, match="must mutate.*in place"):
+        Workflow(operator)(nn.Identity(), data)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        ("metadata", "changed artifact batch size or device metadata"),
+        ("keys", "changed artifact keys"),
+        ("non_tensor", "output.*must remain a Tensor"),
+    ],
+)
+def test_workflow_handoff_rejects_unsafe_step_mutations(mutation, message):
+    data = TensorDict({"input": torch.ones(2), "output": torch.zeros(2)}, batch_size=[2]).share_memory_()
+
+    with pytest.raises(WorkflowHandoffError, match=message):
+        Workflow(HandoffMutation(mutation))(nn.Identity(), data)
+
+
+def test_workflow_handoff_ignores_discarded_operator_outputs():
+    data = TensorDict({"input": torch.ones(2)}, batch_size=[2]).share_memory_()
+    operator = TensorDictModule(_double, in_keys=["input"], out_keys=["_"])
+
+    result = Workflow(operator)(nn.Identity(), data)
+
+    assert result is data
+    assert result.is_shared()
+
+
+@pytest.mark.parametrize(
+    ("corruption", "message"),
+    [
+        ("record", "without storage metadata"),
+        ("storage", "storage metadata is unavailable"),
+        ("nested", "metadata is missing output"),
+        ("leaf", "metadata is missing output"),
+    ],
+)
+def test_workflow_handoff_rejects_malformed_consolidated_metadata(corruption, message):
+    data = TensorDict({"input": torch.ones(2), "result": {"doubled": torch.zeros(2)}}, batch_size=[2]).consolidate()
+    if corruption == "record":
+        data._consolidated = None
+    elif corruption == "storage":
+        data._consolidated = {"metadata": {}}
+    elif corruption == "nested":
+        data._consolidated["metadata"]["result"] = None
+    else:
+        del data._consolidated["metadata"]["result"]["leaves"]["doubled"]
+    operator = TensorDictModule(_double, in_keys=["input"], out_keys=[("result", "doubled")])
+
+    with pytest.raises(WorkflowHandoffError, match=message):
+        Workflow(operator)(nn.Identity(), data)
+
+
+def test_workflow_handoff_detects_final_storage_changes():
+    data = TensorDict({"input": torch.ones(2), "output": torch.zeros(2)}, batch_size=[2]).share_memory_()
+
+    def unlock_artifact(value):
+        data.unlock_()
+        return value * 2
+
+    operator = TensorDictModule(unlock_artifact, in_keys=["input"], out_keys=["output"])
+
+    with pytest.raises(WorkflowHandoffError, match="changed native handoff artifact storage"):
         Workflow(operator)(nn.Identity(), data)
 
 

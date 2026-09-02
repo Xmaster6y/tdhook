@@ -142,6 +142,18 @@ class _OperatorNode:
 _ExecutionNode = _BoundMethodNode | _OperatorNode
 
 
+def _artifact_leaf_items(data: TensorDictBase):
+    return (
+        (key, value)
+        for key, value in data.items(include_nested=True, leaves_only=False)
+        if not isinstance(value, TensorDictBase)
+    )
+
+
+def _artifact_leaf_keys(data: TensorDictBase) -> frozenset[NestedKey]:
+    return frozenset(key for key, _ in _artifact_leaf_items(data))
+
+
 @dataclass(frozen=True)
 class _HandoffArtifact:
     """Storage facts for a shared or consolidated TensorDict."""
@@ -160,7 +172,7 @@ class _HandoffArtifact:
         if not (shared or consolidated):
             return None
 
-        for key, value in data.items(include_nested=True, leaves_only=True):
+        for key, value in _artifact_leaf_items(data):
             if not isinstance(value, Tensor):
                 raise WorkflowHandoffError(
                     f"Workflow handoff artifact key {key!r} must contain a Tensor, got {type(value).__name__}"
@@ -176,7 +188,7 @@ class _HandoffArtifact:
 
         return cls(
             data=data,
-            keys=frozenset(data.keys(include_nested=True, leaves_only=True)),
+            keys=_artifact_leaf_keys(data),
             batch_size=data.batch_size,
             device=data.device,
             shared=shared,
@@ -210,7 +222,7 @@ class _HandoffArtifact:
             raise WorkflowHandoffError(
                 f"Workflow step {execution.steps!r} changed artifact batch size or device metadata"
             )
-        if frozenset(current.keys(include_nested=True, leaves_only=True)) != self.keys:
+        if _artifact_leaf_keys(current) != self.keys:
             raise WorkflowHandoffError(f"Workflow step {execution.steps!r} changed artifact keys")
 
         for key in execution.out_keys:
@@ -267,7 +279,7 @@ class _HandoffArtifact:
             or self.data.device != self.device
             or self.data.is_shared() != self.shared
             or self.data.is_consolidated() != self.consolidated
-            or frozenset(self.data.keys(include_nested=True, leaves_only=True)) != self.keys
+            or _artifact_leaf_keys(self.data) != self.keys
         ):
             raise WorkflowHandoffError("Workflow changed native handoff artifact storage or metadata")
         return self.data
