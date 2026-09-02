@@ -6,7 +6,7 @@ import torch
 from tensordict import TensorDict
 from torch import nn
 
-from tdhook.session import CaptureSource, EarlyStopResult, HookProgram, HookSession, HookSpec
+from tdhook.session import CapturedTarget, CaptureSource, EarlyStopResult, HookProgram, HookSession, HookSpec
 from tdhook.targets import Target
 
 
@@ -192,9 +192,18 @@ def test_session_validates_live_capture_options():
     with HookSession(model) as session:
         with pytest.raises(TypeError, match="detach must be a bool"):
             session.capture(activation, detach=1)
+        forged = CapturedTarget(_session_token=session._session_token)
+        with pytest.raises(ValueError, match="created by HookSession.capture"):
+            session.replace(activation, forged)
         captured = session.capture(activation)
         with pytest.raises(TypeError, match="transform must be callable"):
             session.replace(activation, captured, transform=1)
+        session.replace(activation, captured)
+        session.replace(activation, captured)
+        assert torch.equal(model(torch.ones(1)), torch.ones(1))
+
+    assert not model._forward_pre_hooks
+    assert not model._forward_hooks
 
     with HookSession(parameter_model) as session:
         captured = session.capture(parameter)
