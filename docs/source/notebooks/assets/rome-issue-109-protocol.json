@@ -4,11 +4,30 @@
     "bootstrap_samples": 10000,
     "case_ids": "0-99 inclusive",
     "number_cases": 100,
+    "paper_reference": {
+      "evaluation_records": 7500,
+      "metrics": {
+        "neighborhood_specificity": {
+          "point_estimate": 0.754,
+          "reported_95_ci_half_width": 0.007
+        },
+        "paraphrase_generalization": {
+          "point_estimate": 0.964,
+          "reported_95_ci_half_width": 0.003
+        },
+        "rewrite_efficacy": {
+          "point_estimate": 1.0,
+          "reported_95_ci_half_width": 0.001
+        }
+      },
+      "source": "https://arxiv.org/abs/2202.05262v5",
+      "table": 4
+    },
     "seed": 109
   },
   "decision_gates": {
     "causal_trace_case_parity": "all fixed cases match atol=1e-6 and rtol=1e-5",
-    "counterfact_reproduction": "the 95% confidence interval for each declared metric contains the matching official-slice point estimate",
+    "counterfact_reproduction": "the preregistered 100-case bootstrap 95% confidence interval for each metric contains the matching GPT-2 XL ROME point estimate in paper Table 4",
     "localization": "subject-last-token middle-third MLP restoration has greater mean indirect effect than both early-third and late-third controls",
     "state_restoration": "the unedited model weight is bitwise equal before and after every temporary edit"
   },
@@ -27,7 +46,13 @@
     "model": "openai-community/gpt2-xl",
     "model_revision": "15ea56dee5df4983c59b2538573817e1667135e2",
     "rome_repository": "https://github.com/kmeng01/rome",
-    "rome_revision": "0874014cd9837e4365f3e6f3c71400ef11509e04"
+    "rome_revision": "0874014cd9837e4365f3e6f3c71400ef11509e04",
+    "rome_source_sha256": {
+      "experiments/causal_trace.py": "78af1c55d0353351bcdfff04dae747e5d2c09ce05ba0733ea8ec4c34cf74a155",
+      "experiments/py/eval_utils_counterfact.py": "9517b4f538f72178a1fdcd869950c5846406a092d99e5c513c4ab9ae3fadd747",
+      "hparams/ROME/gpt2-xl.json": "81a98b788b8fbb89718288a8831441200e7d824fd057f62cb7d913ae4da5cf42",
+      "rome/rome_main.py": "dfad8eaa83940bfd00fd3629eca23650726ede62d5a8160905f2c8a516188768"
+    }
   },
   "scientific_claim": "No reproduction claim is made until all gates are evaluated from emitted per-case artifacts.",
   "tracing": {

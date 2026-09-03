@@ -181,6 +181,8 @@ def causal_trace_window_grid(
 
     if component not in {"mlp", "attn"}:
         raise ValueError("component must be 'mlp' or 'attn'")
+    if isinstance(window, bool) or not isinstance(window, int) or window <= 0:
+        raise ValueError("window must be a positive integer")
     token_indices = tuple(
         token_indices if token_indices is not None else range(next(iter(model_inputs.values())).shape[1])
     )

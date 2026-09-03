@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 import nbformat
 import numpy as np
+import pytest
 import torch
 from torch import nn
 
@@ -48,9 +49,14 @@ def test_rome_reproduction_is_linked_parseable_and_resource_bounded():
         "execute_rome",
         "compute_rewrite_quality_counterfact",
         "parity_report",
+        "rome_source_sha256",
+        "scores.cpu().numpy() - corrupted_probability",
+        'protocol["counterfact"]["paper_reference"]',
         "write_json",
     ):
         assert required in code
+    assert "deltas = execute_rome(model, tokenizer, request, hparams)" in code
+    assert "deltas = execute_rome(model, tokenizer, [request], hparams)" not in code
     for cell in notebook.cells:
         if cell.cell_type == "code":
             compile(cell.source, str(NOTEBOOK), "exec")
@@ -62,6 +68,11 @@ def test_protocol_preregisters_provenance_controls_metrics_and_fail_closed_statu
     assert protocol["artifact_status"] == "not_run"
     assert protocol["counterfact"]["case_ids"] == "0-99 inclusive"
     assert protocol["counterfact"]["seed"] == 109
+    assert protocol["counterfact"]["paper_reference"]["metrics"] == {
+        "rewrite_efficacy": {"point_estimate": 1.0, "reported_95_ci_half_width": 0.001},
+        "paraphrase_generalization": {"point_estimate": 0.964, "reported_95_ci_half_width": 0.003},
+        "neighborhood_specificity": {"point_estimate": 0.754, "reported_95_ci_half_width": 0.007},
+    }
     assert protocol["tracing"]["parity_case_ids"] == [0, 1, 2]
     assert protocol["tracing"]["aggregate_case_ids"] == "all 1000 known_1000 cases"
     assert protocol["metrics"] == [
@@ -75,14 +86,25 @@ def test_protocol_preregisters_provenance_controls_metrics_and_fail_closed_statu
         "localization",
         "state_restoration",
     }
-    assert all(len(value) == 64 for key, value in protocol["provenance"].items() if key.endswith("_sha256"))
+    assert all(
+        len(value) == 64
+        for key, value in protocol["provenance"].items()
+        if key.endswith("_sha256") and isinstance(value, str)
+    )
+    assert set(protocol["provenance"]["rome_source_sha256"]) == {
+        "experiments/causal_trace.py",
+        "experiments/py/eval_utils_counterfact.py",
+        "hparams/ROME/gpt2-xl.json",
+        "rome/rome_main.py",
+    }
+    assert all(len(value) == 64 for value in protocol["provenance"]["rome_source_sha256"].values())
 
 
 def test_numpy_corruption_matches_the_released_rome_rng_convention():
     helper = _load_helper()
-    value = torch.zeros(3, 2, 4)
+    value = torch.ones(3, 2, 4)
     actual = helper._corrupt_subject(value, seed=1, noise_level=0.1, replace=False)
-    expected = torch.from_numpy(np.random.RandomState(1).randn(2, 2, 4)) * 0.1
+    expected = value[1:] + torch.from_numpy(np.random.RandomState(1).randn(2, 2, 4)) * 0.1
 
     assert torch.equal(actual[0], value[0])
     torch.testing.assert_close(actual[1:], expected.to(actual))
@@ -95,8 +117,10 @@ def test_temporary_rank_one_edit_is_visible_only_inside_the_session():
     left = torch.tensor([1.0, 2.0, 3.0])
     right = torch.tensor([4.0, 5.0])
 
-    with helper.temporary_rank_one_edit(model, "", "weight", left, right):
-        torch.testing.assert_close(model.weight, original + torch.outer(left, right).T)
+    with pytest.raises(ValueError, match="sentinel"):
+        with helper.temporary_rank_one_edit(model, "", "weight", left, right):
+            torch.testing.assert_close(model.weight, original + torch.outer(left, right).T)
+            raise ValueError("sentinel")
 
     assert torch.equal(model.weight, original)
 
@@ -168,6 +192,23 @@ def test_residual_grid_selects_the_tensor_from_gpt2_style_block_outputs():
 
     assert scores.shape == (2, 1)
     assert budget == {"model_pass_budget": 2, "model_passes": 2}
+
+
+@pytest.mark.parametrize("window", [0, -1, True, 1.5])
+def test_window_grid_rejects_non_positive_or_non_integer_windows(window):
+    helper = _load_helper()
+
+    with pytest.raises(ValueError, match="positive integer"):
+        helper.causal_trace_window_grid(
+            nn.Identity(),
+            {"input": torch.ones(2, 1)},
+            answer_token=0,
+            subject_range=(0, 1),
+            layer_paths=[""],
+            component="mlp",
+            window=window,
+            config=helper.CausalTraceConfig(samples=1),
+        )
 
 
 def test_counterfact_reduction_uses_official_negative_log_likelihood_ordering():
