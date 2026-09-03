@@ -50,10 +50,12 @@ json_url = "https://tdhook.readthedocs.io/en/latest/_static/switcher.json"
 
 version_match = os.environ.get("READTHEDOCS_VERSION")
 release = tdhook.__version__
-# If READTHEDOCS_VERSION doesn't exist, we're not on RTD
+# Read the Docs uses "latest" for the development build.
+if version_match == "latest":
+    version_match = "dev"
+# If READTHEDOCS_VERSION doesn't exist, we're not on RTD.
 # If it is an integer, we're in a PR build and the version isn't correct.
-# If it's "latest" → change to "dev"
-if not version_match or version_match.isdigit() or version_match == "latest":
+elif not version_match or version_match.isdigit():
     # For local development, infer the version to match from the package.
     if "dev" in release or "rc" in release:
         version_match = "dev"
