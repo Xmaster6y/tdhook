@@ -2,15 +2,18 @@
 Module for attribution methods.
 """
 
-# Import order is intentional: legacy modules import Saliency from this package.
-# ruff: noqa: I001
-
-from .lrp import LRP
-from .saliency import Saliency
-from .grad_cam import GradCAM
-from .guided_backpropagation import GuidedBackpropagation
 from .activation_maximisation import ActivationMaximisation
-from .integrated_gradients import IntegratedGradients
+from .circuit_clustering import (
+    CircuitClusters,
+    CircuitContributor,
+    CircuitSignature,
+    build_circuit_signature,
+    cluster_circuit_artifacts,
+    dbscan_circuit_signatures,
+    filter_contributor_frequency,
+    jaccard_distances,
+    sample_activation_indices,
+)
 from .circuit_lens import (
     AttentionContributor,
     AttentionSite,
@@ -24,17 +27,11 @@ from .circuit_lens import (
     feature_contributions,
     logit_contributions,
 )
-from .circuit_clustering import (
-    CircuitClusters,
-    CircuitContributor,
-    CircuitSignature,
-    build_circuit_signature,
-    cluster_circuit_artifacts,
-    dbscan_circuit_signatures,
-    filter_contributor_frequency,
-    jaccard_distances,
-    sample_activation_indices,
-)
+from .grad_cam import GradCAM
+from .guided_backpropagation import GuidedBackpropagation
+from .integrated_gradients import IntegratedGradients
+from .lrp import LRP
+from .saliency import Saliency
 
 __all__ = [
     "LRP",
