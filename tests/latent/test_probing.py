@@ -96,6 +96,13 @@ class TestProbing:
         with pytest.raises(TypeError, match="additional_keys"):
             Probing("linear1", probe_factory, additional_keys=[object()])
 
+    def test_additional_keys_require_the_root_capture(self, default_test_model):
+        context = Probing("linear1", lambda *_: ExampleProbe(), additional_keys=["labels"])
+
+        with context.prepare(default_test_model):
+            with pytest.raises(RuntimeError, match="before additional inputs were captured"):
+                default_test_model.linear1(torch.ones(1, 10))
+
     def test_probing_pattern(self, default_test_model):
         """Test creating a Probing with pattern."""
         probes = {}

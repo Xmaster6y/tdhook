@@ -8,7 +8,7 @@ import torch
 from tensordict import TensorDict
 
 from tdhook.latent.activation_patching import ActivationPatching
-from tdhook.runtime import HookProgram, HookSpec
+from tdhook.runtime import CaptureSource, HookProgram, HookSpec
 from tdhook.targets import Target
 
 
@@ -44,10 +44,16 @@ class TestActivationPatching:
         assert hooked_module.hooking_context.program == HookProgram(
             tuple(
                 spec
-                for module_key in modules_to_patch
+                for index, module_key in enumerate(modules_to_patch)
                 for spec in (
                     HookSpec(module_key, "capture", "fwd"),
-                    HookSpec(module_key, "replace", "fwd", prepend=True),
+                    HookSpec(
+                        module_key,
+                        "replace",
+                        "fwd",
+                        prepend=True,
+                        source=CaptureSource(2 * index, detach=False),
+                    ),
                 )
             )
         )
@@ -67,7 +73,14 @@ class TestActivationPatching:
         assert hooked_module.hooking_context.program == HookProgram(
             (
                 HookSpec("linear2", "capture", "fwd", target=target),
-                HookSpec("linear2", "replace", "fwd", prepend=True, target=target),
+                HookSpec(
+                    "linear2",
+                    "replace",
+                    "fwd",
+                    prepend=True,
+                    target=target,
+                    source=CaptureSource(0, detach=False),
+                ),
             )
         )
         assert result["output"].shape == result["patched", "output"].shape
@@ -91,6 +104,23 @@ class TestActivationPatching:
 
         torch.testing.assert_close(result["output"], torch.tensor([[1.0, 2.0, 3.0]]))
         torch.testing.assert_close(result["patched", "output"], torch.tensor([[1.0, 20.0, 30.0]]))
+
+    def test_repeated_calls_start_with_a_fresh_clean_pass(self, default_test_model):
+        first = TensorDict(
+            {"input": torch.ones(1, 10), ("patched", "input"): torch.full((1, 10), 2.0)},
+            batch_size=[1],
+        )
+        second = TensorDict(
+            {"input": torch.full((1, 10), 3.0), ("patched", "input"): torch.full((1, 10), 4.0)},
+            batch_size=[1],
+        )
+        expected_clean = default_test_model(second["input"])
+
+        with ActivationPatching(["linear2"]).prepare(default_test_model) as prepared:
+            prepared(first)
+            result = prepared(second)
+
+        torch.testing.assert_close(result["output"], expected_clean)
 
     def test_target_occurrence_patches_one_repeated_module_call(self):
         class Model(torch.nn.Module):

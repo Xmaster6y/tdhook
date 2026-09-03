@@ -5,10 +5,10 @@ from tensordict.utils import NestedKey
 
 from tdhook.contexts import HookingContextFactory
 from tdhook.execution import ExecutionSpec
-from tdhook.hooks import CacheProxy, HookFactory
+from tdhook.hooks import HookFactory, register_hook_to_module
 from tdhook.latent._targets import activation_target
 from tdhook.modules import HookedModule, ModuleCallWithCache, IntermediateKeysCleaner, ModuleCall
-from tdhook.runtime import BoundHookProgram, HookProgramBuilder, HookSpec
+from tdhook.runtime import BoundHookProgram, CaptureSource, HookProgramBuilder, HookSpec
 from tdhook.targets import Target
 
 
@@ -80,28 +80,46 @@ class ActivationPatching(HookingContextFactory):
 
     def _hook_module(self, module: HookedModule) -> BoundHookProgram:
         cache_ref = module.td_module[0].cache_ref
+        captured_outputs = []
         with HookProgramBuilder() as program:
-            for module_key, target in self._targets_to_patch:
-                proxy = CacheProxy(module_key, cache_ref)
 
-                def capture_callback(*, _target=target, **kwargs):
+            def reset_captures(_module, _args):
+                for captured_output in captured_outputs:
+                    captured_output["value"] = None
+
+            reset_handle = register_hook_to_module(module, reset_captures, "fwd_pre", prepend=True)
+            program.add_cleanup(reset_handle.remove)
+
+            for module_key, target in self._targets_to_patch:
+                captured_output = {"value": None}
+                captured_outputs.append(captured_output)
+
+                def capture_callback(*, _target=target, _captured_output=captured_output, **kwargs):
                     output = kwargs["output"]
                     if self._cache_callback is not None:
                         output = self._cache_callback(**kwargs)
-                    return _selected_output(output, _target)
+                    _captured_output["value"] = _selected_output(output, _target)
+                    return _captured_output["value"]
 
                 capture_hook = HookFactory.make_caching_hook(
                     module_key,
                     cache_ref,
-                    callback=capture_callback if target is not None else self._cache_callback,
+                    callback=capture_callback,
                 )
                 capture_spec = HookSpec(module_key, "capture", "fwd", target=target)
+                capture_index = len(program.program.hooks)
                 register = program.register_path if target is None else program.register_target
                 register(module, capture_hook, capture_spec, relative_path=module.relative_path)
 
-                def callback(*, _module_key=module_key, _target=target, **kwargs):
-                    value = kwargs["value"]
+                def callback(
+                    *,
+                    _module_key=module_key,
+                    _target=target,
+                    _captured_output=captured_output,
+                    **kwargs,
+                ):
                     output = kwargs["output"]
+                    value = _captured_output["value"]
                     if value is None:  # clean run
                         return output
                     selected_output = _selected_output(output, _target)
@@ -116,7 +134,14 @@ class ActivationPatching(HookingContextFactory):
                         replacement = value
                     return _replace_selected_output(output, replacement, _target)
 
-                replace_hook = HookFactory.make_setting_hook(proxy, callback=callback)
-                replace_spec = HookSpec(module_key, "replace", "fwd", prepend=True, target=target)
+                replace_hook = HookFactory.make_setting_hook(None, callback=callback)
+                replace_spec = HookSpec(
+                    module_key,
+                    "replace",
+                    "fwd",
+                    prepend=True,
+                    target=target,
+                    source=CaptureSource(capture_index, detach=False),
+                )
                 register(module, replace_hook, replace_spec, relative_path=module.relative_path)
             return program.build()

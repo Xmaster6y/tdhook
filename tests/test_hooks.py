@@ -2,10 +2,11 @@
 Tests for the hooks functionality.
 """
 
+import gc
+
 import torch
 from tensordict import TensorDict
 import pytest
-import gc
 
 from tdhook.hooks import (
     register_hook_to_module,
@@ -14,7 +15,6 @@ from tdhook.hooks import (
     HookFactory,
     EarlyStoppingException,
     MutableWeakRef,
-    CacheProxy,
     resolve_submodule_path,
     submodule_path_to_name,
 )
@@ -334,19 +334,6 @@ class TestHookEdgeCases:
         assert torch.allclose(out, original)
         handle.remove()
 
-    def test_cacheproxy_dead_reference_raises(self):
-        """Resolving a CacheProxy with a dead cache reference raises."""
-
-        def make_proxy():
-            cache = TensorDict()
-            return CacheProxy("k", cache)
-
-        proxy = make_proxy()
-        gc.collect()
-
-        with pytest.raises(ValueError):
-            proxy.resolve()
-
     def test_callback_positional_only_params_rejected(self):
         """Callbacks with positional-only parameters are not allowed."""
 
@@ -362,16 +349,13 @@ class TestHookEdgeCases:
         with pytest.raises(ValueError):
             HookFactory.make_caching_hook("k", TensorDict(), direction="nope")
 
-    def test_make_setting_hook_cacheproxy_resolve_branch(self):
-        """Setting hook resolves CacheProxy and can return a proxy via callback."""
-
-        cache = TensorDict({"k": 123})
-        proxy = CacheProxy("k", cache)
+    def test_make_setting_hook_passes_configured_value_to_callback(self):
+        """Setting hooks pass their configured value to callbacks unchanged."""
 
         def cb(value, **_):
             return value + 1
 
-        hook = HookFactory.make_setting_hook(proxy, callback=cb, direction="fwd")
+        hook = HookFactory.make_setting_hook(torch.tensor(123), callback=cb, direction="fwd")
         result = hook(object(), None, torch.tensor(-1))
         assert result == 124
 

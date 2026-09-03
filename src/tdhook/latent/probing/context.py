@@ -1,17 +1,16 @@
 from typing import Callable, Optional, List, Any, Type, Protocol
 
-from tensordict import TensorDict
 import torch.nn as nn
 from tensordict.nn import TensorDictModuleBase
 from tensordict.utils import NestedKey
 
 from tdhook.contexts import HookingContextFactory
 from tdhook.hooks import (
-    CacheProxy,
     MultiHookManager,
     HookFactory,
     HookDirection,
     DIRECTION_TO_RETURN,
+    register_hook_to_module,
 )
 from tdhook.modules import HookedModule
 from tdhook.runtime import BoundHookProgram, HookProgramBuilder, HookSpec
@@ -76,10 +75,14 @@ class Probing(HookingContextFactory):
         self._hook_manager.pattern = key_pattern
 
     def _hook_module(self, module: HookedModule) -> BoundHookProgram:
-        if self._additional_keys:
-            tmp_cache = TensorDict()
-            additional_items = CacheProxy("_additional_keys", tmp_cache)
-        else:
+        additional_items = None
+
+        def reset_additional_items(_module, _args):
+            nonlocal additional_items
+            additional_items = None
+
+        def clear_additional_items(_module, _args, _output):
+            nonlocal additional_items
             additional_items = None
 
         def hook_factory(name: str, direction: HookDirection) -> Callable:
@@ -90,25 +93,31 @@ class Probing(HookingContextFactory):
                 probe = self._probe_factory(name, direction)
 
             def callback(**kwargs):
-                nonlocal additional_items
-                if additional_items is not None:
-                    _additional_items = additional_items.resolve()
-                else:
-                    _additional_items = {}
                 if probe is not None:
-                    return probe.step(kwargs[DIRECTION_TO_RETURN[direction]], **_additional_items)
+                    if self._additional_keys and additional_items is None:
+                        raise RuntimeError("probe reached its target before additional inputs were captured")
+                    metadata = additional_items if additional_items is not None else {}
+                    return probe.step(kwargs[DIRECTION_TO_RETURN[direction]], **metadata)
                 return None
 
             return HookFactory.make_reading_hook(callback=callback, direction=direction)
 
         with HookProgramBuilder() as program:
+            reset_handle = register_hook_to_module(module, reset_additional_items, "fwd_pre", prepend=True)
+            program.add_cleanup(reset_handle.remove)
+            clear_handle = register_hook_to_module(module, clear_additional_items, "fwd")
+            program.add_cleanup(clear_handle.remove)
+
             if self._additional_keys:
+
+                def capture_additional_items(**kwargs):
+                    nonlocal additional_items
+                    additional_items = kwargs["args"][0].select(*self._additional_keys)
+
                 program.register(
                     module.td_module,
-                    HookFactory.make_caching_hook(
-                        "_additional_keys",
-                        tmp_cache,
-                        callback=lambda **kwargs: kwargs["args"][0].select(*self._additional_keys),
+                    HookFactory.make_reading_hook(
+                        callback=capture_additional_items,
                         direction="fwd_pre",
                     ),
                     HookSpec("", "capture_inputs", "fwd_pre"),
