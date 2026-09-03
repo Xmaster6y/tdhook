@@ -131,6 +131,7 @@ def test_program_builder_rejects_invalid_specs_and_reuse():
         builder.add_cleanup(1)
 
     builder = HookProgramBuilder()
+    assert builder.occurrence_evidence == ()
     with pytest.raises(TypeError, match="module_path"):
         builder.mark_stopped(None)
     builder.mark_stopped("layer")

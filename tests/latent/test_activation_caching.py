@@ -51,7 +51,9 @@ class TestActivationCaching:
     def test_target_selection_is_cached_and_reported(self, default_test_model):
         target = Target("linear2", "activation", -1, (0, 2))
 
-        with ActivationCaching(target).bind(default_test_model) as hooked_module:
+        with ActivationCaching(target, callback=lambda **kwargs: kwargs["output"]).bind(
+            default_test_model
+        ) as hooked_module:
             result = hooked_module(TensorDict({"input": torch.randn(2, 10)}, batch_size=[2]))
 
         assert result["cache", "linear2"].shape == (2, 2)
@@ -122,6 +124,8 @@ class TestActivationCaching:
         activation = Target("linear", "activation", -1, (0,))
         gradient = Target("linear", "gradient", -1, (0,))
 
+        with pytest.raises(TypeError, match="module pattern or Target"):
+            ActivationCaching(object())
         with pytest.raises(ValueError, match="activation Target"):
             ActivationCaching(gradient)
         with pytest.raises(ValueError, match="relative to the caller-owned model"):

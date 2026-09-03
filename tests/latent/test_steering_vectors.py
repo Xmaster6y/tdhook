@@ -101,7 +101,7 @@ class TestActivationAddition:
     def test_simple_activation_addition(self, default_test_model, modules_to_steer):
         """Test creating a ActivationAddition."""
 
-        context = ActivationAddition(modules_to_steer)
+        context = ActivationAddition(modules_to_steer, cache_callback=lambda **kwargs: kwargs["output"])
 
         with context.bind(default_test_model) as hooked_module:
             data = TensorDict(
@@ -138,7 +138,7 @@ class TestActivationAddition:
             batch_size=[1],
         )
 
-        with ActivationAddition([target]).bind(model) as prepared:
+        with ActivationAddition([target], cache_callback=lambda **kwargs: kwargs["output"]).bind(model) as prepared:
             result = prepared(data)
 
         torch.testing.assert_close(result["steer", "linear"], torch.tensor([4.0]))

@@ -29,9 +29,6 @@ class _LRPModule(TensorDictModuleBase):
     def cache_ref(self):
         return self.module.cache_ref
 
-    def __getitem__(self, index):
-        return self.module[index]
-
 
 class LRP(GradientAttribution):
     """

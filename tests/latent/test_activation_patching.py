@@ -61,7 +61,7 @@ class TestActivationPatching:
 
     def test_target_selection_is_executed_and_reported(self, default_test_model):
         target = Target("linear2", "activation", -1, (0,))
-        context = ActivationPatching([target])
+        context = ActivationPatching([target], cache_callback=lambda **kwargs: kwargs["output"])
         data = TensorDict(
             {"input": torch.randn(2, 10), ("patched", "input"): torch.randn(2, 10)},
             batch_size=2,
