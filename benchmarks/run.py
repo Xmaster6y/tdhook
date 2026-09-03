@@ -200,14 +200,15 @@ def _attribution_benchmark(
     except ImportError as exc:  # pragma: no cover - exercised outside development installs
         raise RuntimeError("the benchmark suite requires the 'benchmark' optional dependency") from exc
 
+    tdhook = Saliency()
+    captum = CaptumSaliency(model)
+
     def tdhook_operation() -> Tensor:
         values = inputs.detach().clone().requires_grad_(True)
         batch = TensorDict({"input": values}, batch_size=[config.batch_size])
-        with Saliency().prepare(model) as hooked_model:
+        with tdhook.prepare(model) as hooked_model:
             result = hooked_model(batch)
         return result.get(("attr", "input"))
-
-    captum = CaptumSaliency(model)
 
     def captum_operation() -> Tensor:
         values = inputs.detach().clone().requires_grad_(True)
@@ -244,6 +245,19 @@ def _commit() -> str | None:
         return None
 
 
+def _dirty() -> bool | None:
+    try:
+        status = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=normal"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return bool(status.strip())
+
+
 def _environment(device: torch.device) -> dict[str, object]:
     if device.type == "cuda":
         hardware_name = torch.cuda.get_device_name(device)
@@ -254,6 +268,7 @@ def _environment(device: torch.device) -> dict[str, object]:
         "platform": platform.platform(),
         "hardware": {"device": str(device), "name": hardware_name},
         "commit": _commit(),
+        "dirty": _dirty(),
         "versions": {
             "tdhook": _package_version("tdhook"),
             "torch": torch.__version__,

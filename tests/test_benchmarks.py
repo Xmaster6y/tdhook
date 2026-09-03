@@ -18,6 +18,7 @@ def test_smoke_benchmark_checks_agreement_and_emits_stable_schema():
         "repeats": 3,
     }
     assert result["environment"]["hardware"]["device"] == "cpu"
+    assert isinstance(result["environment"]["dirty"], bool)
     assert {item["name"] for item in result["benchmarks"]} == {
         "activation_capture",
         "activation_intervention",
@@ -25,6 +26,7 @@ def test_smoke_benchmark_checks_agreement_and_emits_stable_schema():
     }
     for benchmark in result["benchmarks"]:
         assert benchmark["correctness"]["passed"] is True
+        assert set(benchmark["implementations"]) == {"tdhook", "reference"}
         for implementation in benchmark["implementations"].values():
             assert len(implementation["timing"]["samples"]) == CONFIGS["smoke"].repeats
             assert implementation["timing"]["unit"] == "ns"

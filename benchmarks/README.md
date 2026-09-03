@@ -25,11 +25,14 @@ available and otherwise selects CPU.
 
 ## Result contract
 
-The output is JSON with a versioned schema. It records the TDHook commit,
-package versions, Python/platform details, hardware device, fixed benchmark
-configuration, correctness tolerances, raw nanosecond samples, summary timing,
-and peak memory. Timings are collected only after TDHook and reference outputs
-agree. A mismatch aborts the run without publishing a result file.
+The output is JSON with a versioned schema. It records the TDHook commit and an
+explicit dirty-checkout marker, package versions, Python/platform details,
+hardware device, fixed benchmark configuration, correctness tolerances, raw
+nanosecond samples, summary timing, and peak memory. Timings are collected only
+after TDHook and reference outputs agree. A mismatch aborts the run without
+publishing a result file. Treat a report with `environment.dirty` set to `true`
+as a measurement of local source changes rather than of the recorded commit
+alone.
 
 CUDA memory is the change in PyTorch's peak allocated tensor memory. CPU memory
 uses `tracemalloc` and therefore reports peak Python-tracked allocations, not
