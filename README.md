@@ -84,6 +84,14 @@ weight-level interventions.
 
 This project uses [`uv`](https://docs.astral.sh/uv/) to manage python dependencies and run scripts, as well as [`just`](https://github.com/casey/just) to run commands.
 
+## Benchmarks
+
+The [maintained benchmark suite](benchmarks/README.md) checks current TDHook
+attribution, capture, and intervention behavior against reference libraries
+before recording versioned timing and memory results. It provides a cheap local
+smoke mode and a documented full mode; it does not claim to reproduce the
+historical v0.1 paper measurements.
+
 ## Citation
 
 If you're using `tdhook` in your research, please cite it using the following BibTeX entry:
