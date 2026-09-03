@@ -220,24 +220,6 @@ class TensorDictRef:
         self._td = td
 
 
-class CacheProxy:
-    """
-    Proxy for a cache.
-    """
-
-    def __init__(self, key: str, cache: TensorDict | MutableWeakRef[TensorDict] | TensorDictRef):
-        self._key = key
-        self._cache = weakref.ref(cache)
-
-    def resolve(self) -> Any:
-        cache = self._cache()
-        if isinstance(cache, (MutableWeakRef, TensorDictRef)):
-            cache = cache.resolve()
-        if cache is None:
-            raise ValueError("Dead reference to cache")
-        return cache.get(self._key)
-
-
 class EarlyStoppingException(BaseException):
     """
     Internal control-flow signal for early stopping.
@@ -341,7 +323,7 @@ class HookFactory:
         def hook(*args):
             nonlocal value, callback, params, return_index, direction
             original_type = type(args[return_index])
-            _value = value.resolve() if isinstance(value, CacheProxy) else value
+            _value = value
             if callback is not None:
                 _value = callback(**dict(zip(params, args)), value=_value, direction=direction)
             if _value is not None and type(_value) is not original_type:

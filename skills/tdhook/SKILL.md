@@ -1,11 +1,12 @@
 ---
 name: tdhook
 description: Provides guidance for interpreting and manipulating neural network internals using tdhook with TensorDict and PyTorch hooks. Use when needing attribution maps, activation analysis, probing, steering, activation patching, or weight-level interventions on PyTorch or TensorDict models.
-version: 1.0.0
-author: Xmaster6y
 license: MIT
-tags: [tdhook, Interpretability, Attribution, Activation Analysis, Probing, Steering, TensorDict, PyTorch Hooks, GradCAM, LRP, Activation Patching]
-dependencies: [tdhook, tensordict>=0.3.0, torch>=2.0.0]
+metadata:
+  version: 1.0.0
+  author: Xmaster6y
+  dependencies: tdhook, tensordict>=0.3.0, torch>=2.0.0
+  tags: tdhook, interpretability, attribution, activation analysis, probing, steering, tensordict, pytorch hooks, gradcam, lrp, activation patching
 ---
 
 # tdhook
@@ -84,17 +85,24 @@ with Probing(
 **Goal**: Inspect or patch activations at specific modules without high-level methods.
 
 **Checklist**:
-- [ ] Use `hooked_module.run(data, grad_enabled=...)` for low-level control
-- [ ] Inside context: `run.save("path.to.module")` to capture
-- [ ] Use `run.set("path.to.module", tensor)` to override
-- [ ] Call `proxy.resolve()` after the run to read cached tensors
-- [ ] For gradients: `run.save_grad(...)`, `run.set_grad(...)`
+- [ ] Create explicit activation or gradient `Target` objects
+- [ ] Enter `HookSession(model)` before registering operations
+- [ ] Use `session.capture(target)` to capture a value
+- [ ] Use `session.replace(target, value)` for static replacements
+- [ ] Pass a capture to `replace()` to route each live value to a later target
 
 ```python
-with hooked_module.run(data, grad_enabled=True) as run:
-    run.save("layers.5.mlp")
-    run.set("layers.5.attn", override_tensor)
-cached = run.get("layers.5.mlp", cache_key="my_key").resolve()
+from tdhook.session import HookSession
+from tdhook.targets import Target
+
+source = Target("layers.5.attn", "activation", feature_axis=-1, indices=(0,))
+destination = Target("layers.5.mlp", "activation", feature_axis=-1, indices=(0,))
+with HookSession(model) as session:
+    captured = session.capture(source)
+    session.replace(destination, captured)
+    output = model(inputs)
+
+cached = captured.value
 ```
 
 ---

@@ -27,42 +27,43 @@ td = hooked_module(td)
 # Results written into td
 ```
 
-### Get / Set / Save API
+### HookSession capture and replacement API
 
-Use `run(data)` for low-level access. Inside the context, register hooks before the forward executes on exit.
+Use `HookSession` for low-level capture, replacement, and early stopping. Register operations inside the context before executing the model.
 
 ```python
-with hooked_module.run(data) as run:
-    run.save("layers.5.mlp")           # Capture forward output into run.cache
-    run.set("layers.5.attn", override)  # Override activation at that module
-    run.get("layers.3.mlp", cache_key="custom")  # Cache with custom key
+from tdhook.session import HookSession
+from tdhook.targets import Target
+
+source = Target("layers.5.attn", "activation", feature_axis=-1, indices=(0,))
+destination = Target("layers.5.mlp", "activation", feature_axis=-1, indices=(0,))
+with HookSession(model) as session:
+    captured = session.capture(source)
+    session.replace(destination, captured)
+    output = model(inputs)
 ```
 
-- **`save(key)`** – Capture activation; auto cache key (`key_output` or `key_grad_input`).
-- **`get(key, cache_key=...)`** – Same as save but explicit cache key; returns `CacheProxy`.
-- **`set(key, value)`** – Replace activation. `value` can be a tensor or `CacheProxy.resolve()`.
-- **`stop(key)`** – Raise `EarlyStoppingException` at that module (short-circuit).
+- **`capture(target, direction=..., detach=...)`** – Capture target values for the session lifetime.
+- **`replace(target, value, direction=..., transform=...)`** – Apply a static value or route a live capture to a later compatible target.
+- **`stop(module_path)`** – Stop after a module runs and expose its exact partial output.
 
-Direction-specific variants (all take same args as base):
+Directions select the hook location:
 
 | Variant | Direction | Use |
 |---------|-----------|-----|
-| `save` / `get` / `set` | `fwd` | Forward output |
-| `save_input` / `get_input` / `set_input` | `fwd_pre` | Forward input |
-| `save_grad` / `get_grad` / `set_grad` | `bwd` | Gradient input (requires `grad_enabled=True`) |
-| `save_grad_output` / `get_grad_output` / `set_grad_output` | `bwd_pre` | Gradient output |
+| activation output | `fwd` | Forward output |
+| activation input | `fwd_pre` | Forward positional input |
+| gradient input | `bwd` | Backward gradient input |
+| gradient output | `bwd_pre` | Backward gradient output |
 
 ```python
-with hooked_module.run(data, grad_enabled=True) as run:
-    run.save_input("layers.0")
-    run.save_grad("layers.5.mlp")
+gradient = Target("layers.5.mlp", "gradient", feature_axis=-1, indices=(0,))
+with HookSession(model) as session:
+    captured_gradient = session.capture(gradient, direction="bwd_pre")
+    model(inputs).sum().backward()
 ```
 
-Common params: `callback=fn`, `prepend=False`, `relative=True`. Paths use module resolution (see Module Path Resolution).
-
-**CacheProxy** – Returned by `get`/`save`. Call `proxy.resolve()` after the run to read the cached tensor.
-
-**Run options**: `run(data, cache=None, run_name="run", run_sep=".", grad_enabled=False, run_callback=None)`. Pass `cache=my_td` to write saves into a shared TensorDict; `run_callback` overrides the default `module(data)` execution.
+Targets can select structured output paths, feature indices, or repeated call occurrences. See Module Path Resolution below for path syntax.
 
 ### Context control
 
@@ -89,7 +90,7 @@ hooked_module.restore()  # When using prepare(return_context=False)
 
 ## Module Path Resolution
 
-Submodule keys in `set`/`get`/`save`/`stop` resolve via `resolve_submodule_path`:
+Submodule paths in targets and `stop()` resolve via `resolve_submodule_path`:
 
 - `layers[0].attention` – indexing
 - `layers[-1]`, `layers[1:3]` – slicing

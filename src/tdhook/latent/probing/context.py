@@ -1,17 +1,16 @@
 from typing import Callable, Optional, List, Any, Type, Protocol
 
-from tensordict import TensorDict
 import torch.nn as nn
 from tensordict.nn import TensorDictModuleBase
 from tensordict.utils import NestedKey
 
 from tdhook.contexts import HookingContextFactory
 from tdhook.hooks import (
-    CacheProxy,
     MultiHookManager,
     HookFactory,
     HookDirection,
     DIRECTION_TO_RETURN,
+    register_hook_to_module,
 )
 from tdhook.modules import HookedModule
 from tdhook.runtime import BoundHookProgram, HookProgramBuilder, HookSpec
@@ -76,11 +75,27 @@ class Probing(HookingContextFactory):
         self._hook_manager.pattern = key_pattern
 
     def _hook_module(self, module: HookedModule) -> BoundHookProgram:
-        if self._additional_keys:
-            tmp_cache = TensorDict()
-            additional_items = CacheProxy("_additional_keys", tmp_cache)
-        else:
+        additional_items = None
+        forward_active = False
+        backward_active = False
+
+        def begin_forward(_module, _args):
+            nonlocal additional_items, forward_active
             additional_items = None
+            forward_active = True
+
+        def end_forward(_module, _args, _output):
+            nonlocal forward_active
+            forward_active = False
+
+        def begin_backward(_module, _grad_output):
+            nonlocal backward_active
+            backward_active = True
+
+        def end_backward(_module, _grad_input, _grad_output):
+            nonlocal additional_items, backward_active
+            additional_items = None
+            backward_active = False
 
         def hook_factory(name: str, direction: HookDirection) -> Callable:
             nonlocal self, additional_items
@@ -90,25 +105,43 @@ class Probing(HookingContextFactory):
                 probe = self._probe_factory(name, direction)
 
             def callback(**kwargs):
-                nonlocal additional_items
-                if additional_items is not None:
-                    _additional_items = additional_items.resolve()
-                else:
-                    _additional_items = {}
                 if probe is not None:
-                    return probe.step(kwargs[DIRECTION_TO_RETURN[direction]], **_additional_items)
+                    direction_active = backward_active if direction.startswith("bwd") else forward_active
+                    if self._additional_keys and (additional_items is None or not direction_active):
+                        raise RuntimeError("probe reached its target before additional inputs were captured")
+                    metadata = additional_items if additional_items is not None else {}
+                    return probe.step(kwargs[DIRECTION_TO_RETURN[direction]], **metadata)
                 return None
 
             return HookFactory.make_reading_hook(callback=callback, direction=direction)
 
         with HookProgramBuilder() as program:
             if self._additional_keys:
+                begin_forward_handle = register_hook_to_module(module, begin_forward, "fwd_pre", prepend=True)
+                program.add_cleanup(begin_forward_handle.remove)
+                end_forward_handle = register_hook_to_module(module, end_forward, "fwd")
+                program.add_cleanup(end_forward_handle.remove)
+
+                if any(direction.startswith("bwd") for direction in self._directions):
+                    model_root = program.resolve_path(module, "", relative_path=module.relative_path)
+                    begin_backward_handle = register_hook_to_module(
+                        model_root,
+                        begin_backward,
+                        "bwd_pre",
+                        prepend=True,
+                    )
+                    program.add_cleanup(begin_backward_handle.remove)
+                    end_backward_handle = register_hook_to_module(model_root, end_backward, "bwd")
+                    program.add_cleanup(end_backward_handle.remove)
+
+                def capture_additional_items(**kwargs):
+                    nonlocal additional_items
+                    additional_items = kwargs["args"][0].select(*self._additional_keys)
+
                 program.register(
                     module.td_module,
-                    HookFactory.make_caching_hook(
-                        "_additional_keys",
-                        tmp_cache,
-                        callback=lambda **kwargs: kwargs["args"][0].select(*self._additional_keys),
+                    HookFactory.make_reading_hook(
+                        callback=capture_additional_items,
                         direction="fwd_pre",
                     ),
                     HookSpec("", "capture_inputs", "fwd_pre"),

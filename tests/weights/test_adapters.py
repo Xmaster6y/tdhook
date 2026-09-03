@@ -4,7 +4,7 @@ import torch
 import pytest
 from tensordict import TensorDict
 
-from tdhook.runtime import HookProgram, HookSpec
+from tdhook.runtime import CaptureSource, HookProgram, HookSpec
 from tdhook.weights.adapters import Adapters
 
 
@@ -29,7 +29,14 @@ class TestAdapters:
         expected_specs = []
         if adapter_source != adapter_target:
             expected_specs.append(HookSpec(adapter_source, "capture", "fwd"))
-        expected_specs.append(HookSpec(adapter_target, "replace", "fwd"))
+        expected_specs.append(
+            HookSpec(
+                adapter_target,
+                "replace",
+                "fwd",
+                source=CaptureSource(0, detach=False) if adapter_source != adapter_target else None,
+            )
+        )
         assert hooked.hooking_context.program == HookProgram(tuple(expected_specs))
 
         restored_out = default_test_model(data["input"])
@@ -49,3 +56,23 @@ class TestAdapters:
                 pass
 
         assert not default_test_model.linear1._forward_hooks
+
+    def test_crosslayer_adapter_rejects_a_stale_capture(self):
+        class ConditionalSource(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.source = torch.nn.Identity()
+                self.destination = torch.nn.Identity()
+
+            def forward(self, value):
+                if value.sum() > 0:
+                    value = self.source(value)
+                return self.destination(value)
+
+        model = ConditionalSource()
+        method = Adapters({"conditional": (_DoubleAdapter(), "source", "destination")})
+
+        with method.prepare(model) as prepared:
+            prepared(TensorDict({"input": torch.ones(1, 2)}, batch_size=[1]))
+            with pytest.raises(RuntimeError, match="fresh source capture"):
+                prepared(TensorDict({"input": -torch.ones(1, 2)}, batch_size=[1]))

@@ -96,6 +96,43 @@ class TestProbing:
         with pytest.raises(TypeError, match="additional_keys"):
             Probing("linear1", probe_factory, additional_keys=[object()])
 
+    def test_additional_keys_require_the_root_capture(self, default_test_model):
+        context = Probing("linear1", lambda *_: ExampleProbe(), additional_keys=["labels"])
+
+        with context.prepare(default_test_model) as prepared:
+            prepared(
+                TensorDict(
+                    {"input": torch.ones(1, 10), "labels": torch.ones(1)},
+                    batch_size=[1],
+                )
+            )
+            with pytest.raises(RuntimeError, match="before additional inputs were captured"):
+                default_test_model.linear1(torch.ones(1, 10))
+
+    def test_backward_probes_keep_additional_keys_until_backward(self, default_test_model):
+        observed = []
+
+        class BackwardProbe:
+            def step(self, gradient, **metadata):
+                observed.append((gradient, metadata["labels"]))
+
+        context = Probing(
+            "linear1",
+            lambda *_: BackwardProbe(),
+            directions=["bwd_pre"],
+            additional_keys=["labels"],
+        )
+        data = TensorDict(
+            {"input": torch.ones(1, 10, requires_grad=True), "labels": torch.tensor([3])},
+            batch_size=[1],
+        )
+
+        with context.prepare(default_test_model) as prepared:
+            prepared(data)["output"].sum().backward()
+
+        assert len(observed) == 1
+        torch.testing.assert_close(observed[0][1], data["labels"])
+
     def test_probing_pattern(self, default_test_model):
         """Test creating a Probing with pattern."""
         probes = {}
