@@ -78,6 +78,53 @@ The workflow returns one TensorDict containing both ``("attr", "input")`` and
 ``"attribution_mass"``. Use :meth:`~tdhook.workflow.Workflow.plan` when you
 also need to inspect model-pass and compatibility decisions before execution.
 
+Select repeated module calls
+----------------------------
+
+A module instance can run more than once during one root model pass. Use an
+integer ``Target.occurrence`` to select one zero-based call, or an immutable
+:class:`~tdhook.targets.OccurrenceSelector` to select several calls:
+
+.. code-block:: python
+
+   import torch
+   from torch import nn
+   from tdhook.session import HookSession
+   from tdhook.targets import OccurrenceSelector, Target
+
+   class SharedModel(nn.Module):
+       def __init__(self):
+           super().__init__()
+           self.shared_layer = nn.Identity()
+
+       def forward(self, value):
+           calls = (self.shared_layer(value + offset) for offset in (1, 2, 3))
+           return torch.cat(tuple(calls), dim=-1)
+
+   model = SharedModel()
+   inputs = torch.zeros(1, 1)
+   target = Target(
+       "shared_layer",
+       "activation",
+       -1,
+       (0,),
+       occurrence=OccurrenceSelector((0, 2)),
+   )
+
+   with HookSession(model) as session:
+       captured = session.capture(target)
+       model(inputs)
+
+   plan = session.program.occurrence_plans
+   evidence = session.occurrence_evidence
+
+Occurrence indices reset for every root model pass. Each evidence record is
+tensor-free and contains the target path, selected indices, and every observed
+call index. TDHook raises before the model result is returned if a selected
+call is missing. Duplicate or reordered selections are rejected when the
+selector is constructed, and every temporary selector hook is removed when
+the session exits, including after failures.
+
 Where to go next
 ----------------
 

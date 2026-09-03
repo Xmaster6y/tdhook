@@ -45,7 +45,7 @@ def test_getting_started_examples_match_and_execute():
 
 def test_getting_started_workflow_example_executes_after_the_first_example():
     blocks = _rst_python_blocks((REPO_ROOT / "docs/source/start.rst").read_text())
-    assert len(blocks) == 2
+    assert len(blocks) == 3
     namespace = {}
 
     exec(blocks[0], namespace)
@@ -54,3 +54,15 @@ def test_getting_started_workflow_example_executes_after_the_first_example():
     result = namespace["result"]
     assert ("attr", "input") in result
     assert "attribution_mass" in result
+
+
+def test_getting_started_occurrence_example_executes():
+    block = _rst_python_blocks((REPO_ROOT / "docs/source/start.rst").read_text())[2]
+    namespace = {}
+
+    exec(block, namespace)
+
+    assert [value.item() for value in namespace["captured"].values] == [1.0, 3.0]
+    assert namespace["plan"][0].selected_indices == (0, 2)
+    assert namespace["evidence"][0].observed_indices == (0, 1, 2)
+    assert all(not module._forward_hooks for module in namespace["model"].modules())

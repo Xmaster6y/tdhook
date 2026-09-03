@@ -14,7 +14,7 @@ from tdhook.hooks import MultiHookHandle, merge_paths
 from tdhook._types import is_nested_key
 from tdhook.execution import ExecutionSpec
 from tdhook.descriptions import ConfiguredStepDescription, configured_step_description
-from tdhook.runtime import BoundHookProgram, HookProgram
+from tdhook.runtime import BoundHookProgram, HookProgram, TargetOccurrenceEvidence
 
 
 class HookingContext:
@@ -37,6 +37,7 @@ class HookingContext:
         self._in_context = False
         self._handle = None
         self._program = None
+        self._occurrence_evidence: tuple[TargetOccurrenceEvidence, ...] = ()
         self._hooked_module = None
         self._pre_factories = pre_factories or []
         self._stack = None
@@ -58,6 +59,7 @@ class HookingContext:
         self._in_context = True
         self._for_inspection = for_inspection
         self._program = None
+        self._occurrence_evidence = ()
 
         working_module = self._module
         prepared = False
@@ -102,6 +104,14 @@ class HookingContext:
         """Return the model-free hook program installed by this context."""
 
         return self._program
+
+    @property
+    def occurrence_evidence(self) -> tuple[TargetOccurrenceEvidence, ...]:
+        """Return validated target-occurrence evidence from this binding."""
+
+        if isinstance(self._handle, BoundHookProgram):
+            return self._occurrence_evidence + self._handle.occurrence_evidence
+        return self._occurrence_evidence
 
     def on_hook_failure(self, callback) -> None:
         """Register cleanup to run if a bound hook raises during execution."""
@@ -159,6 +169,9 @@ class HookingContext:
                     self._handle.remove()
                 except BaseException as error:
                     cleanup_error = error
+                finally:
+                    if isinstance(self._handle, BoundHookProgram):
+                        self._occurrence_evidence += self._handle.occurrence_evidence
             try:
                 self._restore(self._module, self._in_keys, self._out_keys, self._extra_relative_path)
             except BaseException as error:
@@ -182,6 +195,8 @@ class HookingContext:
         if not self._in_context:
             raise RuntimeError("Cannot disable hooks outside of context")
         self._handle.remove()
+        if isinstance(self._handle, BoundHookProgram):
+            self._occurrence_evidence += self._handle.occurrence_evidence
         try:
             yield
         finally:

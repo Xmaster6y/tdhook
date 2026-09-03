@@ -16,6 +16,47 @@ from tdhook.paths import resolve_submodule_path
 
 TargetKind = Literal["activation", "gradient", "parameter"]
 OutputPathComponent = int | str
+OccurrenceResetScope = Literal["root_model_pass"]
+
+
+@dataclass(frozen=True)
+class OccurrenceSelector:
+    """Select ordered, zero-based module calls within each root model pass.
+
+    Indices must be unique and strictly increasing. The explicit ordering makes
+    the selector a stable, tensor-free identity that can be compared directly
+    with execution evidence.
+    """
+
+    indices: tuple[int, ...]
+    reset_scope: OccurrenceResetScope = "root_model_pass"
+
+    def __post_init__(self) -> None:
+        if not self.indices:
+            raise ValueError("occurrence indices must contain at least one selection")
+        if any(type(index) is not int for index in self.indices):
+            raise TypeError("occurrence indices must be integers")
+        if any(index < 0 for index in self.indices):
+            raise ValueError("occurrence indices must be non-negative")
+        if any(left >= right for left, right in zip(self.indices, self.indices[1:])):
+            raise ValueError("occurrence indices must be unique and strictly increasing")
+        if self.reset_scope != "root_model_pass":
+            raise ValueError("occurrence reset_scope must be 'root_model_pass'")
+
+    def to_dict(self) -> dict[str, object]:
+        """Return a JSON-compatible selector representation."""
+
+        return {"indices": list(self.indices), "reset_scope": self.reset_scope}
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, object]) -> "OccurrenceSelector":
+        """Build a selector from :meth:`to_dict` output."""
+
+        try:
+            indices = tuple(data["indices"])  # type: ignore[arg-type]
+        except KeyError as exc:
+            raise ValueError("OccurrenceSelector data is missing indices") from exc
+        return cls(indices, data.get("reset_scope", "root_model_pass"))  # type: ignore[arg-type]
 
 
 @dataclass(frozen=True)
@@ -25,8 +66,10 @@ class Target:
     ``feature_axis`` identifies the axis containing units, channels, rows, or
     columns.  For example, use ``-1`` for MLP output units, ``1`` for CNN
     output channels, and ``0``/``1`` for parameter rows/columns respectively.
-    ``occurrence`` optionally selects one zero-based activation or gradient
-    observation per root-model execution when a module is called repeatedly.
+    ``occurrence`` optionally selects zero-based activation or gradient
+    observations per root-model execution when a module is called repeatedly.
+    Pass an integer for one call or :class:`OccurrenceSelector` for multiple
+    calls.
     """
 
     module_path: str
@@ -35,7 +78,7 @@ class Target:
     indices: tuple[int, ...]
     parameter: str | None = None
     output_path: tuple[OutputPathComponent, ...] = ()
-    occurrence: int | None = None
+    occurrence: int | OccurrenceSelector | None = None
 
     def __post_init__(self) -> None:
         if self.kind not in {"activation", "gradient", "parameter"}:
@@ -55,18 +98,30 @@ class Target:
         if self.kind == "parameter" and self.output_path:
             raise ValueError("output_path is only valid for activation and gradient targets")
         if self.occurrence is not None:
-            if type(self.occurrence) is not int:
-                raise TypeError("occurrence must be an integer or None")
-            if self.occurrence < 0:
+            if not isinstance(self.occurrence, OccurrenceSelector) and type(self.occurrence) is not int:
+                raise TypeError("occurrence must be an integer, OccurrenceSelector, or None")
+            if type(self.occurrence) is int and self.occurrence < 0:
                 raise ValueError("occurrence must be non-negative")
             if self.kind == "parameter":
                 raise ValueError("occurrence is only valid for activation and gradient targets")
+
+    @property
+    def occurrence_indices(self) -> tuple[int, ...] | None:
+        """Return the normalized selected calls, or ``None`` for every call."""
+
+        if isinstance(self.occurrence, OccurrenceSelector):
+            return self.occurrence.indices
+        if self.occurrence is None:
+            return None
+        return (self.occurrence,)
 
     def to_dict(self) -> dict[str, object]:
         """Return a JSON-compatible representation of this target."""
         data = asdict(self)
         data["indices"] = list(self.indices)
         data["output_path"] = list(self.output_path)
+        if isinstance(self.occurrence, OccurrenceSelector):
+            data["occurrence"] = self.occurrence.to_dict()
         return data
 
     @classmethod
@@ -78,6 +133,9 @@ class Target:
         except KeyError as exc:
             raise ValueError("Target data is missing indices") from exc
         values["output_path"] = tuple(values.get("output_path", ()))  # type: ignore[arg-type]
+        occurrence = values.get("occurrence")
+        if isinstance(occurrence, Mapping):
+            values["occurrence"] = OccurrenceSelector.from_dict(occurrence)
         return cls(**values)  # type: ignore[arg-type]
 
     def to_json(self) -> str:
@@ -213,4 +271,4 @@ class Target:
         raise ValueError(f"output_path component {component!r} does not match the hook value structure")
 
 
-__all__ = ["OutputPathComponent", "Target", "TargetKind"]
+__all__ = ["OccurrenceResetScope", "OccurrenceSelector", "OutputPathComponent", "Target", "TargetKind"]

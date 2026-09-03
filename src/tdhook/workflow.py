@@ -16,7 +16,7 @@ from torch import Tensor, nn
 from tdhook.contexts import HookingContext
 from tdhook.execution import AutogradLifetime, ExecutionSpec, GradientMode
 from tdhook.descriptions import ConfiguredStepDescription
-from tdhook.runtime import HookProgram
+from tdhook.runtime import HookProgram, TargetOccurrenceEvidence
 from tdhook.session import HookSession
 
 
@@ -112,11 +112,14 @@ class WorkflowResult:
     :meth:`Workflow.run` continues to return only the TensorDict for existing
     callers. ``program`` identifies the imperative operations that wrapped a
     managed :class:`WorkflowSession` run and is ``None`` for direct execution.
+    ``occurrence_evidence`` contains only root passes whose selected target
+    occurrences were validated before the result was returned.
     """
 
     data: TensorDictBase
     plan: WorkflowPlan
     program: HookProgram | None = None
+    occurrence_evidence: tuple[TargetOccurrenceEvidence, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -920,7 +923,12 @@ class WorkflowSession(HookSession):
 
         self._active_state()
         result = self._workflow.run_with_plan(self._model(), data)
-        return WorkflowResult(data=result.data, plan=result.plan, program=self.program)
+        return WorkflowResult(
+            data=result.data,
+            plan=result.plan,
+            program=self.program,
+            occurrence_evidence=self.occurrence_evidence,
+        )
 
     def __call__(self, data: TensorDictBase) -> WorkflowResult:
         return self.run(data)

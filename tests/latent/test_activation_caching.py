@@ -75,6 +75,9 @@ class TestActivationCaching:
             result = prepared(data)
 
         torch.testing.assert_close(result["cache", "shared"], torch.tensor([[2.0]]))
+        assert prepared.hooking_context.occurrence_evidence[0].target_path == "shared"
+        assert prepared.hooking_context.occurrence_evidence[0].selected_indices == (0,)
+        assert prepared.hooking_context.occurrence_evidence[0].observed_indices == (0, 1)
 
     def test_target_uses_the_shared_module_path_grammar(self):
         class Model(torch.nn.Module):
