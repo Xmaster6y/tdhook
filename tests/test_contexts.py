@@ -286,9 +286,9 @@ class TestTensorDictModuleContext:
     def test_prepare_validates_selected_tensordict_module_keys(self, default_test_model):
         td_mod = TensorDictModule(module=default_test_model, in_keys=["input"], out_keys=["output"])
         invalid = (
-            ({"in_keys": [object()]}, "in_keys must be unraveled"),
+            ({"in_keys": [object()]}, "in_keys must be TensorDict nested keys"),
             ({"in_keys": ["missing"]}, "not in module.in_keys"),
-            ({"out_keys": [object()]}, "out_keys must be unraveled"),
+            ({"out_keys": [object()]}, "out_keys must be TensorDict nested keys"),
             ({"out_keys": ["missing"]}, "not in module.out_keys"),
         )
         for kwargs, message in invalid:
