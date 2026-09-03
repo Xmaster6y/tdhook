@@ -413,7 +413,7 @@ def test_managed_workflow_session_resets_occurrence_for_every_model_execution():
     model = RepeatedModule()
     workflow = Workflow(CaptureOutput(), ReplaceOutput())
     data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
-    target = Target("shared", "activation", -1, (0,), occurrence=1)
+    target = Target("shared", "activation", -1, (0,), occurrences=(1,))
 
     with workflow.session(model) as session:
         captured = session.capture(target)
@@ -422,6 +422,33 @@ def test_managed_workflow_session_resets_occurrence_for_every_model_execution():
     assert result.plan.model_passes == 2
     assert len(captured.values) == 2
     assert all(torch.equal(value, torch.full((2, 1), 3.0)) for value in captured.values)
+
+
+def test_managed_workflow_result_includes_validated_occurrence_evidence():
+    class RepeatedModule(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.shared = nn.Identity()
+
+        def forward(self, x):
+            return self.shared(x + 1) + self.shared(x + 2) + self.shared(x + 3)
+
+    model = RepeatedModule()
+    workflow = Workflow(CaptureOutput(), ReplaceOutput())
+    data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
+    target = Target("shared", "activation", -1, (0,), occurrences=(0, 2))
+
+    with workflow.session(model) as session:
+        session.capture(target)
+        first = session(data)
+        second = session(data)
+
+    assert first.plan.model_passes == second.plan.model_passes == 2
+    assert tuple(item.root_pass for item in first.occurrence_evidence) == (0, 1)
+    assert tuple(item.root_pass for item in second.occurrence_evidence) == (2, 3)
+    assert all(item.selected_indices == (0, 2) for item in first.occurrence_evidence)
+    assert all(item.observed_indices == (0, 1, 2) for item in second.occurrence_evidence)
+    assert tuple(item.root_pass for item in session.occurrence_evidence) == (0, 1, 2, 3)
 
 
 def test_managed_workflow_session_early_stop_aborts_the_run_and_restores_hooks(default_test_model):

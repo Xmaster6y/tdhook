@@ -11,7 +11,7 @@ import torch
 from torch import Tensor, nn
 
 from tdhook.hooks import EarlyStoppingException, HookDirection, register_hook_to_module
-from tdhook.runtime import CaptureSource, HookProgram, HookProgramBuilder, HookSpec
+from tdhook.runtime import CaptureSource, HookProgram, HookProgramBuilder, HookSpec, TargetOccurrenceEvidence
 from tdhook.targets import OutputPathComponent, Target
 
 
@@ -78,12 +78,21 @@ class HookSession:
         self._session_token: object | None = None
         self._executions = {"activation": 0, "gradient": 0}
         self._tracked_executions: set[str] = set()
+        self._occurrence_evidence: tuple[TargetOccurrenceEvidence, ...] = ()
 
     @property
     def program(self) -> HookProgram:
         """Return an immutable description of the operations installed this run."""
 
         return self._builder.program if self._builder is not None else self._program
+
+    @property
+    def occurrence_evidence(self) -> tuple[TargetOccurrenceEvidence, ...]:
+        """Return validated occurrence evidence from completed root model passes."""
+
+        if self._builder is not None:
+            return self._builder.occurrence_evidence
+        return self._occurrence_evidence
 
     def __enter__(self) -> Self:
         if self._builder is not None:
@@ -94,6 +103,7 @@ class HookSession:
         self._session_token = object()
         self._executions = {"activation": 0, "gradient": 0}
         self._tracked_executions.clear()
+        self._occurrence_evidence = ()
         self._builder = HookProgramBuilder()
         return self
 
@@ -108,6 +118,7 @@ class HookSession:
         try:
             bound.remove()
         finally:
+            self._occurrence_evidence = bound.occurrence_evidence
             self._stop_exception = None
             self._session_token = None
         return suppress_stop
@@ -130,8 +141,9 @@ class HookSession:
         ``detach=False`` when a later attribution objective must backpropagate
         from the captured activation; the result then retains its autograd
         history and is only valid for the lifetime of the surrounding graph.
-        A target with ``occurrence`` set captures only that zero-based module
-        call in each root-model execution.
+        ``Target.occurrences`` captures one or more ordered, zero-based module
+        calls in each root-model execution. Validated observations are exposed through
+        :attr:`occurrence_evidence`.
         """
 
         model, builder = self._active_state()
@@ -227,9 +239,8 @@ class HookSession:
         observed live value to a later compatible target in the same model
         execution. ``transform`` is applied to that value immediately before
         replacement. Whether the routed value retains its graph is controlled
-        by the source capture's ``detach`` argument. A target with
-        ``occurrence`` set replaces only that zero-based module call in each
-        root-model execution.
+        by the source capture's ``detach`` argument. ``Target.occurrences``
+        selects one or more ordered, zero-based calls per root-model execution.
         """
 
         model, builder = self._active_state()

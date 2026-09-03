@@ -154,6 +154,12 @@ def test_program_builder_rejects_invalid_target_hook_specs():
     builder.remove()
 
 
+def test_program_omits_occurrence_plans_for_unselected_hooks():
+    target = Target("", "activation", -1, (0,))
+
+    assert HookProgram((HookSpec("", "capture", "fwd", target=target),)).occurrence_plans == ()
+
+
 def test_temporary_module_state_rejects_hook_specs():
     with pytest.raises(ValueError, match="directionless"):
         with temporary_module_state(nn.Identity(), None, HookSpec("", "state", "fwd")):

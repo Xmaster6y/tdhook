@@ -79,7 +79,7 @@ class TestSteeringVectors:
             def forward(self, value):
                 return self.shared(value + 1) + self.shared(value + 2)
 
-        target = Target("shared", "activation", -1, (0,), occurrence=0)
+        target = Target("shared", "activation", -1, (0,), occurrences=(0,))
         data = TensorDict({"input": torch.tensor([[1.0, 2.0]])}, batch_size=[1])
 
         with SteeringVectors([target], steer_fn=lambda module_key, output: torch.zeros_like(output)).prepare(
@@ -155,7 +155,7 @@ class TestActivationAddition:
             def forward(self, value):
                 return self.shared(value * 2) + self.shared(value * 3)
 
-        target = Target("shared", "activation", -1, (0,), occurrence=1)
+        target = Target("shared", "activation", -1, (0,), occurrences=(1,))
         data = TensorDict(
             {
                 ("positive", "input"): torch.tensor([[2.0, 0.0]]),

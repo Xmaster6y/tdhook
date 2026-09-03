@@ -8,13 +8,22 @@ from tdhook.targets import Target
 
 
 def test_target_round_trip_is_json_serializable():
-    target = Target("features.0", "activation", -1, (1, 3), output_path=("features", 0), occurrence=1)
+    target = Target("features.0", "activation", -1, (1, 3), output_path=("features", 0), occurrences=(1,))
 
     assert Target.from_dict(target.to_dict()) == target
     assert Target.from_json(target.to_json()) == target
     assert json.loads(target.to_json())["indices"] == [1, 3]
     assert json.loads(target.to_json())["output_path"] == ["features", 0]
-    assert json.loads(target.to_json())["occurrence"] == 1
+    assert json.loads(target.to_json())["occurrences"] == [1]
+
+
+def test_multi_occurrence_target_round_trip_is_json_serializable():
+    target = Target("shared", "activation", -1, (0,), occurrences=(0, 2))
+
+    assert Target.from_dict(target.to_dict()) == target
+    assert Target.from_json(target.to_json()) == target
+    assert target.occurrences == (0, 2)
+    assert json.loads(target.to_json())["occurrences"] == [0, 2]
 
 
 def test_target_validation_uses_the_shared_path_grammar():
@@ -71,12 +80,20 @@ def test_invalid_targets_have_clear_errors(default_test_model):
         Target("linear1", "activation", 0, (0,), output_path=(object(),))
     with pytest.raises(ValueError, match="output_path is only valid"):
         Target("linear1", "parameter", 0, (0,), parameter="weight", output_path=(0,))
-    with pytest.raises(TypeError, match="occurrence"):
-        Target("linear1", "activation", 0, (0,), occurrence=True)
+    with pytest.raises(TypeError, match="tuple"):
+        Target("linear1", "activation", 0, (0,), occurrences=0)
+    with pytest.raises(ValueError, match="at least one"):
+        Target("linear1", "activation", 0, (0,), occurrences=())
+    with pytest.raises(TypeError, match="integers"):
+        Target("linear1", "activation", 0, (0,), occurrences=(True,))
     with pytest.raises(ValueError, match="non-negative"):
-        Target("linear1", "activation", 0, (0,), occurrence=-1)
+        Target("linear1", "activation", 0, (0,), occurrences=(-1,))
     with pytest.raises(ValueError, match="activation and gradient"):
-        Target("linear1", "parameter", 0, (0,), parameter="weight", occurrence=0)
+        Target("linear1", "parameter", 0, (0,), parameter="weight", occurrences=(0,))
+    with pytest.raises(ValueError, match="unique"):
+        Target("linear1", "activation", 0, (0,), occurrences=(1, 1))
+    with pytest.raises(ValueError, match="strictly increasing"):
+        Target("linear1", "activation", 0, (0,), occurrences=(2, 1))
     with pytest.raises(ValueError, match="missing indices"):
         Target.from_dict({"module_path": "linear1"})
     with pytest.raises(ValueError, match="JSON is invalid"):

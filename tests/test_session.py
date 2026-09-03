@@ -1,6 +1,9 @@
 import gc
 from collections import UserDict
 
+from dataclasses import asdict
+import json
+
 import pytest
 import torch
 from tensordict import TensorDict
@@ -659,7 +662,7 @@ def test_session_selects_and_resets_repeated_module_occurrences():
             return self.shared(x + 1) + self.shared(x + 2)
 
     model = RepeatedModule()
-    target = Target("shared", "activation", -1, (0,), occurrence=1)
+    target = Target("shared", "activation", -1, (0,), occurrences=(1,))
 
     with HookSession(model) as session:
         captured = session.capture(target)
@@ -674,9 +677,38 @@ def test_session_selects_and_resets_repeated_module_occurrences():
     assert torch.equal(second, torch.tensor([[12.0, 5.0]]))
 
 
+def test_session_selects_multiple_occurrences_and_exposes_immutable_evidence():
+    class RepeatedModule(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.shared = nn.Identity()
+
+        def forward(self, x):
+            return torch.cat((self.shared(x + 1), self.shared(x + 2), self.shared(x + 3)), dim=-1)
+
+    model = RepeatedModule()
+    target = Target("shared", "activation", -1, (0,), occurrences=(0, 2))
+
+    with HookSession(model) as session:
+        captured = session.capture(target)
+        first = model(torch.zeros(1, 1))
+        second = model(torch.ones(1, 1))
+
+    assert torch.equal(first, torch.tensor([[1.0, 2.0, 3.0]]))
+    assert torch.equal(second, torch.tensor([[2.0, 3.0, 4.0]]))
+    assert [value.item() for value in captured.values] == [1.0, 3.0, 2.0, 4.0]
+    assert session.program.occurrence_plans[0].target_path == "shared"
+    assert session.program.occurrence_plans[0].selected_indices == (0, 2)
+    assert tuple(item.root_pass for item in session.occurrence_evidence) == (0, 1)
+    assert all(item.selected_indices == (0, 2) for item in session.occurrence_evidence)
+    assert all(item.observed_indices == (0, 1, 2) for item in session.occurrence_evidence)
+    json.dumps([asdict(item) for item in session.occurrence_evidence])
+    assert all(not module._forward_hooks and not module._forward_pre_hooks for module in model.modules())
+
+
 def test_session_selects_root_pre_hook_occurrence_with_prepend():
     model = nn.Identity()
-    target = Target("", "activation", -1, (0,), occurrence=0)
+    target = Target("", "activation", -1, (0,), occurrences=(0,))
 
     with HookSession(model) as session:
         captured = session.capture(target, direction="fwd_pre", prepend=True)
@@ -702,7 +734,7 @@ def test_session_selects_repeated_gradient_occurrence():
             return self.shared(first_input) + self.shared(second_input)
 
     model = RepeatedModule()
-    target = Target("shared", "gradient", -1, (0,), occurrence=1)
+    target = Target("shared", "gradient", -1, (0,), occurrences=(1,))
     x = torch.ones(1, 2, requires_grad=True)
 
     with HookSession(model) as session:
@@ -725,7 +757,7 @@ def test_session_selects_repeated_gradient_occurrence():
 @pytest.mark.parametrize("operation", ["capture", "replace"])
 def test_session_fails_when_requested_occurrence_is_not_reached(operation):
     model = nn.Sequential(nn.Identity())
-    target = Target("0", "activation", -1, (0,), occurrence=1)
+    target = Target("0", "activation", -1, (0,), occurrences=(1,))
 
     with (
         pytest.raises(RuntimeError, match=rf"{operation} target '0' requested occurrence 1.*called 1 time"),
@@ -737,6 +769,21 @@ def test_session_fails_when_requested_occurrence_is_not_reached(operation):
             session.replace(target, 0)
         model(torch.ones(1, 2))
 
+    assert all(not module._forward_hooks and not module._forward_pre_hooks for module in model.modules())
+
+
+def test_session_fails_closed_when_a_multi_occurrence_is_missing():
+    model = nn.Sequential(nn.Identity())
+    target = Target("0", "activation", -1, (0,), occurrences=(0, 2))
+
+    with (
+        pytest.raises(RuntimeError, match=r"requested occurrences \(0, 2\).*called 1 time"),
+        HookSession(model) as session,
+    ):
+        session.capture(target)
+        model(torch.ones(1, 2))
+
+    assert session.occurrence_evidence == ()
     assert all(not module._forward_hooks and not module._forward_pre_hooks for module in model.modules())
 
 

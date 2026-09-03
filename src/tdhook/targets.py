@@ -25,8 +25,9 @@ class Target:
     ``feature_axis`` identifies the axis containing units, channels, rows, or
     columns.  For example, use ``-1`` for MLP output units, ``1`` for CNN
     output channels, and ``0``/``1`` for parameter rows/columns respectively.
-    ``occurrence`` optionally selects one zero-based activation or gradient
-    observation per root-model execution when a module is called repeatedly.
+    ``occurrences`` optionally selects ordered, zero-based activation or
+    gradient observations per root-model execution when a module is called
+    repeatedly. ``None`` selects every call.
     """
 
     module_path: str
@@ -35,7 +36,7 @@ class Target:
     indices: tuple[int, ...]
     parameter: str | None = None
     output_path: tuple[OutputPathComponent, ...] = ()
-    occurrence: int | None = None
+    occurrences: tuple[int, ...] | None = None
 
     def __post_init__(self) -> None:
         if self.kind not in {"activation", "gradient", "parameter"}:
@@ -54,19 +55,27 @@ class Target:
             raise TypeError("output_path components must be integer slots or string mapping keys")
         if self.kind == "parameter" and self.output_path:
             raise ValueError("output_path is only valid for activation and gradient targets")
-        if self.occurrence is not None:
-            if type(self.occurrence) is not int:
-                raise TypeError("occurrence must be an integer or None")
-            if self.occurrence < 0:
-                raise ValueError("occurrence must be non-negative")
+        if self.occurrences is not None:
+            if not isinstance(self.occurrences, tuple):
+                raise TypeError("occurrences must be a tuple of integers or None")
+            if not self.occurrences:
+                raise ValueError("occurrences must contain at least one selection")
+            if any(type(index) is not int for index in self.occurrences):
+                raise TypeError("occurrences must contain only integers")
+            if any(index < 0 for index in self.occurrences):
+                raise ValueError("occurrences must be non-negative")
+            if any(left >= right for left, right in zip(self.occurrences, self.occurrences[1:])):
+                raise ValueError("occurrences must be unique and strictly increasing")
             if self.kind == "parameter":
-                raise ValueError("occurrence is only valid for activation and gradient targets")
+                raise ValueError("occurrences are only valid for activation and gradient targets")
 
     def to_dict(self) -> dict[str, object]:
         """Return a JSON-compatible representation of this target."""
         data = asdict(self)
         data["indices"] = list(self.indices)
         data["output_path"] = list(self.output_path)
+        if self.occurrences is not None:
+            data["occurrences"] = list(self.occurrences)
         return data
 
     @classmethod
@@ -78,6 +87,9 @@ class Target:
         except KeyError as exc:
             raise ValueError("Target data is missing indices") from exc
         values["output_path"] = tuple(values.get("output_path", ()))  # type: ignore[arg-type]
+        occurrences = values.get("occurrences")
+        if occurrences is not None:
+            values["occurrences"] = tuple(occurrences)  # type: ignore[arg-type]
         return cls(**values)  # type: ignore[arg-type]
 
     def to_json(self) -> str:

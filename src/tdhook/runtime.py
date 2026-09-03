@@ -65,6 +65,32 @@ class HookSpec:
 
 
 @dataclass(frozen=True)
+class TargetOccurrencePlan:
+    """Tensor-free occurrence selection planned for one hook operation."""
+
+    hook_index: int
+    target_path: str
+    operation: str
+    direction: HookDirection
+    selected_indices: tuple[int, ...]
+    reset_scope: str = "root_model_pass"
+
+
+@dataclass(frozen=True)
+class TargetOccurrenceEvidence:
+    """Validated calls observed for one target during one root model pass."""
+
+    hook_index: int
+    target_path: str
+    operation: str
+    direction: HookDirection
+    root_pass: int
+    selected_indices: tuple[int, ...]
+    observed_indices: tuple[int, ...]
+    reset_scope: str = "root_model_pass"
+
+
+@dataclass(frozen=True)
 class HookProgram:
     """Ordered, model-free description of installed hook operations."""
 
@@ -80,28 +106,69 @@ class HookProgram:
             if self.hooks[spec.source.hook_index].operation != "capture":
                 raise ValueError("capture dependencies must refer to a capture hook")
 
+    @property
+    def occurrence_plans(self) -> tuple[TargetOccurrencePlan, ...]:
+        """Return immutable multi-occurrence plans in registration order."""
+
+        plans = []
+        for hook_index, spec in enumerate(self.hooks):
+            if spec.target is None or spec.target.occurrences is None or spec.direction is None:
+                continue
+            plans.append(
+                TargetOccurrencePlan(
+                    hook_index,
+                    spec.target.module_path,
+                    spec.operation,
+                    spec.direction,
+                    spec.target.occurrences,
+                )
+            )
+        return tuple(plans)
+
 
 @dataclass
 class _TargetOccurrence:
     target: Target
     operation: str
+    hook_index: int
+    direction: HookDirection
+    evidence: list[TargetOccurrenceEvidence]
     calls: int = 0
+    root_pass: int = -1
 
     def selected(self) -> bool:
-        occurrence = self.target.occurrence
-        selected = occurrence is None or self.calls == occurrence
+        selected_indices = self.target.occurrences
+        selected = selected_indices is None or self.calls in selected_indices
         self.calls += 1
         return selected
 
     def reset(self) -> None:
         self.calls = 0
+        self.root_pass += 1
 
     def validate(self) -> None:
-        occurrence = self.target.occurrence
-        if occurrence is not None and self.calls <= occurrence:
+        selected_indices = self.target.occurrences
+        if selected_indices is not None and self.calls <= selected_indices[-1]:
+            requested = (
+                f"occurrence {selected_indices[0]}"
+                if len(selected_indices) == 1
+                else f"occurrences {selected_indices}"
+            )
             raise RuntimeError(
-                f"{self.operation} target {self.target.module_path!r} requested occurrence {occurrence}, "
+                f"{self.operation} target {self.target.module_path!r} requested {requested}, "
                 f"but the module was called {self.calls} time(s) in this root-model execution"
+            )
+        if selected_indices is not None:
+            self.evidence.append(
+                TargetOccurrenceEvidence(
+                    self.hook_index,
+                    self.target.module_path,
+                    self.operation,
+                    self.direction,
+                    self.root_pass,
+                    selected_indices,
+                    tuple(range(self.calls)),
+                )
             )
 
 
@@ -113,10 +180,18 @@ class BoundHookProgram:
         program: HookProgram,
         cleanups: tuple[Callable[[], Any], ...],
         hook_failure_handlers: tuple[list[Callable[[], Any] | None], ...] = (),
+        occurrence_evidence: list[TargetOccurrenceEvidence] | None = None,
     ):
         self.program = program
         self._cleanups = list(cleanups)
         self._hook_failure_handlers = hook_failure_handlers
+        self._occurrence_evidence = occurrence_evidence if occurrence_evidence is not None else []
+
+    @property
+    def occurrence_evidence(self) -> tuple[TargetOccurrenceEvidence, ...]:
+        """Return validated occurrence evidence accumulated so far."""
+
+        return tuple(self._occurrence_evidence)
 
     def on_hook_failure(self, callback: Callable[[], Any]) -> None:
         """Run ``callback`` if one of this program's hooks raises."""
@@ -146,6 +221,7 @@ class HookProgramBuilder:
         self._cleanups: list[Callable[[], Any]] = []
         self._hook_failure_handlers: list[list[Callable[[], Any] | None]] = []
         self._stopped_at: str | None = None
+        self._occurrence_evidence: list[TargetOccurrenceEvidence] = []
         self._built = False
 
     @property
@@ -153,6 +229,12 @@ class HookProgramBuilder:
         """Return the operations successfully registered so far."""
 
         return HookProgram(tuple(self._specs), self._stopped_at)
+
+    @property
+    def occurrence_evidence(self) -> tuple[TargetOccurrenceEvidence, ...]:
+        """Return validated occurrence evidence accumulated so far."""
+
+        return tuple(self._occurrence_evidence)
 
     def mark_stopped(self, module_path: str) -> None:
         """Record that execution reached a registered early-stop location."""
@@ -217,7 +299,13 @@ class HookProgramBuilder:
         if spec.target.kind == "parameter" or spec.direction is None:
             raise ValueError("target hook registration requires an activation or gradient hook")
         target_module = self.resolve_path(root, spec.module_path, relative_path=relative_path)
-        occurrence = _TargetOccurrence(spec.target, spec.operation)
+        occurrence = _TargetOccurrence(
+            spec.target,
+            spec.operation,
+            len(self._specs),
+            spec.direction,
+            self._occurrence_evidence,
+        )
 
         @wraps(hook)
         def selected_hook(*args: Any, **kwargs: Any) -> Any:
@@ -226,7 +314,7 @@ class HookProgramBuilder:
             return None
 
         self.register(target_module, selected_hook, spec)
-        if spec.target.occurrence is None:
+        if spec.target.occurrences is None:
             return
 
         execution_root = self.resolve_path(root, "", relative_path=relative_path)
@@ -276,7 +364,12 @@ class HookProgramBuilder:
         """Seal and return the installed program."""
 
         self._ensure_open()
-        bound = BoundHookProgram(self.program, tuple(self._cleanups), tuple(self._hook_failure_handlers))
+        bound = BoundHookProgram(
+            self.program,
+            tuple(self._cleanups),
+            tuple(self._hook_failure_handlers),
+            self._occurrence_evidence,
+        )
         self._cleanups.clear()
         self._built = True
         return bound
@@ -286,7 +379,12 @@ class HookProgramBuilder:
 
         self._ensure_open()
         try:
-            BoundHookProgram(self.program, tuple(self._cleanups), tuple(self._hook_failure_handlers)).remove()
+            BoundHookProgram(
+                self.program,
+                tuple(self._cleanups),
+                tuple(self._hook_failure_handlers),
+                self._occurrence_evidence,
+            ).remove()
         finally:
             self._cleanups.clear()
             self._hook_failure_handlers.clear()
@@ -333,5 +431,7 @@ __all__ = [
     "HookProgram",
     "HookProgramBuilder",
     "HookSpec",
+    "TargetOccurrenceEvidence",
+    "TargetOccurrencePlan",
     "temporary_module_state",
 ]

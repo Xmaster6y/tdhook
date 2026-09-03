@@ -68,13 +68,39 @@ class TestActivationCaching:
             def forward(self, value):
                 return self.shared(value + 1) + self.shared(value + 2)
 
-        target = Target("shared", "activation", -1, (0,), occurrence=0)
+        target = Target("shared", "activation", -1, (0,), occurrences=(0,))
         data = TensorDict({"input": torch.tensor([[1.0, 2.0]])}, batch_size=[1])
 
         with ActivationCaching(target).prepare(Model()) as prepared:
             result = prepared(data)
 
         torch.testing.assert_close(result["cache", "shared"], torch.tensor([[2.0]]))
+        assert prepared.hooking_context.occurrence_evidence[0].target_path == "shared"
+        assert prepared.hooking_context.occurrence_evidence[0].selected_indices == (0,)
+        assert prepared.hooking_context.occurrence_evidence[0].observed_indices == (0, 1)
+
+    def test_target_occurrence_numbering_survives_hook_rebinding(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.shared = torch.nn.Identity()
+
+            def forward(self, value):
+                return self.shared(value + 1) + self.shared(value + 2)
+
+        model = Model()
+        target = Target("shared", "activation", -1, (0,), occurrences=(0,))
+        data = TensorDict({"input": torch.tensor([[1.0, 2.0]])}, batch_size=[1])
+
+        with ActivationCaching(target).prepare(model) as prepared:
+            prepared(data)
+            assert tuple(item.root_pass for item in prepared.hooking_context.occurrence_evidence) == (0,)
+            with prepared.hooking_context.disable_hooks():
+                model(data["input"])
+            prepared(data)
+            assert tuple(item.root_pass for item in prepared.hooking_context.occurrence_evidence) == (0, 1)
+
+        assert tuple(item.root_pass for item in prepared.hooking_context.occurrence_evidence) == (0, 1)
 
     def test_target_uses_the_shared_module_path_grammar(self):
         class Model(torch.nn.Module):
