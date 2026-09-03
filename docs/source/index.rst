@@ -10,7 +10,6 @@
 
     Getting Started <start>
     Tutorials <tutorials>
-    Release Notes <release-notes>
     API Reference <api/index>
     About <about>
 

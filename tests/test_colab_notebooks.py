@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+import re
 
 import pytest
 
@@ -19,7 +20,7 @@ NOTEBOOK_DIR = REPO_ROOT / "docs/source/notebooks/methods"
 
 
 def notebook_code_cells(path: Path) -> tuple[str, ...]:
-    notebook = json.loads(path.read_text())
+    notebook = json.loads(path.read_text(encoding="utf-8"))
     return tuple("".join(cell.get("source", ())) for cell in notebook["cells"] if cell["cell_type"] == "code")
 
 
@@ -42,14 +43,14 @@ def test_dimension_estimation_declares_its_extra_colab_dependency():
     assert "scikit-learn" in colab_setup_cell(NOTEBOOK_DIR / "dimension-estimation.ipynb")
 
 
-def test_bilinear_probing_matches_paths_relative_to_its_raw_model():
+def test_bilinear_probing_does_not_force_absolute_paths():
     code = "\n".join(notebook_code_cells(NOTEBOOK_DIR / "bilinear-probing.ipynb"))
 
-    assert "relative=False" not in code
+    assert re.search(r"\brelative\s*=\s*False\b", code) is None
 
 
 def test_readme_colab_badges_load_notebooks_from_main():
-    readme = (REPO_ROOT / "README.md").read_text()
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
 
     for filename in NOTEBOOKS:
         assert f"blob/main/docs/source/notebooks/methods/{filename}" in readme

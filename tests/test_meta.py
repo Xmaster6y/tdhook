@@ -14,10 +14,10 @@ def test_version_matches_metadata() -> None:
 
 
 def test_release_version_is_consistent_across_metadata_and_docs() -> None:
-    project = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())
+    project = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     project_version = project["project"]["version"]
-    citation = (REPO_ROOT / "CITATION.cff").read_text().splitlines()
-    switcher = json.loads((REPO_ROOT / "docs/source/_static/switcher.json").read_text())
+    citation = (REPO_ROOT / "CITATION.cff").read_text(encoding="utf-8").splitlines()
+    switcher = json.loads((REPO_ROOT / "docs/source/_static/switcher.json").read_text(encoding="utf-8"))
 
     assert f"version: {project_version}" in citation
     assert switcher[0] == {

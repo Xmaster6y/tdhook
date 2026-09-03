@@ -12,17 +12,22 @@ In a contributor checkout, the package source is under `src/tdhook/`:
 ```text
 src/tdhook/
 ├── __init__.py           # Public API
-├── modules.py            # HookedModule and TensorDict wrappers
-├── hooks.py              # Hook factories and low-level handles
+├── _optional_deps.py     # Lazy imports (sklearn, captum, etc.)
+├── _types.py             # Nested-key validation and composition helpers
+├── concepts.py           # Concept definitions and utilities
 ├── contexts.py           # HookingContext, HookingContextFactory
+├── descriptions.py       # Serializable configured-step descriptions
+├── dimension.py          # Dimension-estimation workflow helpers
+├── execution.py          # Execution requirements and plans
+├── hooks.py              # Hook factories and low-level handles
+├── interventions.py      # Optimized activation interventions
+├── metrics.py            # InfidelityMetric, SensitivityMetric
+├── modules.py            # HookedModule and TensorDict wrappers
+├── paths.py              # Safe submodule-path resolution
 ├── runtime.py            # Immutable hook programs and bound execution
 ├── session.py            # Public imperative HookSession lifecycle
 ├── targets.py            # Serializable activation, gradient, and parameter targets
-├── paths.py              # Safe submodule-path resolution
-├── metrics.py            # InfidelityMetric, SensitivityMetric
-├── sources.py            # Baseline/source utilities
-├── _types.py             # Nested-key validation and composition helpers
-└── _optional_deps.py     # Lazy imports (sklearn, captum, etc.)
+└── workflow.py           # Declarative composition and artifact exchange
 ```
 
 ## Attribution
@@ -35,6 +40,8 @@ attribution/
 ├── guided_backpropagation.py
 ├── grad_cam.py
 ├── activation_maximisation.py
+├── circuit_clustering.py
+├── circuit_lens.py
 ├── lrp.py
 ├── gradient_helpers/     # Shared gradient/IG logic
 └── lrp_helpers/          # LRP rules, mappers
@@ -45,10 +52,13 @@ attribution/
 ```text
 latent/
 ├── __init__.py
+├── _targets.py           # Shared target normalization
 ├── steering_vectors.py   # ActivationAddition, SteeringVectors
 ├── activation_patching.py
 ├── activation_caching.py
-├── representation_similarity.py
+├── representation_similarity/
+│   ├── cka.py
+│   └── information_imbalance.py
 ├── probing/              # Probing, ProbeManager, BilinearProbeManager
 │   ├── context.py
 │   ├── managers.py
@@ -63,7 +73,8 @@ weights/
 ├── __init__.py
 ├── pruning.py
 ├── adapters.py
-└── task_vectors.py
+├── task_vectors.py
+└── weight_lens.py
 ```
 
 ## Key Entry Points

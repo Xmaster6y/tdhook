@@ -102,7 +102,7 @@ with HookSession(model) as session:
     session.replace(destination, captured)
     output = model(inputs)
 
-cached = captured.value
+cached = captured.values[-1]
 ```
 
 ---
