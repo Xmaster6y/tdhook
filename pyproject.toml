@@ -31,6 +31,9 @@ issues = "https://github.com/Xmaster6y/tdhook/issues"
 releasenotes = "https://github.com/Xmaster6y/tdhook/releases"
 
 [project.optional-dependencies]
+benchmark = [
+    "captum>=0.8.0",
+]
 circuit-lens = [
     "circuit-tracer>=0.5.0",
     "transformer-lens>=2.16.0",
