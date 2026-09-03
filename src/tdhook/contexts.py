@@ -295,13 +295,13 @@ class HookingContextFactory:
             if in_keys is not None:
                 for key in in_keys:
                     if not is_nested_key(key):
-                        raise ValueError(f"in_keys must be unraveled, got {type(key)}")
+                        raise ValueError(f"in_keys must be TensorDict nested keys, got {type(key)}")
                     if key not in module.in_keys:
                         raise ValueError(f"Key {key} not in module.in_keys")
             if out_keys is not None:
                 for key in out_keys:
                     if not is_nested_key(key):
-                        raise ValueError(f"out_keys must be unraveled, got {type(key)}")
+                        raise ValueError(f"out_keys must be TensorDict nested keys, got {type(key)}")
                     if key not in module.out_keys:
                         raise ValueError(f"Key {key} not in module.out_keys")
 
