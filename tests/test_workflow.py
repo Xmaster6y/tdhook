@@ -440,12 +440,15 @@ def test_managed_workflow_result_includes_validated_occurrence_evidence():
 
     with workflow.session(model) as session:
         session.capture(target)
-        result = session(data)
+        first = session(data)
+        second = session(data)
 
-    assert result.plan.model_passes == 2
-    assert tuple(item.root_pass for item in result.occurrence_evidence) == (0, 1)
-    assert all(item.selected_indices == (0, 2) for item in result.occurrence_evidence)
-    assert all(item.observed_indices == (0, 1, 2) for item in result.occurrence_evidence)
+    assert first.plan.model_passes == second.plan.model_passes == 2
+    assert tuple(item.root_pass for item in first.occurrence_evidence) == (0, 1)
+    assert tuple(item.root_pass for item in second.occurrence_evidence) == (2, 3)
+    assert all(item.selected_indices == (0, 2) for item in first.occurrence_evidence)
+    assert all(item.observed_indices == (0, 1, 2) for item in second.occurrence_evidence)
+    assert tuple(item.root_pass for item in session.occurrence_evidence) == (0, 1, 2, 3)
 
 
 def test_managed_workflow_session_early_stop_aborts_the_run_and_restores_hooks(default_test_model):

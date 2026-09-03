@@ -30,6 +30,15 @@ def test_multi_occurrence_target_round_trip_is_json_serializable():
     }
 
 
+def test_occurrence_selector_normalizes_mutable_indices():
+    indices = [0, 2]
+    selector = OccurrenceSelector(indices)
+    indices.append(3)
+
+    assert selector.indices == (0, 2)
+    assert hash(selector) == hash(OccurrenceSelector((0, 2)))
+
+
 def test_target_validation_uses_the_shared_path_grammar():
     class Model(nn.Module):
         def __init__(self):
@@ -139,3 +148,10 @@ def test_occurrence_selector_rejects_ambiguous_indices(indices, exception, messa
         OccurrenceSelector(indices)
 
     assert OccurrenceSelector((0, 2)).reset_scope == "root_model_pass"
+
+
+def test_occurrence_selector_rejects_invalid_serialized_data():
+    with pytest.raises(ValueError, match="missing indices"):
+        OccurrenceSelector.from_dict({})
+    with pytest.raises(ValueError, match="reset_scope"):
+        OccurrenceSelector((0,), reset_scope="session")

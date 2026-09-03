@@ -1,5 +1,6 @@
 from contextlib import contextmanager
 from contextlib import ExitStack
+from dataclasses import replace
 from functools import wraps
 import inspect
 import sys
@@ -110,8 +111,31 @@ class HookingContext:
         """Return validated target-occurrence evidence from this binding."""
 
         if isinstance(self._handle, BoundHookProgram):
-            return self._occurrence_evidence + self._handle.occurrence_evidence
+            return self._occurrence_evidence + self._renumber_occurrence_evidence(self._handle.occurrence_evidence)
         return self._occurrence_evidence
+
+    def _renumber_occurrence_evidence(
+        self,
+        evidence: tuple[TargetOccurrenceEvidence, ...],
+    ) -> tuple[TargetOccurrenceEvidence, ...]:
+        """Continue root-pass numbering when a context rebinds its hooks."""
+
+        next_pass: dict[tuple[object, ...], int] = {}
+        for item in self._occurrence_evidence:
+            key = (item.hook_index, item.target_path, item.operation, item.direction)
+            next_pass[key] = max(next_pass.get(key, 0), item.root_pass + 1)
+        return tuple(
+            replace(
+                item,
+                root_pass=item.root_pass
+                + next_pass.get((item.hook_index, item.target_path, item.operation, item.direction), 0),
+            )
+            for item in evidence
+        )
+
+    def _retain_occurrence_evidence(self, handle: object) -> None:
+        if isinstance(handle, BoundHookProgram):
+            self._occurrence_evidence += self._renumber_occurrence_evidence(handle.occurrence_evidence)
 
     def on_hook_failure(self, callback) -> None:
         """Register cleanup to run if a bound hook raises during execution."""
@@ -170,8 +194,7 @@ class HookingContext:
                 except BaseException as error:
                     cleanup_error = error
                 finally:
-                    if isinstance(self._handle, BoundHookProgram):
-                        self._occurrence_evidence += self._handle.occurrence_evidence
+                    self._retain_occurrence_evidence(self._handle)
             try:
                 self._restore(self._module, self._in_keys, self._out_keys, self._extra_relative_path)
             except BaseException as error:
@@ -195,8 +218,7 @@ class HookingContext:
         if not self._in_context:
             raise RuntimeError("Cannot disable hooks outside of context")
         self._handle.remove()
-        if isinstance(self._handle, BoundHookProgram):
-            self._occurrence_evidence += self._handle.occurrence_evidence
+        self._retain_occurrence_evidence(self._handle)
         try:
             yield
         finally:

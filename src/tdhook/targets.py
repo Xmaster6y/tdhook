@@ -32,6 +32,7 @@ class OccurrenceSelector:
     reset_scope: OccurrenceResetScope = "root_model_pass"
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "indices", tuple(self.indices))
         if not self.indices:
             raise ValueError("occurrence indices must contain at least one selection")
         if any(type(index) is not int for index in self.indices):

@@ -922,12 +922,13 @@ class WorkflowSession(HookSession):
         """
 
         self._active_state()
+        evidence_start = len(self.occurrence_evidence)
         result = self._workflow.run_with_plan(self._model(), data)
         return WorkflowResult(
             data=result.data,
             plan=result.plan,
             program=self.program,
-            occurrence_evidence=self.occurrence_evidence,
+            occurrence_evidence=self.occurrence_evidence[evidence_start:],
         )
 
     def __call__(self, data: TensorDictBase) -> WorkflowResult:
