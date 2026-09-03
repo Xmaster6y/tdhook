@@ -1,12 +1,13 @@
-from typing import List, Optional, Callable
+from typing import Callable, List, Optional
+
 from tensordict import TensorDict
-from tensordict.nn import TensorDictModuleBase, TensorDictModule, TensorDictSequential
+from tensordict.nn import TensorDictModule, TensorDictModuleBase, TensorDictSequential
 from tensordict.utils import NestedKey
 
-from tdhook.attribution import Saliency
+from tdhook.attribution.saliency import Saliency
 from tdhook.contexts import HookingContextFactory
-from tdhook.modules import PGDModule, IntermediateKeysCleaner
 from tdhook.execution import ExecutionSpec, GradientMode
+from tdhook.modules import IntermediateKeysCleaner, PGDModule
 
 
 class ActivationMaximisation(HookingContextFactory):
