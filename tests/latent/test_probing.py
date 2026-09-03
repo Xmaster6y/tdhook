@@ -290,6 +290,16 @@ class TestTorchEstimators:
         captured = capsys.readouterr()
         assert "Epoch 10/10" in captured.out
 
+    def test_fit_enables_grad_when_model_forward_disables_it(self):
+        estimator = LinearEstimator(d_latent=3, num_classes=2, epochs=1, batch_size=2)
+        X = torch.randn(4, 3)
+        y = torch.randint(0, 2, (4,))
+
+        with torch.no_grad():
+            estimator.fit(X, y=y)
+
+        assert any(parameter.grad is not None for parameter in estimator.parameters())
+
     def test_loss_shape_mismatch_regression_raises(self):
         estimator = LinearEstimator(d_latent=3, num_classes=None)
         output = torch.randn(5, 1)

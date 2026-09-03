@@ -42,6 +42,12 @@ def test_dimension_estimation_declares_its_extra_colab_dependency():
     assert "scikit-learn" in colab_setup_cell(NOTEBOOK_DIR / "dimension-estimation.ipynb")
 
 
+def test_bilinear_probing_matches_paths_relative_to_its_raw_model():
+    code = "\n".join(notebook_code_cells(NOTEBOOK_DIR / "bilinear-probing.ipynb"))
+
+    assert "relative=False" not in code
+
+
 def test_readme_colab_badges_load_notebooks_from_main():
     readme = (REPO_ROOT / "README.md").read_text()
 

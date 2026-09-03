@@ -22,12 +22,10 @@ HookOperation = Literal["capture", "replace", "stop"]
 class CapturedTarget:
     """Mutable result populated whenever a capture hook observes its target.
 
-    ``value`` retains the most recent observation for compatibility with a
-    single model execution. ``values`` preserves every observation in call
-    order, so repeated executions remain distinguishable.
+    ``values`` preserves every observation in call order, so repeated module
+    calls and repeated executions remain distinguishable.
     """
 
-    value: Tensor | None = None
     values: list[Tensor] = field(default_factory=list)
     _target: Target | None = field(default=None, repr=False, compare=False)
     _session_token: object | None = field(default=None, repr=False, compare=False)
@@ -36,7 +34,6 @@ class CapturedTarget:
     _execution: int | None = field(default=None, repr=False, compare=False)
 
     def _record(self, value: Tensor, execution: int | None = None) -> None:
-        self.value = value
         self.values.append(value)
         self._execution = execution
 
@@ -270,9 +267,9 @@ class HookSession:
                 if source is None:
                     return value  # type: ignore[return-value]
                 execution = self._executions[target.kind]
-                if execution == 0 or source.value is None or source._execution != execution:
+                if execution == 0 or not source.values or source._execution != execution:
                     raise RuntimeError("live replacement reached its target before a fresh source capture")
-                replacement = source.value
+                replacement = source.values[-1]
                 return transform(replacement) if transform is not None else replacement
 
             def forward_hook(_module: nn.Module, _args: tuple[object, ...], output: object):

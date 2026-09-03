@@ -90,17 +90,20 @@ class TorchEstimator(nn.Module):
         dataset = TensorDataset(*Xs, y)
         train_loader = DataLoader(dataset, batch_size=self._batch_size, shuffle=True)
         optimizer = torch.optim.Adam(self.parameters(), lr=self._lr)
-        for epoch in range(self._epochs):
-            self.train()
-            for batch in train_loader:
-                *Xs_b, y_b = batch
-                o_b = self(*Xs_b)
-                loss = self._loss_fn(o_b, y_b)
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-            if self._verbose and (epoch + 1) % 10 == 0:
-                print(f"Epoch {epoch + 1}/{self._epochs}")
+        # Probe fitting owns its autograd context. It is commonly triggered from
+        # a hook while the model forward itself is intentionally under no_grad.
+        with torch.enable_grad():
+            for epoch in range(self._epochs):
+                self.train()
+                for batch in train_loader:
+                    *Xs_b, y_b = batch
+                    o_b = self(*Xs_b)
+                    loss = self._loss_fn(o_b, y_b)
+                    optimizer.zero_grad()
+                    loss.backward()
+                    optimizer.step()
+                if self._verbose and (epoch + 1) % 10 == 0:
+                    print(f"Epoch {epoch + 1}/{self._epochs}")
         return self
 
     def predict(self, *Xs: torch.Tensor) -> torch.Tensor:

@@ -115,7 +115,7 @@ manager = BilinearProbeManager(
 )
 
 manager.before_all()
-with Probing(manager.key_pattern, manager.probe_factory, additional_keys=["labels", "step_type"], relative=False).prepare(model, in_keys=["input_ids"], out_keys=["logits"]) as hooked:
+with Probing(manager.key_pattern, manager.probe_factory, additional_keys=["labels", "step_type"]).prepare(model, in_keys=["input_ids"], out_keys=["logits"]) as hooked:
     hooked(train_td)
     hooked(test_td)
 manager.after_all()

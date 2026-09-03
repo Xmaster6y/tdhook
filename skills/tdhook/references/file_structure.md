@@ -12,9 +12,13 @@ In a contributor checkout, the package source is under `src/tdhook/`:
 ```text
 src/tdhook/
 ├── __init__.py           # Public API
-├── modules.py            # HookedModule, HookedModuleRun, TensorDict wrappers
-├── hooks.py              # HookFactory, MultiHookManager, resolve_submodule_path
+├── modules.py            # HookedModule and TensorDict wrappers
+├── hooks.py              # Hook factories and low-level handles
 ├── contexts.py           # HookingContext, HookingContextFactory
+├── runtime.py            # Immutable hook programs and bound execution
+├── session.py            # Public imperative HookSession lifecycle
+├── targets.py            # Serializable activation, gradient, and parameter targets
+├── paths.py              # Safe submodule-path resolution
 ├── metrics.py            # InfidelityMetric, SensitivityMetric
 ├── sources.py            # Baseline/source utilities
 ├── _types.py             # Nested-key validation and composition helpers

@@ -114,5 +114,5 @@ nbsphinx_execute = "never"
 # Autoapi
 autoapi_dirs = ["../../src"]
 autoapi_root = "api"
-autoapi_keep_files = True
+autoapi_keep_files = False
 autodoc_typehints = "description"

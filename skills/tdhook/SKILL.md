@@ -141,7 +141,7 @@ with SteeringVectors(modules_to_steer=["layer.7.mlp"], steer_fn=lambda k, o: o +
 | `KeyError` on TensorDict | Use tuple keys: `("attr", "input")`, `("baseline", "input")` |
 | HuggingFace model fails | Pass `in_keys=["input_ids"]`, `out_keys=["logits"]` to `prepare()` |
 | `BilinearProbeManager` shape mismatch | Call `manager.before_all()` before forwards, `manager.after_all()` after |
-| Module path not found | Use `relative=False` or correct regex; see [api.md](references/api.md) Module Path Resolution |
+| Module path not found | Match paths relative to the model passed to `prepare`; see [api.md](references/api.md) Module Path Resolution |
 | Probing `step_type` missing | Add `additional_keys=["labels", "step_type"]` and pass both in TensorDict |
 | IG baseline wrong shape | Ensure `("baseline", "input")` matches `"input"` shape and device |
 
