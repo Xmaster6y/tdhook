@@ -1,4 +1,4 @@
-"""Keep the two public getting-started examples aligned and executable."""
+"""Keep the public getting-started examples aligned and executable."""
 
 from pathlib import Path
 

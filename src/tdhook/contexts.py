@@ -222,6 +222,8 @@ class HookingContextWithCache(HookingContext):
 
     def _enter(self, *, for_inspection: bool = False):
         if self._clear_cache and not for_inspection:
+            if self._cache.is_locked:
+                raise ValueError("locked or memory-mapped caches require clear_cache=False")
             self.clear()
         return super()._enter(for_inspection=for_inspection)
 
