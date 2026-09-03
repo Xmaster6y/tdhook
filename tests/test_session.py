@@ -24,9 +24,8 @@ def test_session_captures_and_replaces_an_activation(default_test_model):
         modified = default_test_model(x)
         program = session.program
 
-    assert captured.value is not None
-    assert captured.values == [captured.value]
-    assert captured.value.shape == (3, 1)
+    assert len(captured.values) == 1
+    assert captured.values[-1].shape == (3, 1)
     assert not torch.allclose(modified, baseline)
     assert torch.allclose(default_test_model(x), baseline)
     assert program == HookProgram(
@@ -47,7 +46,6 @@ def test_session_preserves_repeated_captures_in_call_order(default_test_model):
             default_test_model(value)
 
     assert len(captured.values) == 2
-    assert captured.value is captured.values[-1]
     assert not torch.equal(captured.values[0], captured.values[1])
 
 
@@ -111,7 +109,7 @@ def test_session_routes_a_live_gradient_to_a_later_backward_target():
         session.replace(destination, captured, direction="bwd_pre", transform=lambda gradient: gradient * 4)
         model(value).sum().backward()
 
-    assert captured.value is not None
+    assert captured.values
     assert torch.equal(value.grad, torch.tensor([[1.0, 1.0, 4.0]]))
 
 
@@ -243,8 +241,7 @@ def test_session_selects_and_replaces_one_leaf_of_a_structured_output():
         session.replace(target, 0)
         output = model(x)
 
-    assert captured.value is not None
-    assert torch.equal(captured.value, torch.full((2, 1), 3.0))
+    assert torch.equal(captured.values[-1], torch.full((2, 1), 3.0))
     assert torch.equal(output["predictions"][0], x + 1)
     assert torch.equal(output["predictions"][1][:, 1], torch.zeros(2))
     assert output["metadata"] == "kept"
@@ -272,8 +269,7 @@ def test_session_preserves_mapping_output_types(container_factory):
         output = model(x)
 
     assert isinstance(output, type(container_factory(x)))
-    assert captured.value is not None
-    assert torch.equal(captured.value, torch.full((2, 1), 2.0))
+    assert torch.equal(captured.values[-1], torch.full((2, 1), 2.0))
     assert torch.equal(output["predictions"][:, 1], torch.zeros(2))
     assert output["metadata"] == "kept"
 
@@ -292,8 +288,7 @@ def test_session_captures_and_replaces_keyword_inputs():
         session.replace(target, 4, direction="fwd_pre_kwargs")
         output = model(x, scale=torch.ones(2, 3))
 
-    assert captured.value is not None
-    assert torch.equal(captured.value, torch.ones(2, 1))
+    assert torch.equal(captured.values[-1], torch.ones(2, 1))
     assert torch.equal(output[:, 1], torch.full((2,), 4.0))
     assert torch.equal(output[:, (0, 2)], torch.ones(2, 2))
     assert session.program == HookProgram(
@@ -332,8 +327,7 @@ def test_session_preserves_structured_forward_inputs(container_factory, output_p
         output = model(original)
 
     assert isinstance(output, type(original))
-    assert captured.value is not None
-    assert torch.equal(captured.value, torch.ones(2, 1))
+    assert torch.equal(captured.values[-1], torch.ones(2, 1))
     selected = Target._output_tensor((output,), output_path)
     assert torch.equal(selected[:, 2], torch.zeros(2))
 
@@ -352,8 +346,7 @@ def test_session_selects_one_gradient_from_multiple_module_outputs():
         first, second = model(x)
         (first.sum() + second.sum()).backward()
 
-    assert captured.value is not None
-    assert torch.equal(captured.value, torch.ones(2, 1))
+    assert torch.equal(captured.values[-1], torch.ones(2, 1))
 
 
 def test_session_captures_and_replaces_gradient_inputs_and_outputs():
@@ -368,8 +361,7 @@ def test_session_captures_and_replaces_gradient_inputs_and_outputs():
         output_session.replace(grad_output_target, 0, direction="bwd_pre")
         model(first_input).sum().backward()
 
-    assert captured_output.value is not None
-    assert torch.equal(captured_output.value, torch.ones(1, 1))
+    assert torch.equal(captured_output.values[-1], torch.ones(1, 1))
     assert torch.equal(first_input.grad, model.weight[0:1])
     assert output_session.program == HookProgram(
         (
@@ -385,8 +377,7 @@ def test_session_captures_and_replaces_gradient_inputs_and_outputs():
         input_session.replace(grad_input_target, 0, direction="bwd")
         model(second_input).sum().backward()
 
-    assert captured_input.value is not None
-    assert torch.equal(captured_input.value, torch.tensor([[7.0]]))
+    assert torch.equal(captured_input.values[-1], torch.tensor([[7.0]]))
     assert second_input.grad is not None
     assert torch.equal(second_input.grad, torch.tensor([[5.0, 0.0, 9.0]]))
     assert input_session.program == HookProgram(
@@ -496,7 +487,7 @@ def test_session_stops_forward_execution_and_exposes_partial_results():
     assert stopped.output is not None
     assert events == [4]
     assert torch.equal(stopped.output, expected)
-    assert captured.value is not None
+    assert captured.values
     assert session.program == HookProgram(
         (
             HookSpec("0", "capture", "fwd", target=target),
@@ -633,10 +624,8 @@ def test_session_captures_channels_and_replaces_gradients():
         session.replace(gradient, 0)
         model(x).sum().backward()
 
-    assert captured.value is not None
-    assert captured.value.shape == (2, 1, 4, 4)
-    assert captured_gradient.value is not None
-    assert captured_gradient.value.shape == (2, 1, 4, 4)
+    assert captured.values[-1].shape == (2, 1, 4, 4)
+    assert captured_gradient.values[-1].shape == (2, 1, 4, 4)
     assert torch.allclose(model.weight.grad[1], torch.zeros_like(model.weight.grad[1]))
 
 
@@ -647,8 +636,7 @@ def test_session_captures_parameter_values():
     with HookSession(model) as session:
         captured = session.capture(target)
 
-    assert captured.value is not None
-    assert torch.equal(captured.value, model.weight[1:2])
+    assert torch.equal(captured.values[-1], model.weight[1:2])
     assert session.program == HookProgram((HookSpec(target.module_path, "capture", None, target=target),))
 
 
@@ -715,7 +703,7 @@ def test_session_selects_root_pre_hook_occurrence_with_prepend():
         model(torch.tensor([1.0, 2.0]))
 
     assert len(captured.values) == 1
-    assert torch.equal(captured.value, torch.tensor([1.0]))
+    assert torch.equal(captured.values[-1], torch.tensor([1.0]))
 
 
 def test_session_selects_repeated_gradient_occurrence():
@@ -743,7 +731,7 @@ def test_session_selects_repeated_gradient_occurrence():
         model(x).sum().backward()
 
     assert len(captured.values) == 1
-    assert torch.equal(captured.value, torch.ones(1, 1))
+    assert torch.equal(captured.values[-1], torch.ones(1, 1))
     assert len(model.branch_inputs) == 2
     branch_gradients = [branch_input.grad for branch_input in model.branch_inputs]
     assert all(gradient is not None for gradient in branch_gradients)

@@ -87,20 +87,30 @@ class TorchEstimator(nn.Module):
         self._verbose = verbose
 
     def fit(self, *Xs: torch.Tensor, y: torch.Tensor):
-        dataset = TensorDataset(*Xs, y)
-        train_loader = DataLoader(dataset, batch_size=self._batch_size, shuffle=True)
-        optimizer = torch.optim.Adam(self.parameters(), lr=self._lr)
-        for epoch in range(self._epochs):
-            self.train()
-            for batch in train_loader:
-                *Xs_b, y_b = batch
-                o_b = self(*Xs_b)
-                loss = self._loss_fn(o_b, y_b)
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-            if self._verbose and (epoch + 1) % 10 == 0:
-                print(f"Epoch {epoch + 1}/{self._epochs}")
+        # Probe fitting owns its training context. Hooks commonly invoke it while
+        # the inspected model runs under no_grad or inference_mode.
+        with torch.inference_mode(False), torch.enable_grad():
+            inference_parameters = [name for name, parameter in self.named_parameters() if parameter.is_inference()]
+            if inference_parameters:
+                names = ", ".join(inference_parameters)
+                raise RuntimeError(f"TorchEstimator must be constructed outside torch.inference_mode(); got {names}")
+
+            Xs = tuple(tensor.clone() if tensor.is_inference() else tensor for tensor in Xs)
+            y = y.clone() if y.is_inference() else y
+            dataset = TensorDataset(*Xs, y)
+            train_loader = DataLoader(dataset, batch_size=self._batch_size, shuffle=True)
+            optimizer = torch.optim.Adam(self.parameters(), lr=self._lr)
+            for epoch in range(self._epochs):
+                self.train()
+                for batch in train_loader:
+                    *Xs_b, y_b = batch
+                    o_b = self(*Xs_b)
+                    loss = self._loss_fn(o_b, y_b)
+                    optimizer.zero_grad()
+                    loss.backward()
+                    optimizer.step()
+                if self._verbose and (epoch + 1) % 10 == 0:
+                    print(f"Epoch {epoch + 1}/{self._epochs}")
         return self
 
     def predict(self, *Xs: torch.Tensor) -> torch.Tensor:

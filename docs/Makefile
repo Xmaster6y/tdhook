@@ -12,7 +12,13 @@ BUILDDIR      = build
 help:
 	@$(SPHINXBUILD) -M help "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
 
-.PHONY: help Makefile
+.PHONY: help html Makefile
+
+# AutoAPI and sphinx-llm run overlapping Sphinx builders. Clean generated API
+# sources once before either builder starts, then keep them stable for both.
+html:
+	@$(RM) -r "$(SOURCEDIR)/api"
+	@$(SPHINXBUILD) -M html "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
 
 # Catch-all target: route all unknown targets to Sphinx using the new
 # "make mode" option.  $(O) is meant as a shortcut for $(SPHINXOPTS).

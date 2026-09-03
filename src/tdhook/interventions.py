@@ -270,11 +270,9 @@ def optimize_interventions(
                     captured = session.capture(spec.target, direction=spec.direction)
                     model(*model_args, **kwargs)
                 model_passes += 1
-                if (
-                    captured.value is None
-                ):  # pragma: no cover - target validation and execution normally guarantee this
+                if not captured.values:  # pragma: no cover - target validation and execution normally guarantee this
                     raise RuntimeError(f"target {spec.target.module_path!r} was not reached")
-                initial = captured.value
+                initial = captured.values[-1]
             else:
                 initial = initial.detach().clone()
 

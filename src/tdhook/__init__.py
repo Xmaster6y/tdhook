@@ -21,7 +21,6 @@ __all__ = [
     # Methods
     "latent",
     "attribution",
-    "auto",
     "weights",
     "concepts",
     "dimension",

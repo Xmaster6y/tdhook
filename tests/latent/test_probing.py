@@ -290,6 +290,24 @@ class TestTorchEstimators:
         captured = capsys.readouterr()
         assert "Epoch 10/10" in captured.out
 
+    @pytest.mark.parametrize("training_context", [torch.no_grad, torch.inference_mode])
+    def test_fit_owns_grad_context_when_model_forward_disables_it(self, training_context):
+        estimator = LinearEstimator(d_latent=3, num_classes=2, epochs=1, batch_size=2)
+
+        with training_context():
+            X = torch.randn(4, 3)
+            y = torch.randint(0, 2, (4,))
+            estimator.fit(X, y=y)
+
+        assert any(parameter.grad is not None for parameter in estimator.parameters())
+
+    def test_fit_rejects_an_estimator_constructed_in_inference_mode(self):
+        with torch.inference_mode():
+            estimator = LinearEstimator(d_latent=3, num_classes=2, epochs=1, batch_size=2)
+
+        with pytest.raises(RuntimeError, match="must be constructed outside torch.inference_mode"):
+            estimator.fit(torch.randn(4, 3), y=torch.randint(0, 2, (4,)))
+
     def test_loss_shape_mismatch_regression_raises(self):
         estimator = LinearEstimator(d_latent=3, num_classes=None)
         output = torch.randn(5, 1)

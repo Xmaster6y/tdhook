@@ -106,7 +106,7 @@ def _capture(model: torch.nn.Module, inputs: torch.Tensor, layer: int) -> tuple[
     with torch.inference_mode(), HookSession(model) as session:
         captured = session.capture(_target(layer))
         logits = model(inputs)[0]
-    return captured.value, logits
+    return captured.values[-1], logits
 
 
 def _replace(model: torch.nn.Module, inputs: torch.Tensor, layer: int, replacement: torch.Tensor) -> torch.Tensor:
@@ -297,7 +297,7 @@ def _probe_and_behavior_metrics(
         logits = model(inputs)[0]
     layer_accuracy = []
     for captured, probe in zip(captures, probes, strict=True):
-        predictions = _probe_logits(captured.value, probe).argmax(-1)
+        predictions = _probe_logits(captured.values[-1], probe).argmax(-1)
         layer_accuracy.append(float((predictions[:, 5:54] == labels[:, 5:54]).float().mean().cpu()))
 
     playable = [square for square in range(64) if square not in (27, 28, 35, 36)]

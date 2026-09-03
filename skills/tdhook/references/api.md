@@ -7,12 +7,12 @@ Key classes, usage patterns, and method implementations.
 Base for all method implementations. Subclasses: `IntegratedGradients`, `Saliency`, `Probing`, `ActivationAddition`, etc.
 
 ```python
-method.prepare(module, in_keys=None, out_keys=None, return_context=True)
-# Returns HookingContext (context manager) or HookedModule if return_context=False
+context = method.prepare(module, in_keys=None, out_keys=None)
+with context as hooked_module:
+    result = hooked_module(data)
 ```
 
 - `in_keys` / `out_keys`: Override for non-TensorDictModule (e.g. HuggingFace: `["input_ids"]`, `["logits"]`).
-- `return_context=False`: Returns `HookedModule` directly; context is auto-entered.
 
 ## HookingContext / HookingContextWithCache
 
@@ -29,7 +29,7 @@ td = hooked_module(td)
 
 ### HookSession capture and replacement API
 
-Use `HookSession` for low-level capture, replacement, and early stopping. Register operations inside the context before executing the model.
+Use `HookSession` for low-level capture, replacement, and early stopping. Register operations inside the session before executing the model.
 
 ```python
 from tdhook.session import HookSession
@@ -47,12 +47,15 @@ with HookSession(model) as session:
 - **`replace(target, value, direction=..., transform=...)`** – Apply a static value or route a live capture to a later compatible target.
 - **`stop(module_path)`** – Stop after a module runs and expose its exact partial output.
 
+Captured values are ordered in `captured.values`; use `captured.values[-1]` when exactly one observation is expected.
+
 Directions select the hook location:
 
 | Variant | Direction | Use |
 |---------|-----------|-----|
 | activation output | `fwd` | Forward output |
 | activation input | `fwd_pre` | Forward positional input |
+| activation args and kwargs | `fwd_pre_kwargs` | `(args, kwargs)` |
 | gradient input | `bwd` | Backward gradient input |
 | gradient output | `bwd_pre` | Backward gradient output |
 
@@ -63,18 +66,16 @@ with HookSession(model) as session:
     model(inputs).sum().backward()
 ```
 
-Targets can select structured output paths, feature indices, or repeated call occurrences. See Module Path Resolution below for path syntax.
+Targets can select structured output paths, feature indices, or repeated call occurrences. Use `occurrences=(0, 2)` to select repeated calls within each root model pass. See Module Path Resolution below for path syntax.
 
 ### Context control
 
 ```python
-with hooked_module.disable_context_hooks():
+with context.disable_hooks():
     ...  # Run without method hooks
 
-with hooked_module.disable_context() as raw_module:
+with context.disable() as raw_module:
     ...  # Raw module, no hooks
-
-hooked_module.restore()  # When using prepare(return_context=False)
 ```
 
 ## TensorDict Keys
@@ -97,7 +98,7 @@ Submodule paths in targets and `stop()` resolve via `resolve_submodule_path`:
 - `<custom/attr>.submodule` – attributes with special chars (e.g. `block0/module`)
 - `m1.<0>.layers` – numeric attribute names
 
-Paths default to relative to `td_module`; use `relative=False` for absolute. Probing methods use regex `key_pattern` to match paths (e.g. `"transformer.h.5.mlp$"`).
+Target paths are relative to the model passed to `HookSession`. Probing methods use regex `key_pattern` to match paths (e.g. `"transformer.h.5.mlp$"`).
 
 ---
 
@@ -149,7 +150,7 @@ with ActivationAddition(["transformer.h.7.mlp"]).prepare(model) as hooked:
     steer = hooked(TensorDict({("positive", "input"): pos, ("negative", "input"): neg}, batch_size=1)).get(("steer", "transformer.h.7.mlp"))
 
 # Cache activations
-with ActivationCaching(r"transformer\.h\.\d+\.mlp", relative=False).prepare(model) as hooked:
+with ActivationCaching(r"transformer\.h\.\d+\.mlp").prepare(model) as hooked:
     hooked(data)
     cache = hooked.hooking_context.cache
 

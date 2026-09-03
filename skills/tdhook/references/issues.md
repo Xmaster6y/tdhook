@@ -14,7 +14,7 @@ Common issues from the tdhook repository and how to resolve them.
 | `KeyError` on TensorDict | Use tuple keys for nested: `("attr", "input")`, `("baseline", "input")` |
 | HuggingFace `in_keys`/`out_keys` | Pass `in_keys=["input_ids"]`, `out_keys=["logits"]` to `prepare()` |
 | BilinearProbeManager h1≠h2 | Call `manager.before_all()` before forwards, `manager.after_all()` after |
-| Module path not found | Use relative paths or `relative=False`; check `resolve_submodule_path` patterns in api.md |
+| Module path not found | Match paths relative to the model passed to `prepare`; check `resolve_submodule_path` patterns in api.md |
 | Probing `step_type` missing | Include `additional_keys=["labels", "step_type"]` and pass both in TensorDict |
 
 ## Contributing

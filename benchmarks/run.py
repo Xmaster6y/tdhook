@@ -129,8 +129,8 @@ def _capture_benchmark(
         with HookSession(model) as session:
             captured = session.capture(target)
             model(inputs)
-        assert captured.value is not None
-        return captured.value
+        assert captured.values
+        return captured.values[-1]
 
     def torch_operation() -> Tensor:
         captured: list[Tensor] = []

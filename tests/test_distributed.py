@@ -56,7 +56,7 @@ def _run_rank_local_sessions(rank: int, world_size: int, rendezvous: str, output
             session.replace(target, rank + 10)
             replaced = model(value)
 
-        assert captured.value is not None
+        assert captured.values
         assert len(target_module._forward_hooks) == original_hook_count
 
         workflow = Workflow(ActivationCaching(target, cache_key="activations"))
@@ -74,7 +74,7 @@ def _run_rank_local_sessions(rank: int, world_size: int, rendezvous: str, output
 
         result = {
             "rank": rank,
-            "captured": captured.value.tolist(),
+            "captured": captured.values[-1].tolist(),
             "replaced": replaced.tolist(),
             "workflow_capture": workflow_capture.tolist(),
             "stopped": stopped.output.tolist(),
