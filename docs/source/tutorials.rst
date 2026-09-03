@@ -167,6 +167,16 @@ Complete workflows
       Reproduce bounded Gemma-2-2B WeightLens candidates and CircuitLens
       contributors, then cluster circuit signatures.
 
+   .. grid-item-card:: ROME Causal Tracing and Editing
+      :link: notebooks/tutorials/rome-research-reproduction
+      :link-type: doc
+      :class-card: surface
+
+      :octicon:`pencil;2em;sd-text-primary`
+
+      Compare TDHook causal tracing and temporary rank-one edits with the
+      official ROME implementation on a preregistered CounterFact slice.
+
 .. toctree::
    :hidden:
    :maxdepth: 2
@@ -186,3 +196,4 @@ Complete workflows
    notebooks/tutorials/chess-dimension-estimation
    notebooks/tutorials/othello-research-reproduction
    notebooks/tutorials/weight-circuit-research-reproduction
+   notebooks/tutorials/rome-research-reproduction
