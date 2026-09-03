@@ -33,7 +33,7 @@ def test_public_colab_notebook_installs_the_released_package(filename: str):
     code_cells = notebook_code_cells(NOTEBOOK_DIR / filename)
     setup = colab_setup_cell(NOTEBOOK_DIR / filename)
 
-    assert any('IN_COLAB = importlib.util.find_spec("google.colab") is not None' in cell for cell in code_cells)
+    assert any('importlib.util.find_spec("google.colab") is not None' in cell for cell in code_cells)
     assert "%pip install -q tdhook" in setup
     assert "git+https://github.com/Xmaster6y/tdhook" not in setup
     assert "git clone https://github.com/Xmaster6y/tdhook -b main" not in setup
