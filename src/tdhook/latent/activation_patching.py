@@ -3,11 +3,11 @@ from typing import Callable, Optional, List
 from tensordict.nn import TensorDictModuleBase, TensorDictSequential
 from tensordict.utils import NestedKey
 
-from tdhook.contexts import HookingContextFactory
+from tdhook.methods import Method
 from tdhook.execution import ExecutionSpec
 from tdhook.hooks import HookFactory, register_hook_to_module
 from tdhook.latent._targets import activation_target
-from tdhook.modules import HookedModule, ModuleCallWithCache, IntermediateKeysCleaner, ModuleCall
+from tdhook.modules import BoundModule, ModuleCallWithCache, IntermediateKeysCleaner, ModuleCall
 from tdhook.runtime import BoundHookProgram, CaptureSource, HookProgramBuilder, HookSpec
 from tdhook.targets import Target
 
@@ -24,7 +24,13 @@ def _replace_selected_output(value: object, replacement: object, target: Target 
     return target.replace_output(value, replacement)
 
 
-class ActivationPatching(HookingContextFactory):
+class _PatchingPipeline(TensorDictSequential):
+    def __init__(self, *modules, cache_ref):
+        super().__init__(*modules)
+        self.cache_ref = cache_ref
+
+
+class ActivationPatching(Method):
     """
     Causal mediation analysis :cite:`Vig2020InvestigatingGB` and latent editing :cite:`belrose2023leace,Dreyer2023FromHT`.
     """
@@ -46,13 +52,11 @@ class ActivationPatching(HookingContextFactory):
         self._patch_fn = patch_fn
         self._cache_callback = cache_callback
 
-        self._hooked_module_kwargs["relative_path"] = "td_module.module[0]._td_module"
-
     @property
     def execution_spec(self) -> ExecutionSpec:
         return ExecutionSpec(model_passes=2)
 
-    def _prepare_module(
+    def _bind_module(
         self,
         module: TensorDictModuleBase,
         in_keys: List[NestedKey],
@@ -61,13 +65,14 @@ class ActivationPatching(HookingContextFactory):
     ) -> TensorDictModuleBase:
         stored_keys = list(self._modules_to_patch)
 
+        clean_call = ModuleCallWithCache(
+            module,
+            cache_key="_cache",
+            out_key=None,
+            stored_keys=stored_keys,
+        )
         modules = [
-            ModuleCallWithCache(
-                module,
-                cache_key="_cache",
-                out_key=None,
-                stored_keys=stored_keys,
-            ),
+            clean_call,
             ModuleCall(
                 module,
                 in_key=self._patch_key,
@@ -76,10 +81,10 @@ class ActivationPatching(HookingContextFactory):
         ]
         if self._clean_intermediate_keys:
             modules.append(IntermediateKeysCleaner(intermediate_keys=["_cache"]))
-        return TensorDictSequential(*modules)
+        return _PatchingPipeline(*modules, cache_ref=clean_call.cache_ref)
 
-    def _hook_module(self, module: HookedModule) -> BoundHookProgram:
-        cache_ref = module.td_module[0].cache_ref
+    def _install_hooks(self, module: BoundModule) -> BoundHookProgram:
+        cache_ref = module.td_module.cache_ref
         captured_outputs = []
         with HookProgramBuilder() as program:
 
@@ -109,7 +114,7 @@ class ActivationPatching(HookingContextFactory):
                 capture_spec = HookSpec(module_key, "capture", "fwd", target=target)
                 capture_index = len(program.program.hooks)
                 register = program.register_path if target is None else program.register_target
-                register(module, capture_hook, capture_spec, relative_path=module.relative_path)
+                register(module.hook_root, capture_hook, capture_spec, relative_path=module.relative_path)
 
                 def callback(
                     *,
@@ -143,5 +148,5 @@ class ActivationPatching(HookingContextFactory):
                     target=target,
                     source=CaptureSource(capture_index, detach=False),
                 )
-                register(module, replace_hook, replace_spec, relative_path=module.relative_path)
+                register(module.hook_root, replace_hook, replace_spec, relative_path=module.relative_path)
             return program.build()

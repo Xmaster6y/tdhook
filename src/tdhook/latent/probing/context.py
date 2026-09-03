@@ -4,7 +4,7 @@ import torch.nn as nn
 from tensordict.nn import TensorDictModuleBase
 from tensordict.utils import NestedKey
 
-from tdhook.contexts import HookingContextFactory
+from tdhook.methods import Method
 from tdhook.hooks import (
     MultiHookManager,
     HookFactory,
@@ -12,7 +12,7 @@ from tdhook.hooks import (
     DIRECTION_TO_RETURN,
     register_hook_to_module,
 )
-from tdhook.modules import HookedModule
+from tdhook.modules import BoundModule
 from tdhook.runtime import BoundHookProgram, HookProgramBuilder, HookSpec
 from tdhook._types import is_nested_key
 
@@ -21,7 +21,7 @@ class Probe(Protocol):
     def step(self, data: Any, **kwargs) -> Any: ...
 
 
-class _ProbingHookedModule(HookedModule):
+class _ProbingBoundModule(BoundModule):
     """Expose probe metadata as native inputs without mutating the model contract."""
 
     def __init__(self, *args, additional_keys: list[NestedKey], **kwargs):
@@ -33,14 +33,14 @@ class _ProbingHookedModule(HookedModule):
         return self._probing_in_keys
 
 
-class Probing(HookingContextFactory):
+class Probing(Method):
     """
     Linear probing :cite:`alain2018understanding` and concept activation vectors :cite:`kim2018interpretability`.
     """
 
     default_classes_to_hook = (nn.Module,)
     default_classes_to_skip = (nn.ModuleList, nn.Sequential, TensorDictModuleBase)
-    _hooked_module_class = _ProbingHookedModule
+    _bound_module_class = _ProbingBoundModule
 
     def __init__(
         self,
@@ -63,7 +63,7 @@ class Probing(HookingContextFactory):
         self._additional_keys = list(additional_keys or [])
         if not all(is_nested_key(key) for key in self._additional_keys):
             raise TypeError("additional_keys must contain TensorDict nested keys")
-        self._hooked_module_kwargs["additional_keys"] = self._additional_keys
+        self._bound_module_kwargs["additional_keys"] = self._additional_keys
 
     @property
     def key_pattern(self) -> str:
@@ -74,7 +74,7 @@ class Probing(HookingContextFactory):
         self._key_pattern = key_pattern
         self._hook_manager.pattern = key_pattern
 
-    def _hook_module(self, module: HookedModule) -> BoundHookProgram:
+    def _install_hooks(self, module: BoundModule) -> BoundHookProgram:
         additional_items = None
         forward_active = False
         backward_active = False
@@ -99,19 +99,14 @@ class Probing(HookingContextFactory):
 
         def hook_factory(name: str, direction: HookDirection) -> Callable:
             nonlocal self, additional_items
-            if module.hooking_context is not None and module.hooking_context.for_inspection:
-                probe = None
-            else:
-                probe = self._probe_factory(name, direction)
+            probe = self._probe_factory(name, direction)
 
             def callback(**kwargs):
-                if probe is not None:
-                    direction_active = backward_active if direction.startswith("bwd") else forward_active
-                    if self._additional_keys and (additional_items is None or not direction_active):
-                        raise RuntimeError("probe reached its target before additional inputs were captured")
-                    metadata = additional_items if additional_items is not None else {}
-                    return probe.step(kwargs[DIRECTION_TO_RETURN[direction]], **metadata)
-                return None
+                direction_active = backward_active if direction.startswith("bwd") else forward_active
+                if self._additional_keys and (additional_items is None or not direction_active):
+                    raise RuntimeError("probe reached its target before additional inputs were captured")
+                metadata = additional_items if additional_items is not None else {}
+                return probe.step(kwargs[DIRECTION_TO_RETURN[direction]], **metadata)
 
             return HookFactory.make_reading_hook(callback=callback, direction=direction)
 
@@ -123,7 +118,7 @@ class Probing(HookingContextFactory):
                 program.add_cleanup(end_forward_handle.remove)
 
                 if any(direction.startswith("bwd") for direction in self._directions):
-                    model_root = program.resolve_path(module, "", relative_path=module.relative_path)
+                    model_root = program.resolve_path(module.hook_root, "", relative_path=module.relative_path)
                     begin_backward_handle = register_hook_to_module(
                         model_root,
                         begin_backward,
@@ -148,7 +143,7 @@ class Probing(HookingContextFactory):
                 )
             for direction in self._directions:
                 for name, submodule in self._hook_manager.iter_modules(
-                    module,
+                    module.hook_root,
                     relative_path=module.relative_path if self._relative else None,
                 ):
                     program.register(

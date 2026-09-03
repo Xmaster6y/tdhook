@@ -32,7 +32,7 @@ class TestPruning:
         original_output = model(inp)
 
         pruning = Pruning(importance_callback=_importance_cb, amount_to_prune=amount)
-        ctx = pruning.prepare(model)
+        ctx = pruning.bind(model)
         with ctx as hooked:
             output = hooked(inp)
             assert not torch.allclose(output, original_output)
@@ -54,7 +54,7 @@ class TestPruning:
             return Pruning.default_skip(name, module) or name == "linear1"
 
         pruning = Pruning(importance_callback=_importance_cb_skip_bias, amount_to_prune=0.5, skip_modules=skip_linear1)
-        ctx = pruning.prepare(default_test_model)
+        ctx = pruning.bind(default_test_model)
         with ctx:
             assert torch.allclose(default_test_model.linear1.weight, original_linear1_weight)
             assert not torch.allclose(default_test_model.linear2.weight, original_linear2_weight)
@@ -66,7 +66,7 @@ class TestPruning:
         original_linear3_weight = default_test_model.linear3.weight.clone()
 
         pruning = Pruning(importance_callback=_importance_cb_skip_bias, amount_to_prune=0.5, relative_path="linear1")
-        ctx = pruning.prepare(default_test_model)
+        ctx = pruning.bind(default_test_model)
         with ctx:
             assert not torch.allclose(default_test_model.linear1.weight, original_linear1_weight)
             assert torch.allclose(default_test_model.linear2.weight, original_linear2_weight)
@@ -82,7 +82,7 @@ class TestPruning:
             amount_to_prune=0.5,
             modules_to_prune={"linear1": (1, 0.5), "linear3": (1, 0.1)},
         )
-        ctx = pruning.prepare(default_test_model)
+        ctx = pruning.bind(default_test_model)
         with ctx:
             assert torch.allclose(default_test_model.linear2.weight, original_linear2_weight)
             assert not torch.allclose(default_test_model.linear1.weight, original_linear1_weight)
@@ -102,7 +102,7 @@ class TestPruning:
         original_output = model(inp)
 
         pruning = Pruning(importance_callback=_importance_cb, amount_to_prune=0)
-        ctx = pruning.prepare(model)
+        ctx = pruning.bind(model)
         with ctx as hooked:
             output = hooked(inp)
             assert torch.allclose(output, original_output)
@@ -112,7 +112,7 @@ class TestPruning:
         original_state = (model.weight.clone(), model.bias.clone())
 
         pruning = Pruning(importance_callback=_importance_cb_skip_weight, amount_to_prune=0.5)
-        ctx = pruning.prepare(model)
+        ctx = pruning.bind(model)
         with ctx:
             assert torch.allclose(model.weight, original_state[0])
             assert not torch.allclose(model.bias, original_state[1])
@@ -129,7 +129,7 @@ class TestPruning:
         monkeypatch.setattr("tdhook.weights.pruning.prune.global_unstructured", fail_after_first_parameter)
 
         with pytest.raises(RuntimeError, match="pruning failed"):
-            with Pruning(importance_callback=_importance_cb, amount_to_prune=0.5).prepare(model):
+            with Pruning(importance_callback=_importance_cb, amount_to_prune=0.5).bind(model):
                 pass
 
         assert set(model.state_dict()) == set(original_state)
@@ -144,7 +144,7 @@ class TestPruning:
         state_before = {key: value.detach().clone() for key, value in model.state_dict().items()}
 
         with pytest.raises(ValueError, match="already reparameterized"):
-            with Pruning(importance_callback=_importance_cb, amount_to_prune=0.5).prepare(model):
+            with Pruning(importance_callback=_importance_cb, amount_to_prune=0.5).bind(model):
                 pass
 
         assert set(model.state_dict()) == set(state_before)

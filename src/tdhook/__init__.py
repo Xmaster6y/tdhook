@@ -7,7 +7,8 @@ except PackageNotFoundError:  # pragma: no cover
 
 __all__ = [
     # Core
-    "contexts",
+    "artifacts",
+    "methods",
     "execution",
     "hooks",
     "interventions",

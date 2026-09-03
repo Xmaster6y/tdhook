@@ -7,22 +7,13 @@ from tensordict import TensorDict
 from tensordict.nn import TensorDictModule, TensorDictModuleBase
 from torch import nn
 
-from tests.composition_conformance import assert_conformance
-from tdhook.contexts import HookingContext, HookingContextFactory
+from tdhook.methods import BoundMethod, Method
 from tdhook.execution import AutogradLifetime, ExecutionSpec, GradientMode
-from tdhook.latent import ActivationCaching, Probing
-from tdhook.modules import HookedModule
-from tdhook.runtime import BoundHookProgram, HookProgram, HookProgramBuilder, HookSpec
+from tdhook.latent import ActivationCaching
+from tdhook.modules import BoundModule
+from tdhook.runtime import BoundHookProgram, HookProgramBuilder, HookSpec
 from tdhook.targets import Target
-from tdhook.workflow import (
-    PlannedExecution,
-    Workflow,
-    WorkflowHandoffError,
-    WorkflowResult,
-    WorkflowSession,
-    WorkflowUpdate,
-    _DeferredAutogradCleanup,
-)
+from tdhook.workflow import Workflow, WorkflowHandoffError, WorkflowUpdate, _DeferredAutogradCleanup
 
 
 class CountingModel(nn.Module):
@@ -36,18 +27,18 @@ class CountingModel(nn.Module):
         return self.model(value)
 
 
-class CaptureOutput(HookingContextFactory):
+class CaptureOutput(Method):
     def __init__(self):
         super().__init__()
         self.values = []
 
-    def _hook_module(self, module: HookedModule) -> BoundHookProgram:
+    def _install_hooks(self, module: BoundModule) -> BoundHookProgram:
         def capture(_module, _args, output):
             self.values.append(output.detach())
 
         with HookProgramBuilder() as builder:
             builder.register_path(
-                module,
+                module.hook_root,
                 capture,
                 HookSpec("", "capture", "fwd"),
                 relative_path=module.relative_path,
@@ -55,14 +46,14 @@ class CaptureOutput(HookingContextFactory):
             return builder.build()
 
 
-class ReplaceOutput(HookingContextFactory):
-    def _hook_module(self, module: HookedModule) -> BoundHookProgram:
+class ReplaceOutput(Method):
+    def _install_hooks(self, module: BoundModule) -> BoundHookProgram:
         def replace(_module, _args, output):
             return output + 1
 
         with HookProgramBuilder() as builder:
             builder.register_path(
-                module,
+                module.hook_root,
                 replace,
                 HookSpec("", "replace", "fwd"),
                 relative_path=module.relative_path,
@@ -70,7 +61,7 @@ class ReplaceOutput(HookingContextFactory):
             return builder.build()
 
 
-class BackwardCapture(HookingContextFactory):
+class BackwardCapture(Method):
     def __init__(self, *, fail=False):
         super().__init__()
         self.values = []
@@ -80,7 +71,7 @@ class BackwardCapture(HookingContextFactory):
     def execution_spec(self):
         return ExecutionSpec(gradient_mode=GradientMode.REQUIRED, autograd_lifetime=AutogradLifetime.BACKWARD)
 
-    def _hook_module(self, module: HookedModule) -> BoundHookProgram:
+    def _install_hooks(self, module: BoundModule) -> BoundHookProgram:
         def capture(_module, _grad_input, grad_output):
             self.values.append(grad_output[0].detach())
             if self.fail:
@@ -88,7 +79,7 @@ class BackwardCapture(HookingContextFactory):
 
         with HookProgramBuilder() as builder:
             builder.register_path(
-                module,
+                module.hook_root,
                 capture,
                 HookSpec("", "capture", "bwd"),
                 relative_path=module.relative_path,
@@ -96,8 +87,8 @@ class BackwardCapture(HookingContextFactory):
             return builder.build()
 
 
-class EmptyProgram(HookingContextFactory):
-    def _hook_module(self, module: HookedModule) -> BoundHookProgram:
+class EmptyProgram(Method):
+    def _install_hooks(self, module: BoundModule) -> BoundHookProgram:
         with HookProgramBuilder() as builder:
             return builder.build()
 
@@ -110,7 +101,7 @@ class InvalidOutput(TensorDictModuleBase):
         return "not a tensordict"
 
 
-class DeferredInvalidMethod(HookingContextFactory):
+class DeferredInvalidMethod(Method):
     def __init__(self):
         super().__init__()
         self.context = None
@@ -119,15 +110,15 @@ class DeferredInvalidMethod(HookingContextFactory):
     def execution_spec(self):
         return ExecutionSpec(gradient_mode=GradientMode.REQUIRED, autograd_lifetime=AutogradLifetime.BACKWARD)
 
-    def prepare(self, *args, **kwargs):
-        self.context = super().prepare(*args, **kwargs)
+    def bind(self, *args, **kwargs):
+        self.context = super().bind(*args, **kwargs)
         return self.context
 
-    def _prepare_module(self, module, in_keys, out_keys, extra_relative_path):
+    def _bind_module(self, module, in_keys, out_keys, extra_relative_path):
         return InvalidOutput()
 
 
-class PublishingModule(HookedModule):
+class PublishingModule(BoundModule):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.out_keys = [*self.out_keys, "published"]
@@ -136,8 +127,8 @@ class PublishingModule(HookedModule):
         return data.set("published", torch.ones(*data.batch_size))
 
 
-class PublishingMethod(HookingContextFactory):
-    _hooked_module_class = PublishingModule
+class PublishingMethod(Method):
+    _bound_module_class = PublishingModule
 
 
 class HandoffMutation(TensorDictModuleBase):
@@ -351,209 +342,36 @@ def test_workflow_composes_a_method_and_native_tensordict_operator(default_test_
         in_keys=["prediction"],
         out_keys=[("summary", "mean")],
     )
-    workflow = Workflow(HookingContextFactory(), summarise)
+    workflow = Workflow(Method(), summarise)
     data = TensorDict({"source": {"input": torch.ones(2, 10)}}, batch_size=[2])
 
-    plan = workflow.plan(model, data)
     result = workflow(model, data)
 
-    assert plan.model_passes == 1
-    assert [execution.kind for execution in plan.executions] == ["method", "operator"]
-    assert plan.executions[0].in_keys == (("source", "input"),)
-    assert plan.executions[1].out_keys == (("summary", "mean"),)
     assert result["prediction"].shape == (2, 5)
     assert result["summary", "mean"].shape == (2,)
 
 
-def test_workflow_returns_the_plan_used_by_execution(default_test_model):
-    workflow = Workflow(CaptureOutput())
-    data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
-
-    result = workflow.run_with_plan(default_test_model, data)
-
-    assert isinstance(result, WorkflowResult)
-    assert result.plan.model_passes == 1
-    assert result.program is None
-    assert result.data["output"].shape == (2, 5)
-    assert workflow.run(default_test_model, data).shape == data.shape
-
-
-def test_managed_workflow_session_applies_operations_to_every_model_execution(default_test_model):
-    workflow = Workflow(CaptureOutput(), ReplaceOutput())
-    data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
-    target = Target("", "activation", -1, (0,))
-
-    with workflow.session(default_test_model) as session:
-        assert isinstance(session, WorkflowSession)
-        session.replace(target, 0)
-        captured = session.capture(target)
-        result = session(data)
-
-    assert result.plan.model_passes == 2
-    assert result.program == HookProgram(
-        (
-            HookSpec("", "replace", "fwd", target=target),
-            HookSpec("", "capture", "fwd", target=target),
-        )
-    )
-    assert len(captured.values) == 2
-    assert all(torch.equal(value, torch.zeros(2, 1)) for value in captured.values)
-    assert all(not module._forward_hooks for module in default_test_model.modules())
-
-
-def test_managed_workflow_session_resets_occurrence_for_every_model_execution():
-    class RepeatedModule(nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.shared = nn.Identity()
-
-        def forward(self, x):
-            return self.shared(x + 1) + self.shared(x + 2)
-
-    model = RepeatedModule()
-    workflow = Workflow(CaptureOutput(), ReplaceOutput())
-    data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
-    target = Target("shared", "activation", -1, (0,), occurrences=(1,))
-
-    with workflow.session(model) as session:
-        captured = session.capture(target)
-        result = session(data)
-
-    assert result.plan.model_passes == 2
-    assert len(captured.values) == 2
-    assert all(torch.equal(value, torch.full((2, 1), 3.0)) for value in captured.values)
-
-
-def test_managed_workflow_result_includes_validated_occurrence_evidence():
-    class RepeatedModule(nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.shared = nn.Identity()
-
-        def forward(self, x):
-            return self.shared(x + 1) + self.shared(x + 2) + self.shared(x + 3)
-
-    model = RepeatedModule()
-    workflow = Workflow(CaptureOutput(), ReplaceOutput())
-    data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
-    target = Target("shared", "activation", -1, (0,), occurrences=(0, 2))
-
-    with workflow.session(model) as session:
-        session.capture(target)
-        first = session(data)
-        second = session(data)
-
-    assert first.plan.model_passes == second.plan.model_passes == 2
-    assert tuple(item.root_pass for item in first.occurrence_evidence) == (0, 1)
-    assert tuple(item.root_pass for item in second.occurrence_evidence) == (2, 3)
-    assert all(item.selected_indices == (0, 2) for item in first.occurrence_evidence)
-    assert all(item.observed_indices == (0, 1, 2) for item in second.occurrence_evidence)
-    assert tuple(item.root_pass for item in session.occurrence_evidence) == (0, 1, 2, 3)
-
-
-def test_managed_workflow_session_early_stop_aborts_the_run_and_restores_hooks(default_test_model):
-    method = CaptureOutput()
-    workflow = Workflow(method)
-    data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
-
-    with workflow.session(default_test_model) as session:
-        stopped = session.stop("linear1")
-        session.run(data)
-        pytest.fail("managed early stopping must abort the workflow run")
-
-    assert stopped.reached
-    assert stopped.output is not None
-    assert method.values == []
-    assert session.program == HookProgram((HookSpec("linear1", "stop", "fwd"),), stopped_at="linear1")
-    assert all(not module._forward_hooks for module in default_test_model.modules())
-
-
-def test_managed_workflow_session_restores_state_after_workflow_failure(default_test_model):
-    def fail(value):
-        raise RuntimeError("workflow failed")
-
-    failing = TensorDictModule(fail, in_keys=["output"], out_keys=["unused"])
-    workflow = Workflow(CaptureOutput(), failing)
-    data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
-    target = Target("linear1", "parameter", 0, (0,), parameter="weight")
-    original = default_test_model.linear1.weight.detach().clone()
-
-    with pytest.raises(RuntimeError, match="workflow failed"):
-        with workflow.session(default_test_model) as session:
-            session.replace(target, -3)
-            session.run(data)
-
-    assert torch.equal(default_test_model.linear1.weight, original)
-    assert all(not module._forward_hooks for module in default_test_model.modules())
-
-
-def test_managed_workflow_session_requires_its_context(default_test_model):
-    session = Workflow().session(default_test_model)
-
-    with pytest.raises(RuntimeError, match="active context"):
-        session.run(TensorDict())
-
-
-def test_executed_plan_is_not_stale_after_a_preflight_plan(default_test_model):
-    class ChangesAfterPreflight(HookingContextFactory):
-        def __init__(self):
-            super().__init__()
-            self.bindings = 0
-
-        def _prepare_module(self, module, in_keys, out_keys, extra_relative_path):
-            self.bindings += 1
-            result_key = "preflight" if self.bindings == 1 else "executed"
-            return TensorDictModule(module, in_keys=in_keys, out_keys=[result_key])
-
-    workflow = Workflow(ChangesAfterPreflight())
-    data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
-
-    preflight = workflow.plan(default_test_model, data)
-    result = workflow.run_with_plan(default_test_model, data)
-
-    assert preflight.executions[0].out_keys == ("preflight",)
-    assert result.plan.executions[0].out_keys == ("executed",)
-    assert "executed" in result.data
-
-
-def test_workflow_coexecutes_real_activation_methods_and_publishes_each_cache(default_test_model):
+def test_workflow_executes_methods_sequentially_and_publishes_each_cache(default_test_model):
     model = CountingModel(default_test_model)
     first = ActivationCaching("model.linear1", cache_key=("activations", "first"))
     second = ActivationCaching("model.linear2", cache_key=("activations", "second"))
     workflow = Workflow(first, second)
     data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
 
-    plan = workflow.plan(model, data)
     result = workflow(model, data)
 
-    assert_conformance(
-        "test_workflow_coexecutes_real_activation_methods_and_publishes_each_cache", plan, status="supported"
-    )
-
-    assert plan.model_passes == 1
-    assert plan.executions[0].coexecuted
-    assert plan.compatibility[0].compatible
-    assert plan.compatibility[0].reason == "bound read-only capture programs are compatible"
-    assert model.calls == 1
-    assert plan.executions[0].out_keys == (
-        "output",
-        ("activations", "first"),
-        ("activations", "second"),
-    )
+    assert model.calls == 2
     assert result["activations", "first"]["model.linear1"].shape == (2, 20)
     assert result["activations", "second"]["model.linear2"].shape == (2, 20)
 
 
-def test_workflow_plans_and_executes_a_targeted_activation_capture(default_test_model):
+def test_workflow_executes_a_targeted_activation_capture(default_test_model):
     target = Target("linear2", "activation", -1, (0, 2))
     workflow = Workflow(ActivationCaching(target, cache_key=("activations", "selected")))
     data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
 
-    plan = workflow.plan(default_test_model, data)
     result = workflow(default_test_model, data)
 
-    assert plan.model_passes == 1
-    assert plan.executions[0].out_keys == ("output", ("activations", "selected"))
     assert result["activations", "selected", "linear2"].shape == (2, 2)
 
 
@@ -561,7 +379,7 @@ def test_method_publication_contract_applies_to_standalone_and_workflow_executio
     data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
     method = PublishingMethod()
 
-    with method.prepare(default_test_model) as prepared:
+    with method.bind(default_test_model) as prepared:
         standalone = prepared(data.clone())
     workflow_result = Workflow(method)(default_test_model, data.clone())
 
@@ -576,7 +394,7 @@ def test_workflow_rejects_overlapping_method_owned_outputs_without_explicit_upda
     data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
 
     with pytest.raises(ValueError, match="WorkflowUpdate"):
-        workflow.plan(default_test_model, data)
+        workflow(default_test_model, data)
 
 
 def test_workflow_update_explicitly_allows_owned_output_replacement(default_test_model):
@@ -585,10 +403,7 @@ def test_workflow_update_explicitly_allows_owned_output_replacement(default_test
     workflow = Workflow(first, WorkflowUpdate(second))
     data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
 
-    plan = workflow.plan(default_test_model, data)
     result = workflow(default_test_model, data)
-    assert plan.model_passes == 2
-    assert "output namespaces overlap" in plan.compatibility[0].reason
     assert "linear2" in result["activations", "shared"]
     assert "linear1" not in result["activations", "shared"]
 
@@ -599,7 +414,7 @@ def test_workflow_rejects_ancestor_output_collisions_before_execution(default_te
     data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
 
     with pytest.raises(ValueError, match="overlaps earlier workflow-owned outputs"):
-        Workflow(first, second).plan(default_test_model, data)
+        Workflow(first, second)(default_test_model, data)
 
 
 def test_workflow_rejects_undeclared_externally_driven_backward_capture(default_test_model):
@@ -607,7 +422,7 @@ def test_workflow_rejects_undeclared_externally_driven_backward_capture(default_
     data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
 
     with pytest.raises(ValueError, match="backward hooks"):
-        workflow.plan(default_test_model, data)
+        workflow(default_test_model, data)
 
 
 def test_workflow_keeps_deferred_backward_hooks_until_backward_completes(default_test_model):
@@ -644,8 +459,8 @@ def test_workflow_rejects_deferred_backward_before_a_later_model_execution(defau
     workflow = Workflow(BackwardCapture(), CaptureOutput())
     data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
 
-    with pytest.raises(ValueError, match="cannot precede a later model execution"):
-        workflow.plan(default_test_model, data)
+    with pytest.raises(ValueError, match="cannot precede another model-executing method"):
+        workflow(default_test_model, data)
 
     assert all(not module._backward_hooks for module in default_test_model.modules())
 
@@ -666,49 +481,6 @@ def test_deferred_cleanup_preserves_first_cleanup_error_and_is_idempotent():
     with pytest.raises(RuntimeError, match="handle cleanup failed"):
         cleanup.close()
     cleanup.close()
-
-
-def test_probing_inspection_is_inert_and_declares_additional_keys(default_test_model):
-    created = []
-
-    class Probe:
-        def step(self, data, **kwargs):
-            return None
-
-    def factory(name, direction):
-        created.append((name, direction))
-        return Probe()
-
-    method = Probing("linear1", factory, additional_keys=["labels", "step_type"])
-    workflow = Workflow(method)
-    data = TensorDict(
-        {"input": torch.ones(2, 10), "labels": torch.ones(2), "step_type": "fit"},
-        batch_size=[2],
-    )
-
-    plan = workflow.plan(default_test_model, data)
-
-    assert created == []
-    assert plan.executions[0].in_keys == ("input", "labels", "step_type")
-    with pytest.raises(ValueError, match="step_type"):
-        workflow.plan(default_test_model, data.exclude("step_type"))
-
-    workflow(default_test_model, data)
-    assert created == [("linear1", "fwd")]
-
-
-def test_workflow_splits_mutating_programs_and_explains_why(default_test_model):
-    model = CountingModel(default_test_model)
-    workflow = Workflow(CaptureOutput(), ReplaceOutput())
-    data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
-
-    plan = workflow.plan(model, data)
-    workflow(model, data)
-
-    assert plan.model_passes == 2
-    assert not plan.compatibility[0].compatible
-    assert "read-only capture" in plan.compatibility[0].reason
-    assert model.calls == 2
 
 
 def test_workflow_rejects_missing_native_dependencies_before_model_execution(default_test_model):
@@ -740,7 +512,6 @@ def test_workflow_rechecks_a_declared_namespace_before_the_consumer_runs():
     workflow = Workflow(producer, consumer)
     data = TensorDict({"input": torch.ones(2)}, batch_size=[2])
 
-    workflow.plan(nn.Identity(), data)
     try:
         workflow(nn.Identity(), data)
     except ValueError as error:
@@ -759,24 +530,15 @@ def test_workflow_binding_restores_hooks_when_later_validation_fails(default_tes
     data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
 
     try:
-        workflow.plan(model, data)
+        workflow(model, data)
     except ValueError:
         pass
     else:
         raise AssertionError("workflow accepted a missing TensorDict dependency")
 
+    captured = len(capture.values)
     model(torch.ones(2, 10))
-    assert capture.values == []
-
-
-def test_workflow_planning_does_not_clear_method_execution_state(default_test_model):
-    cache = TensorDict({"existing": torch.ones(2)}, batch_size=[2])
-    workflow = Workflow(ActivationCaching("linear1", cache=cache, clear_cache=True))
-    data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
-
-    workflow.plan(default_test_model, data)
-
-    assert "existing" in cache
+    assert len(capture.values) == captured
 
 
 def test_workflow_validates_public_boundary_types(default_test_model):
@@ -788,15 +550,14 @@ def test_workflow_validates_public_boundary_types(default_test_model):
         raise AssertionError("workflow accepted an invalid step")
 
     workflow = Workflow()
-    for operation in (workflow.plan, workflow.run):
-        try:
-            operation(default_test_model, object())
-        except TypeError as error:
-            assert "must be a TensorDict" in str(error)
-        else:
-            raise AssertionError("workflow accepted invalid data")
     try:
-        workflow.plan(object(), TensorDict())
+        workflow.run(default_test_model, object())
+    except TypeError as error:
+        assert "must be a TensorDict" in str(error)
+    else:
+        raise AssertionError("workflow accepted invalid data")
+    try:
+        workflow.run(object(), TensorDict())
     except TypeError as error:
         assert "torch.nn.Module" in str(error)
     else:
@@ -809,8 +570,8 @@ def test_workflow_method_does_not_require_optional_metadata(default_test_model):
         def execution_spec(self):
             return ExecutionSpec()
 
-        def prepare(self, model):
-            return HookingContextFactory().prepare(model)
+        def bind(self, model):
+            return Method().bind(model)
 
     data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
 
@@ -820,91 +581,52 @@ def test_workflow_method_does_not_require_optional_metadata(default_test_model):
 
 
 def test_workflow_rejects_invalid_method_protocol_results(default_test_model):
-    class InvalidSpec(HookingContextFactory):
+    class InvalidSpec(Method):
         @property
         def execution_spec(self):
             return object()
 
-    class InvalidContext(HookingContextFactory):
-        def prepare(self, model):
+    class InvalidContext(Method):
+        def bind(self, model):
             return object()
 
-    class NonModuleContext(HookingContext):
-        def _enter(self, *, for_inspection=False):
+    class NonModuleContext(BoundMethod):
+        def __enter__(self):
             self._in_context = True
             return object()
 
-    class InvalidPrepared(HookingContextFactory):
-        _hooking_context_class = NonModuleContext
+    class InvalidPrepared(Method):
+        _binding_class = NonModuleContext
 
-    class MissingBindingContext(HookingContext):
-        def _enter(self, *, for_inspection=False):
+    class MissingBindingContext(BoundMethod):
+        def __enter__(self):
             self._in_context = True
             return TensorDictModule(lambda value: value, in_keys=["input"], out_keys=["output"])
 
-    class MissingBinding(HookingContextFactory):
-        _hooking_context_class = MissingBindingContext
+    class MissingBinding(Method):
+        _binding_class = MissingBindingContext
 
     data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
     cases = (
         (InvalidSpec(), "ExecutionSpec"),
-        (InvalidContext(), "HookingContext"),
+        (InvalidContext(), "BoundMethod"),
         (InvalidPrepared(), "TensorDictModuleBase"),
-        (MissingBinding(), "MethodBinding"),
+        (MissingBinding(), "invalid bound module"),
     )
     for method, message in cases:
         try:
-            Workflow(method).plan(default_test_model, data)
+            Workflow(method)(default_test_model, data)
         except TypeError as error:
             assert message in str(error)
         else:
             raise AssertionError(f"workflow accepted {type(method).__name__}")
 
 
-def test_workflow_explains_each_unproven_coexecution_case(default_test_model):
-    class TwoPassCapture(CaptureOutput):
-        @property
-        def execution_spec(self):
-            return ExecutionSpec(model_passes=2)
-
-    class GradientCapture(CaptureOutput):
-        @property
-        def execution_spec(self):
-            return ExecutionSpec(gradient_mode=GradientMode.REQUIRED)
-
-    class DeferredGradientCapture(GradientCapture):
-        @property
-        def execution_spec(self):
-            return ExecutionSpec(gradient_mode=GradientMode.REQUIRED, autograd_lifetime=AutogradLifetime.BACKWARD)
-
-    class IndirectContext(HookingContext):
-        @property
-        def executes_model_directly(self):
-            return False
-
-    class IndirectCapture(CaptureOutput):
-        _hooking_context_class = IndirectContext
-
-    data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
-    cases = (
-        ((CaptureOutput(), TwoPassCapture()), "exactly one model pass"),
-        ((CaptureOutput(), GradientCapture()), "different autograd modes"),
-        ((GradientCapture(), DeferredGradientCapture()), "different autograd lifetimes"),
-        ((CaptureOutput(), HookingContextFactory()), "did not expose"),
-        ((CaptureOutput(), EmptyProgram()), "empty hook program"),
-        ((CaptureOutput(), IndirectCapture()), "transforms model execution"),
-    )
-    for methods, message in cases:
-        plan = Workflow(*methods).plan(default_test_model, data)
-        assert not plan.compatibility[0].compatible
-        assert message in plan.compatibility[0].reason
-
-
 def test_workflow_rejects_non_tensordict_step_results(default_test_model):
     data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
 
-    class InvalidMethod(HookingContextFactory):
-        def _prepare_module(self, module, in_keys, out_keys, extra_relative_path):
+    class InvalidMethod(Method):
+        def _bind_module(self, module, in_keys, out_keys, extra_relative_path):
             return InvalidOutput()
 
     for step, message in ((InvalidOutput(), "operator"), (InvalidMethod(), "method execution")):
@@ -925,60 +647,3 @@ def test_deferred_method_non_tensordict_result_closes_its_context(default_test_m
 
     assert method.context is not None
     assert not method.context._in_context
-
-
-def test_planned_execution_preserves_the_pre_lifetime_constructor_signature():
-    execution = PlannedExecution(("0:Method",), "method", ("input",), ("output",), 1, GradientMode.OPTIONAL)
-
-    assert execution.autograd_lifetime is None
-
-
-def test_workflow_splits_methods_bound_to_different_model_signatures():
-    model = TensorDictModule(
-        lambda left, right: (left, right),
-        in_keys=["left", "right"],
-        out_keys=["left_output", "right_output"],
-    )
-
-    class SignatureContext(HookingContext):
-        def __init__(self, *args, selected_in, selected_out, **kwargs):
-            super().__init__(*args, **kwargs)
-            self._in_keys = [selected_in]
-            self._out_keys = [selected_out]
-
-    class SelectedSignature(CaptureOutput):
-        _hooking_context_class = SignatureContext
-
-        def __init__(self, in_key, out_key):
-            super().__init__()
-            self._hooking_context_kwargs = {"selected_in": in_key, "selected_out": out_key}
-
-    data = TensorDict({"left": torch.ones(2), "right": torch.ones(2)}, batch_size=[2])
-    plan = Workflow(
-        SelectedSignature("left", "left_output"),
-        SelectedSignature("right", "right_output"),
-    ).plan(model, data)
-
-    assert not plan.compatibility[0].compatible
-    assert "different model TensorDict signatures" in plan.compatibility[0].reason
-
-
-def test_workflow_rejects_method_facts_that_change_after_inspection(default_test_model):
-    class FlakyMethod(HookingContextFactory):
-        def __init__(self):
-            super().__init__()
-            self.bindings = 0
-
-        def _prepare_module(self, module, in_keys, out_keys, extra_relative_path):
-            self.bindings += 1
-            if self.bindings == 1:
-                return module
-            return TensorDictModule(lambda value: value, in_keys=in_keys, out_keys=["changed"])
-
-    data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
-    try:
-        Workflow(FlakyMethod())(default_test_model, data)
-    except RuntimeError as error:
-        assert "changed after planning" in str(error)
-    else:
-        raise AssertionError("workflow executed rebound facts that differed from inspection")

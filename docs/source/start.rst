@@ -40,12 +40,12 @@ explicit ``TensorDict`` keys:
        batch_size=[1],
    )
 
-   with IntegratedGradients(init_attr_targets=select_score).prepare(model) as hooked_model:
+   with IntegratedGradients(init_attr_targets=select_score).bind(model) as hooked_model:
        result = hooked_model(data)
 
    attributions = result["attr", "input"]
 
-``prepare(model)`` installs the method's hooks on entry and removes them on
+``bind(model)`` installs the method's hooks on entry and removes them on
 exit. The model reads ``"input"`` and writes ``"output"``; Integrated
 Gradients reads ``("baseline", "input")`` and writes
 ``("attr", "input")``. Here, ``attributions.shape`` is ``(1, 4)``, matching
@@ -75,8 +75,7 @@ example, the attribution above can feed a native summary operation:
    result = workflow(model, data)
 
 The workflow returns one TensorDict containing both ``("attr", "input")`` and
-``"attribution_mass"``. Use :meth:`~tdhook.workflow.Workflow.plan` when you
-also need to inspect model-pass and compatibility decisions before execution.
+``"attribution_mass"``.
 
 Where to go next
 ----------------

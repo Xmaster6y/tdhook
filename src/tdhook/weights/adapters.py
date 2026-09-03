@@ -4,8 +4,8 @@ from typing import Callable, Optional, List, Dict, Tuple
 from torch import nn
 from tensordict import TensorDict
 
-from tdhook.contexts import HookingContextFactory, HookingContextWithCache
-from tdhook.modules import HookedModule
+from tdhook.methods import Method, CachedBoundMethod
+from tdhook.modules import BoundModule
 from tdhook.hooks import (
     DIRECTION_TO_RETURN,
     DIRECTION_TO_TYPE,
@@ -16,19 +16,19 @@ from tdhook.hooks import (
 from tdhook.runtime import BoundHookProgram, CaptureSource, HookProgramBuilder, HookSpec
 
 
-class HookedModuleWithAdapters(HookedModule):
+class BoundModuleWithAdapters(BoundModule):
     def __init__(self, *args, adapters: Dict[str, nn.Module], **kwargs):
         super().__init__(*args, **kwargs)
         self.adapters = nn.ModuleDict(adapters)
 
 
-class Adapters(HookingContextFactory):
+class Adapters(Method):
     """
     ROME :cite:`Meng2022LocatingAE`, sparse autoencoders :cite:`Cunningham2023SparseAF` and transcoders :cite:`Dunefsky2024TranscodersFI`.
     """
 
-    _hooked_module_class = HookedModuleWithAdapters
-    _hooking_context_class = HookingContextWithCache
+    _bound_module_class = BoundModuleWithAdapters
+    _binding_class = CachedBoundMethod
 
     def __init__(
         self,
@@ -40,17 +40,17 @@ class Adapters(HookingContextFactory):
         clear_cache: bool = True,
     ):
         super().__init__()
-        self._hooked_module_kwargs["adapters"] = {k: v[0] for k, v in adapters.items()}
-        self._hooking_context_kwargs["clear_cache"] = clear_cache
-        self._hooking_context_kwargs["cache"] = cache
+        self._bound_module_kwargs["adapters"] = {k: v[0] for k, v in adapters.items()}
+        self._binding_kwargs["clear_cache"] = clear_cache
+        self._binding_kwargs["cache"] = cache
 
         self._adapters = adapters
         self._cache_callback = cache_callback
         self._relative = relative
         self._directions = directions or ["fwd"]
 
-    def _hook_module(self, module: HookedModule) -> BoundHookProgram:
-        cache = module.hooking_context.cache
+    def _install_hooks(self, module: BoundModule) -> BoundHookProgram:
+        cache = module.binding.cache
         relative_path = module.relative_path if self._relative else ""
         captured_inputs = []
 
@@ -107,7 +107,7 @@ class Adapters(HookingContextFactory):
 
                         capture_index = len(program.program.hooks)
                         program.register_path(
-                            module,
+                            module.hook_root,
                             HookFactory.make_caching_hook(
                                 cache_key,
                                 cache,
@@ -120,7 +120,7 @@ class Adapters(HookingContextFactory):
                         capture_source = CaptureSource(capture_index, detach=False)
 
                     program.register_path(
-                        module,
+                        module.hook_root,
                         HookFactory.make_setting_hook(
                             None,
                             callback=callback_factory(adapter, captured_input),

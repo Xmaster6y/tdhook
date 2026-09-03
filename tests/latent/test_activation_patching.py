@@ -34,14 +34,14 @@ class TestActivationPatching:
 
         context = ActivationPatching(modules_to_patch, patch_fn=patch_fn)
 
-        with context.prepare(default_test_model) as hooked_module:
+        with context.bind(default_test_model) as hooked_module:
             data = TensorDict({"input": torch.randn(2, 10), ("patched", "input"): torch.randn(2, 10)}, batch_size=2)
             data = hooked_module(data)
             assert data.get(("patched", "output")).shape == (2, 5)
             assert not torch.allclose(data.get("output"), data.get(("patched", "output")))
 
         assert patched_modules == list(modules_to_patch)
-        assert hooked_module.hooking_context.program == HookProgram(
+        assert hooked_module.binding.program == HookProgram(
             tuple(
                 spec
                 for index, module_key in enumerate(modules_to_patch)
@@ -67,10 +67,10 @@ class TestActivationPatching:
             batch_size=2,
         )
 
-        with context.prepare(default_test_model) as hooked_module:
+        with context.bind(default_test_model) as hooked_module:
             result = hooked_module(data)
 
-        assert hooked_module.hooking_context.program == HookProgram(
+        assert hooked_module.binding.program == HookProgram(
             (
                 HookSpec("linear2", "capture", "fwd", target=target),
                 HookSpec(
@@ -99,7 +99,7 @@ class TestActivationPatching:
             batch_size=[1],
         )
 
-        with ActivationPatching([target]).prepare(model) as prepared:
+        with ActivationPatching([target]).bind(model) as prepared:
             result = prepared(data)
 
         torch.testing.assert_close(result["output"], torch.tensor([[1.0, 2.0, 3.0]]))
@@ -116,7 +116,7 @@ class TestActivationPatching:
         )
         expected_clean = default_test_model(second["input"])
 
-        with ActivationPatching(["linear2"]).prepare(default_test_model) as prepared:
+        with ActivationPatching(["linear2"]).bind(default_test_model) as prepared:
             prepared(first)
             result = prepared(second)
 
@@ -140,7 +140,7 @@ class TestActivationPatching:
             batch_size=[1],
         )
 
-        with ActivationPatching([target]).prepare(Model()) as prepared:
+        with ActivationPatching([target]).bind(Model()) as prepared:
             result = prepared(data)
 
         torch.testing.assert_close(result["output"], torch.tensor([[5.0, 7.0]]))

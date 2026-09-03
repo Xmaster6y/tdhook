@@ -244,7 +244,7 @@ class TestRules:
             skip_modules=LRP.default_skip,
             clean_intermediate_keys=False,
         )
-        with lrp.prepare(tdhook_module) as hooked_module:
+        with lrp.bind(tdhook_module) as hooked_module:
             tdhook_output = hooked_module(TensorDict({"input": tdhook_input}))
             tdhook_in_relevance = tdhook_output.get(("attr", "input"))
 
@@ -260,13 +260,13 @@ class TestRules:
         module = get_sequential_linear_module(seed=0)
         context_factory = LRP(rule_mapper=EpsilonPlus(epsilon=1e-6))
         with pytest.warns(UserWarning, match="No rule found for module"):
-            with context_factory.prepare(module):
+            with context_factory.bind(module):
                 pass
 
         clean_lrp = LRP(rule_mapper=EpsilonPlus(epsilon=1e-6), skip_modules=LRP.default_skip)
         with warnings.catch_warnings():
             warnings.simplefilter("error")
-            with clean_lrp.prepare(module):
+            with clean_lrp.bind(module):
                 pass
 
     def test_lrp_rules_are_reported_and_restored_by_the_bound_program(self):
@@ -277,10 +277,10 @@ class TestRules:
             warn_on_missing_rule=False,
         )
 
-        with lrp.prepare(module) as hooked_module:
+        with lrp.bind(module) as hooked_module:
             assert all(hasattr(child, "_prev_forward") for child in module)
 
-        assert hooked_module.hooking_context.program == HookProgram(
+        assert hooked_module.binding.program == HookProgram(
             tuple(HookSpec(str(index), "apply_rule", None) for index in range(len(module)))
         )
         assert all(not hasattr(child, "_prev_forward") for child in module)
@@ -292,7 +292,7 @@ class TestRules:
             warn_on_missing_rule=False,
         )
 
-        with method.prepare(default_test_model) as prepared:
+        with method.bind(default_test_model) as prepared:
             assert ("attr", "input") not in prepared.out_keys
             assert ("attr", "linear1") in prepared.out_keys
 
@@ -308,7 +308,7 @@ class TestRules:
 
         lrp = LRP(rule_mapper=failing_mapper, warn_on_missing_rule=False)
         with pytest.raises(RuntimeError, match="mapper failure"):
-            with lrp.prepare(module):
+            with lrp.bind(module):
                 pass
 
         assert not hasattr(module[0], "_prev_forward")

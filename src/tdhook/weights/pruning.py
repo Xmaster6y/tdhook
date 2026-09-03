@@ -5,14 +5,14 @@ from tensordict.nn import TensorDictModule
 from torch import nn
 from torch.nn.utils import prune
 
-from tdhook.contexts import HookingContextFactory
+from tdhook.methods import Method
 from tdhook.hooks import merge_paths
-from tdhook.modules import HookedModule
+from tdhook.modules import BoundModule
 from tdhook.paths import resolve_submodule_path
 from tdhook.runtime import BoundHookProgram, HookProgramBuilder, HookSpec
 
 
-class Pruning(HookingContextFactory):
+class Pruning(Method):
     """
     Relevance-based pruning :cite:`Yeom2019PruningBE` and circuit pruning :cite:`Pochinkov2024DissectingLM`.
     """
@@ -35,19 +35,19 @@ class Pruning(HookingContextFactory):
         self._skip_modules = skip_modules
         self._relative_path = relative_path or ""
 
-    def _hook_module(self, module: HookedModule) -> BoundHookProgram:
+    def _install_hooks(self, module: BoundModule) -> BoundHookProgram:
         root_path = merge_paths(module.relative_path, self._relative_path)
-        root_module = resolve_submodule_path(module, root_path)
+        root_module = resolve_submodule_path(module.hook_root, root_path)
         if self._pruning_reparameterizations(root_module):
             raise ValueError("Pruning does not accept parameters that are already reparameterized")
-        old_weights = TensorDict.from_module(module.td_module).clone()
-        existing_reparameterizations = self._pruning_reparameterizations(module.td_module)
+        old_weights = TensorDict.from_module(module.hook_root).clone()
+        existing_reparameterizations = self._pruning_reparameterizations(module.hook_root)
 
         with HookProgramBuilder() as program:
             program.record(
                 HookSpec(self._relative_path, "prune_parameters", None),
                 lambda: self._restore_parameters(
-                    module.td_module,
+                    module.hook_root,
                     old_weights,
                     existing_reparameterizations,
                 ),

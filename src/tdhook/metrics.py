@@ -31,7 +31,7 @@ class InfidelityMetric:
 
     ``original_data`` must already contain attributions and the corresponding
     unperturbed model output. Each perturbation performs exactly one call to
-    the prepared TensorDict module.
+    the bound TensorDict module.
     """
 
     def __init__(
@@ -50,7 +50,7 @@ class InfidelityMetric:
         self.output_key = output_key
 
     def additional_model_passes(self, module: TensorDictModuleBase) -> int:
-        """Return the exact number of prepared-module calls for ``module``."""
+        """Return the exact number of bound-module calls for ``module``."""
 
         return self.n_perturb_samples * len(module.in_keys)
 
@@ -117,7 +117,7 @@ class SensitivityMetric:
         self.attribution_key = attribution_key
 
     def additional_model_passes(self, module: TensorDictModuleBase) -> int:
-        """Return the exact number of prepared-module calls for ``module``."""
+        """Return the exact number of bound-module calls for ``module``."""
 
         return 1
 

@@ -11,7 +11,7 @@ from tdhook.hooks import (
 )
 
 if TYPE_CHECKING:
-    from tdhook.contexts import HookingContext
+    from tdhook.methods import BoundMethod
 
 
 def get_best_device():
@@ -248,18 +248,26 @@ class IntermediateKeysCleaner(TensorDictModuleBase):
         return f"{type(self).__name__}(\n{fields})"
 
 
-class HookedModule(TensorDictModuleWrapper):
-    """Internal prepared wrapper owned by :class:`HookingContext`."""
+class BoundModule(TensorDictModuleWrapper):
+    """Internal execution wrapper owned by :class:`BoundMethod`."""
 
     def __init__(
         self,
         td_module: TensorDictModuleBase,
-        hooking_context: Optional["HookingContext"] = None,
-        relative_path: str = "td_module",
+        hook_root: TensorDictModuleBase,
+        binding: Optional["BoundMethod"] = None,
+        relative_path: str = "",
     ):
         super().__init__(td_module)
-        self._hooking_context = hooking_context
+        self._hook_root = hook_root
+        self._binding = binding
         self._relative_path = relative_path
+
+    @property
+    def hook_root(self) -> TensorDictModuleBase:
+        """Return the caller-owned module against which hook paths resolve."""
+
+        return self._hook_root
 
     @property
     def relative_path(self) -> str:
@@ -273,8 +281,8 @@ class HookedModule(TensorDictModuleWrapper):
         return f"{type(self).__name__}(\n{fields})"
 
     @property
-    def hooking_context(self) -> Optional["HookingContext"]:
-        return self._hooking_context
+    def binding(self) -> Optional["BoundMethod"]:
+        return self._binding
 
     def finalize_tensordict(self, data: TensorDictBase) -> TensorDictBase:
         """Publish method-owned products after a shared model execution."""
@@ -282,7 +290,7 @@ class HookedModule(TensorDictModuleWrapper):
         return data
 
     def forward(self, *args, **kwargs):
-        if self._hooking_context is not None and not self._hooking_context._in_context:
-            raise RuntimeError("Contextual HookedModule must be called in context")
+        if self._binding is not None and not self._binding._in_context:
+            raise RuntimeError("Contextual BoundModule must be called in context")
         result = self.td_module(*args, **kwargs)
         return self.finalize_tensordict(result) if isinstance(result, TensorDictBase) else result
