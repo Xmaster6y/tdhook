@@ -1,6 +1,6 @@
 [project]
 name = "tdhook"
-version = "0.2.0"
+version = "0.2.1"
 description = "Interpretability with tensordict and torch hooks."
 readme = "README.md"
 license = "MIT"
