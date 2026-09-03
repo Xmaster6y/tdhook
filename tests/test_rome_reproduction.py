@@ -1,4 +1,4 @@
-"""Contracts and lightweight mechanics for the resource-intensive ROME reproduction."""
+"""Regression contracts for the ROME causal-tracing and editing reproduction."""
 
 import importlib.util
 import json
@@ -42,7 +42,7 @@ def test_rome_reproduction_is_linked_parseable_and_resource_bounded():
         "runtime": "cuda",
     }
     assert "issue #109" in markdown
-    assert "does not constitute a successful reproduction" in markdown
+    assert "reports conclusions only when every declared gate passes" in markdown
     for required in (
         "causal_trace_grid",
         "temporary_rank_one_edit",

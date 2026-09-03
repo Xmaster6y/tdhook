@@ -1,7 +1,7 @@
-"""Deterministic helpers for the ROME causal-tracing reproduction notebook.
+"""Executable helpers for the ROME causal-tracing reproduction notebook.
 
-This module deliberately contains mechanics, not checked-in scientific results.  The
-resource-intensive notebook writes the per-case evidence used to decide its gates.
+The functions implement deterministic causal tracing, rank-one editing,
+CounterFact aggregation, parity checks, and machine-readable result artifacts.
 """
 
 from __future__ import annotations

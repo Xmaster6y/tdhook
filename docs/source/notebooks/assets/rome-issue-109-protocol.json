@@ -54,7 +54,7 @@
       "rome/rome_main.py": "dfad8eaa83940bfd00fd3629eca23650726ede62d5a8160905f2c8a516188768"
     }
   },
-  "scientific_claim": "No reproduction claim is made until all gates are evaluated from emitted per-case artifacts.",
+  "scientific_claim": "The notebook reports reproduction when every declared gate passes from the emitted per-case artifacts; otherwise it reports negative_or_incomplete.",
   "tracing": {
     "aggregate_case_ids": "all 1000 known_1000 cases",
     "aggregate_token_offsets_from_subject_last": [
