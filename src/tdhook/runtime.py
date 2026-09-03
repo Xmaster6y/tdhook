@@ -112,7 +112,7 @@ class HookProgram:
 
         plans = []
         for hook_index, spec in enumerate(self.hooks):
-            if spec.target is None or spec.target.occurrence_indices is None or spec.direction is None:
+            if spec.target is None or spec.target.occurrences is None or spec.direction is None:
                 continue
             plans.append(
                 TargetOccurrencePlan(
@@ -120,7 +120,7 @@ class HookProgram:
                     spec.target.module_path,
                     spec.operation,
                     spec.direction,
-                    spec.target.occurrence_indices,
+                    spec.target.occurrences,
                 )
             )
         return tuple(plans)
@@ -137,7 +137,7 @@ class _TargetOccurrence:
     root_pass: int = -1
 
     def selected(self) -> bool:
-        selected_indices = self.target.occurrence_indices
+        selected_indices = self.target.occurrences
         selected = selected_indices is None or self.calls in selected_indices
         self.calls += 1
         return selected
@@ -147,7 +147,7 @@ class _TargetOccurrence:
         self.root_pass += 1
 
     def validate(self) -> None:
-        selected_indices = self.target.occurrence_indices
+        selected_indices = self.target.occurrences
         if selected_indices is not None and self.calls <= selected_indices[-1]:
             requested = (
                 f"occurrence {selected_indices[0]}"
@@ -314,7 +314,7 @@ class HookProgramBuilder:
             return None
 
         self.register(target_module, selected_hook, spec)
-        if spec.target.occurrence_indices is None:
+        if spec.target.occurrences is None:
             return
 
         execution_root = self.resolve_path(root, "", relative_path=relative_path)

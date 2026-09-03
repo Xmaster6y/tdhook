@@ -58,7 +58,7 @@ class FeatureSite:
             self.target.feature_axis,
             self.target.indices,
             output_path=self.target.output_path,
-            occurrence=self.target.occurrence,
+            occurrences=self.target.occurrences,
         )
 
 

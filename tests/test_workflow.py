@@ -13,7 +13,7 @@ from tdhook.execution import AutogradLifetime, ExecutionSpec, GradientMode
 from tdhook.latent import ActivationCaching, Probing
 from tdhook.modules import HookedModule
 from tdhook.runtime import BoundHookProgram, HookProgram, HookProgramBuilder, HookSpec
-from tdhook.targets import OccurrenceSelector, Target
+from tdhook.targets import Target
 from tdhook.workflow import (
     PlannedExecution,
     Workflow,
@@ -413,7 +413,7 @@ def test_managed_workflow_session_resets_occurrence_for_every_model_execution():
     model = RepeatedModule()
     workflow = Workflow(CaptureOutput(), ReplaceOutput())
     data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
-    target = Target("shared", "activation", -1, (0,), occurrence=1)
+    target = Target("shared", "activation", -1, (0,), occurrences=(1,))
 
     with workflow.session(model) as session:
         captured = session.capture(target)
@@ -436,7 +436,7 @@ def test_managed_workflow_result_includes_validated_occurrence_evidence():
     model = RepeatedModule()
     workflow = Workflow(CaptureOutput(), ReplaceOutput())
     data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
-    target = Target("shared", "activation", -1, (0,), occurrence=OccurrenceSelector((0, 2)))
+    target = Target("shared", "activation", -1, (0,), occurrences=(0, 2))
 
     with workflow.session(model) as session:
         session.capture(target)

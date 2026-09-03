@@ -68,7 +68,7 @@ class TestActivationCaching:
             def forward(self, value):
                 return self.shared(value + 1) + self.shared(value + 2)
 
-        target = Target("shared", "activation", -1, (0,), occurrence=0)
+        target = Target("shared", "activation", -1, (0,), occurrences=(0,))
         data = TensorDict({"input": torch.tensor([[1.0, 2.0]])}, batch_size=[1])
 
         with ActivationCaching(target).prepare(Model()) as prepared:
@@ -89,7 +89,7 @@ class TestActivationCaching:
                 return self.shared(value + 1) + self.shared(value + 2)
 
         model = Model()
-        target = Target("shared", "activation", -1, (0,), occurrence=0)
+        target = Target("shared", "activation", -1, (0,), occurrences=(0,))
         data = TensorDict({"input": torch.tensor([[1.0, 2.0]])}, batch_size=[1])
 
         with ActivationCaching(target).prepare(model) as prepared:

@@ -141,9 +141,8 @@ class HookSession:
         ``detach=False`` when a later attribution objective must backpropagate
         from the captured activation; the result then retains its autograd
         history and is only valid for the lifetime of the surrounding graph.
-        An integer ``occurrence`` captures one zero-based module call in each
-        root-model execution. Use :class:`~tdhook.targets.OccurrenceSelector`
-        for multiple calls. Validated observations are exposed through
+        ``Target.occurrences`` captures one or more ordered, zero-based module
+        calls in each root-model execution. Validated observations are exposed through
         :attr:`occurrence_evidence`.
         """
 
@@ -240,9 +239,8 @@ class HookSession:
         observed live value to a later compatible target in the same model
         execution. ``transform`` is applied to that value immediately before
         replacement. Whether the routed value retains its graph is controlled
-        by the source capture's ``detach`` argument. An integer ``occurrence``
-        replaces one zero-based module call per root-model execution; use
-        :class:`~tdhook.targets.OccurrenceSelector` for multiple calls.
+        by the source capture's ``detach`` argument. ``Target.occurrences``
+        selects one or more ordered, zero-based calls per root-model execution.
         """
 
         model, builder = self._active_state()

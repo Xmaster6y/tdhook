@@ -10,7 +10,7 @@ from tensordict import TensorDict
 from torch import nn
 
 from tdhook.session import CapturedTarget, CaptureSource, EarlyStopResult, HookProgram, HookSession, HookSpec
-from tdhook.targets import OccurrenceSelector, Target
+from tdhook.targets import Target
 
 
 def test_session_captures_and_replaces_an_activation(default_test_model):
@@ -662,7 +662,7 @@ def test_session_selects_and_resets_repeated_module_occurrences():
             return self.shared(x + 1) + self.shared(x + 2)
 
     model = RepeatedModule()
-    target = Target("shared", "activation", -1, (0,), occurrence=1)
+    target = Target("shared", "activation", -1, (0,), occurrences=(1,))
 
     with HookSession(model) as session:
         captured = session.capture(target)
@@ -687,7 +687,7 @@ def test_session_selects_multiple_occurrences_and_exposes_immutable_evidence():
             return torch.cat((self.shared(x + 1), self.shared(x + 2), self.shared(x + 3)), dim=-1)
 
     model = RepeatedModule()
-    target = Target("shared", "activation", -1, (0,), occurrence=OccurrenceSelector((0, 2)))
+    target = Target("shared", "activation", -1, (0,), occurrences=(0, 2))
 
     with HookSession(model) as session:
         captured = session.capture(target)
@@ -708,7 +708,7 @@ def test_session_selects_multiple_occurrences_and_exposes_immutable_evidence():
 
 def test_session_selects_root_pre_hook_occurrence_with_prepend():
     model = nn.Identity()
-    target = Target("", "activation", -1, (0,), occurrence=0)
+    target = Target("", "activation", -1, (0,), occurrences=(0,))
 
     with HookSession(model) as session:
         captured = session.capture(target, direction="fwd_pre", prepend=True)
@@ -734,7 +734,7 @@ def test_session_selects_repeated_gradient_occurrence():
             return self.shared(first_input) + self.shared(second_input)
 
     model = RepeatedModule()
-    target = Target("shared", "gradient", -1, (0,), occurrence=1)
+    target = Target("shared", "gradient", -1, (0,), occurrences=(1,))
     x = torch.ones(1, 2, requires_grad=True)
 
     with HookSession(model) as session:
@@ -757,7 +757,7 @@ def test_session_selects_repeated_gradient_occurrence():
 @pytest.mark.parametrize("operation", ["capture", "replace"])
 def test_session_fails_when_requested_occurrence_is_not_reached(operation):
     model = nn.Sequential(nn.Identity())
-    target = Target("0", "activation", -1, (0,), occurrence=1)
+    target = Target("0", "activation", -1, (0,), occurrences=(1,))
 
     with (
         pytest.raises(RuntimeError, match=rf"{operation} target '0' requested occurrence 1.*called 1 time"),
@@ -774,7 +774,7 @@ def test_session_fails_when_requested_occurrence_is_not_reached(operation):
 
 def test_session_fails_closed_when_a_multi_occurrence_is_missing():
     model = nn.Sequential(nn.Identity())
-    target = Target("0", "activation", -1, (0,), occurrence=OccurrenceSelector((0, 2)))
+    target = Target("0", "activation", -1, (0,), occurrences=(0, 2))
 
     with (
         pytest.raises(RuntimeError, match=r"requested occurrences \(0, 2\).*called 1 time"),
