@@ -16,7 +16,6 @@ src/tdhook/
 ├── _types.py             # Nested-key validation and composition helpers
 ├── concepts.py           # Concept definitions and utilities
 ├── contexts.py           # HookingContext, HookingContextFactory
-├── descriptions.py       # Serializable configured-step descriptions
 ├── dimension.py          # Dimension-estimation workflow helpers
 ├── execution.py          # Execution requirements and plans
 ├── hooks.py              # Hook factories and low-level handles

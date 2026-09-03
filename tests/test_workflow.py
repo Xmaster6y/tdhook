@@ -803,6 +803,22 @@ def test_workflow_validates_public_boundary_types(default_test_model):
         raise AssertionError("workflow accepted an invalid model")
 
 
+def test_workflow_method_does_not_require_optional_metadata(default_test_model):
+    class ExecutableMethod:
+        @property
+        def execution_spec(self):
+            return ExecutionSpec()
+
+        def prepare(self, model):
+            return HookingContextFactory().prepare(model)
+
+    data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
+
+    result = Workflow(ExecutableMethod())(default_test_model, data)
+
+    assert result["output"].shape == (2, 5)
+
+
 def test_workflow_rejects_invalid_method_protocol_results(default_test_model):
     class InvalidSpec(HookingContextFactory):
         @property

@@ -1,10 +1,8 @@
 from contextlib import contextmanager
 from contextlib import ExitStack
 from dataclasses import replace
-from functools import wraps
-import inspect
 import sys
-from typing import Callable, List, Optional, Generator, Dict, Mapping
+from typing import List, Optional, Generator, Dict
 from torch import nn
 from tensordict.nn import TensorDictModuleBase, TensorDictModule
 from tensordict import TensorDict
@@ -14,7 +12,6 @@ from tdhook.modules import HookedModule
 from tdhook.hooks import MultiHookHandle, merge_paths
 from tdhook._types import is_nested_key
 from tdhook.execution import ExecutionSpec
-from tdhook.descriptions import ConfiguredStepDescription, configured_step_description
 from tdhook.runtime import BoundHookProgram, HookProgram, TargetOccurrenceEvidence
 
 
@@ -276,44 +273,9 @@ class HookingContextFactory:
     _hooked_module_class = HookedModule
     _hooking_context_class = HookingContext
 
-    def __init_subclass__(cls, **kwargs) -> None:
-        """Capture each concrete method's declared constructor configuration."""
-
-        super().__init_subclass__(**kwargs)
-        initializer = cls.__dict__.get("__init__")
-        if initializer is None:
-            return
-        signature = inspect.signature(initializer)
-
-        @wraps(initializer)
-        def configured_initializer(self, *args, **init_kwargs):
-            bound = signature.bind(self, *args, **init_kwargs)
-            bound.apply_defaults()
-            initializer(self, *args, **init_kwargs)
-            self._configured_step_parameters = {
-                name: value
-                for name, value in bound.arguments.items()
-                if name != "self" and name not in {"args", "kwargs"}
-            }
-
-        cls.__init__ = configured_initializer
-
     def __init__(self):
         self._hooking_context_kwargs = {}
         self._hooked_module_kwargs = {}
-        self._configured_step_parameters: dict[str, object] = {}
-
-    def describe(
-        self, *, callback_identifiers: Mapping[Callable[..., object], str] | None = None
-    ) -> ConfiguredStepDescription:
-        """Describe this configured method without serializing executable objects."""
-
-        return configured_step_description(
-            self,
-            self._configured_step_parameters,
-            self.execution_spec,
-            callback_identifiers=callback_identifiers,
-        )
 
     @property
     def execution_spec(self) -> ExecutionSpec:
