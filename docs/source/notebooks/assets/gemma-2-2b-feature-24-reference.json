@@ -1,7 +1,5 @@
 {
-  "schema_version": 1,
   "feature": {"layer": 0, "index": 24},
-  "evidence_slice_sha256": "b8bd6fda45dda1f6e18c8a283be1883af32dc5016ee9b2f859dc2b6ae01c62a4",
   "provenance": {
     "model": "google/gemma-2-2b",
     "model_revision": "c5ebcd40d208330abc697524c919956e692655cf",
@@ -10,11 +8,9 @@
     "circuit_dataset": "egolimblevskaia/circuitlens-gemma-2-2b-transcoder-circuit-analysis",
     "circuit_dataset_revision": "fcd78fd98c3de6cc869d7df9e7d0f4a864ffea50",
     "circuit_file": "analysis_layer_0.jsonl",
-    "circuit_blob_sha256": "76f8ba7dba35222d366835f82f5557480bace71f89dc60ec16a8f946a7e20faf",
     "weight_dataset": "egolimblevskaia/weightlens-gemma-2-2b-transcoder-descriptions",
     "weight_dataset_revision": "aa51f4ee40784ac7af168932e2505fe3e4bab833",
     "weight_file": "feature_analysis_layer_0.json",
-    "weight_blob_sha256": "9b3c26c6fbf969bd82a996d561b52df6bbbe63f96d615684f332e23fefc5c935",
     "weightlens_revision": "93f820024034bb9b1829f7f09c1483ec3bc71f49",
     "circuitlens_revision": "d24b7e3a71ea1fbce0800056eb7333d1a282303d"
   },

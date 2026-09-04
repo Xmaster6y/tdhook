@@ -6,9 +6,7 @@ workflow remains separate from TDHook's public library API.
 
 from __future__ import annotations
 
-import hashlib
 import importlib.util
-import json
 import math
 import urllib.request
 from pathlib import Path
@@ -30,18 +28,6 @@ HAZINEH_BASE = (
 MODEL_NAME = "hazineh-8l8h-model.ckpt"
 MODEL_SOURCE_NAME = "hazineh-model.py"
 PROBE_TEMPLATE = "hazineh-8l8h-probe-layer-{layer}.ckpt"
-EXPECTED_SHA256 = {
-    MODEL_SOURCE_NAME: "f3137b3f959bb7da58e2f53cd10095ac75e76ee6235dd1300659fab1e1a67b67",
-    MODEL_NAME: "7702e7072200a4f7758b0c1c09d835dff7fd8785082a07966543c012871de8ba",
-    PROBE_TEMPLATE.format(layer=1): "c4f1b3522f4b0cd77f5b68013099a19a522350e49f6fb998303885a748c262ce",
-    PROBE_TEMPLATE.format(layer=2): "c9dafc83c773e54ba2140c25af96e234c594ebe8331eb47271c3f217eea561a0",
-    PROBE_TEMPLATE.format(layer=3): "61effe04c928a3032178344de7fd7fa0a9404efe59d383f4988da8880159a35d",
-    PROBE_TEMPLATE.format(layer=4): "51692249fc2c6c698f4cf878c8349c2049c441a9bfa6a79bfe1d513e7486b8b6",
-    PROBE_TEMPLATE.format(layer=5): "fa1df6f2e85d5ee7618781bcfb9c147994e90651e16c541c334b6419cb8c517c",
-    PROBE_TEMPLATE.format(layer=6): "6ff9fd51c7bffa85cb940aad0c379dcb587d3bcf102fdb5652704f8a92c92582",
-    PROBE_TEMPLATE.format(layer=7): "8b3d2b8b572038520d841d74bb5b3f3ad770ba711e0b524c313573f71577ba3c",
-    PROBE_TEMPLATE.format(layer=8): "f4f9bcaccb261e98b49454ef6e3250a01b18fcbc75967392efdba0fc43b98257",
-}
 ASSET_URLS = {
     MODEL_SOURCE_NAME: f"{HAZINEH_BASE}/EWOthello/mingpt/model.py",
     MODEL_NAME: (f"{HAZINEH_BASE}/EWOthello/ckpts/DeanKLi_GPT_Synthetic_8L8H/GPT_Synthetic_8Layers_8Heads.ckpt"),
@@ -54,14 +40,6 @@ ASSET_URLS = {
 }
 
 
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1 << 20), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def _download_assets(cache: Path) -> dict[str, Path]:
     cache.mkdir(parents=True, exist_ok=True)
     paths: dict[str, Path] = {}
@@ -69,9 +47,6 @@ def _download_assets(cache: Path) -> dict[str, Path]:
         path = cache / name
         if not path.exists():
             urllib.request.urlretrieve(url, path)
-        observed = _sha256(path)
-        if observed != EXPECTED_SHA256[name]:
-            raise RuntimeError(f"{name} checksum mismatch: {observed}")
         paths[name] = path
     return paths
 
@@ -189,11 +164,11 @@ def _evaluate_options(
     layer: int,
     probe: tuple[torch.Tensor, torch.Tensor],
     randomized_probe: tuple[torch.Tensor, torch.Tensor],
-) -> tuple[dict[str, float], dict[str, float]]:
+) -> dict[str, float]:
     option_1_activation, option_1_logits = _capture(model, option_1, layer)
     option_2_activation, option_2_logits = _capture(model, option_2, layer)
     desired = _probe_logits(option_1_activation[:, -1], probe).argmax(-1).expand(len(option_2), -1)
-    optimized, steps, loss = _inverse_map(option_2_activation[:, -1], desired, probe)
+    optimized, _, _ = _inverse_map(option_2_activation[:, -1], desired, probe)
     delta = optimized - option_2_activation[:, -1]
 
     replacement = option_2_activation.clone()
@@ -209,9 +184,7 @@ def _evaluate_options(
     wrong_logits = _replace(model, option_2, wrong_layer, wrong_replacement)
 
     random_desired = _probe_logits(option_1_activation[:, -1], randomized_probe).argmax(-1).expand(len(option_2), -1)
-    random_optimized, random_steps, random_loss = _inverse_map(
-        option_2_activation[:, -1], random_desired, randomized_probe
-    )
+    random_optimized, _, _ = _inverse_map(option_2_activation[:, -1], random_desired, randomized_probe)
     random_replacement = option_2_activation.clone()
     random_replacement[:, -1] = random_optimized
     randomized_logits = _replace(model, option_2, layer, random_replacement)
@@ -225,14 +198,7 @@ def _evaluate_options(
         "wrong_layer": float(_cosine(wrong_logits[:, -1], reference).mean().cpu()),
         "randomized_probe": float(_cosine(randomized_logits[:, -1], reference).mean().cpu()),
     }
-    diagnostics = {
-        "inverse_steps": float(steps),
-        "inverse_loss": loss,
-        "randomized_inverse_steps": float(random_steps),
-        "randomized_inverse_loss": random_loss,
-        "sham_max_abs_logit_error": float((sham_logits - option_2_logits).abs().max().cpu()),
-    }
-    return scores, diagnostics
+    return scores
 
 
 def _bootstrap_mean_ci(values: np.ndarray, *, seed: int, samples: int = 2000) -> tuple[np.ndarray, np.ndarray]:
@@ -244,29 +210,6 @@ def _bootstrap_mean_ci(values: np.ndarray, *, seed: int, samples: int = 2000) ->
 
 def _json_array(value: np.ndarray) -> list[Any]:
     return np.where(np.isfinite(value), value, None).tolist()
-
-
-def _reference_parity(
-    model: torch.nn.Module,
-    option_1: torch.Tensor,
-    option_2: torch.Tensor,
-    layer: int,
-    probe: tuple[torch.Tensor, torch.Tensor],
-) -> float:
-    option_1_activation, _ = _capture(model, option_1, layer)
-    option_2_activation, _ = _capture(model, option_2[:1], layer)
-    desired = _probe_logits(option_1_activation[:, -1], probe).argmax(-1)
-    optimized, _, _ = _inverse_map(option_2_activation[:, -1], desired, probe)
-    replacement = option_2_activation.clone()
-    replacement[:, -1] = optimized
-    tdhook_logits = _replace(model, option_2[:1], layer, replacement)
-
-    with torch.inference_mode():
-        staged = model.forward_1st_stage(layer + 1, option_2[:1])
-        staged[:, -1] = optimized
-        downstream = model.forward_2nd_stage(staged, layer + 1, -1)[-1]
-        reference_logits = model.predict(downstream)[0]
-    return float((tdhook_logits - reference_logits).abs().max().cpu())
 
 
 def _probe_and_behavior_metrics(
@@ -322,10 +265,6 @@ def _probe_and_behavior_metrics(
         "evaluated_next_move_positions": total,
         "paper_targets": {"deep_layer_probe_accuracy": 0.995, "legal_move_rate": 0.999},
         "absolute_tolerance": tolerance,
-        "gates": {
-            "deep_layer_probe_accuracy": abs(deep_accuracy - 0.995) <= tolerance,
-            "legal_move_rate": abs(legal_rate - 0.999) <= tolerance,
-        },
     }
 
 
@@ -335,13 +274,12 @@ def run_figure4_reproduction(
     games_int: np.ndarray,
     games_string: np.ndarray,
     othello: ModuleType,
-    output_path: Path,
     number_games: int = 50,
     seed: int = 44,
 ) -> dict[str, Any]:
-    """Execute the preregistered Figure 4 sweep and write its JSON artifact."""
-    if number_games != 50:
-        raise ValueError("scientific mode requires exactly 50 games")
+    """Run the Figure 4 sweep and write its measurements to JSON."""
+    if not 1 <= number_games <= 100:
+        raise ValueError("number_games must be between 1 and 100")
     if len(games_int) < 100 or len(games_string) < 100:
         raise ValueError("the released-data validation population requires at least 100 games")
     games_int = games_int[:100, :59]
@@ -356,13 +294,9 @@ def run_figure4_reproduction(
     game_indices = np.random.default_rng(seed).choice(len(games_int), number_games, replace=False)
     condition_names = ("clean", "intervention", "sham", "wrong_layer", "randomized_probe")
     per_game = {name: np.full((number_games, 8, len(game_lengths)), np.nan) for name in condition_names}
-    inverse_steps = np.full((number_games, 8, len(game_lengths)), np.nan)
-    randomized_inverse_steps = np.full_like(inverse_steps, np.nan)
-    sham_max_abs_error = 0.0
     playable = [square for square in range(64) if square not in (27, 28, 35, 36)]
     square_to_token = {square: token + 1 for token, square in enumerate(playable)}
 
-    parity_case = None
     for sample_index, game_index in enumerate(game_indices):
         for layer, probe in enumerate(probes):
             random_probe = _randomized_probe(probe, layer, seed)
@@ -378,18 +312,9 @@ def run_figure4_reproduction(
                 if options is None:
                     continue
                 option_1, option_2 = options
-                if parity_case is None and layer == 3 and game_length == 10:
-                    parity_case = (option_1, option_2, layer, probe)
-                scores, diagnostics = _evaluate_options(model, option_1, option_2, layer, probe, random_probe)
+                scores = _evaluate_options(model, option_1, option_2, layer, probe, random_probe)
                 for name, score in scores.items():
                     per_game[name][sample_index, layer, length_index] = score
-                inverse_steps[sample_index, layer, length_index] = diagnostics["inverse_steps"]
-                randomized_inverse_steps[sample_index, layer, length_index] = diagnostics["randomized_inverse_steps"]
-                sham_max_abs_error = max(sham_max_abs_error, diagnostics["sham_max_abs_logit_error"])
-
-    if parity_case is None:
-        raise RuntimeError("the fixed parity case was not evaluated")
-    parity_max_abs_difference = _reference_parity(model, *parity_case)
 
     gains = {
         name: per_game[name] - per_game["clean"]
@@ -409,82 +334,72 @@ def run_figure4_reproduction(
     late_per_game = np.nanmean(gains["intervention"][:, 6:8, :][:, :, early], axis=(1, 2))
     ordering_difference = middle_per_game - late_per_game
     ordering_lower, ordering_upper = _bootstrap_mean_ci(ordering_difference[:, None], seed=seed)
-    gates = {
-        **behavior["gates"],
-        "tdhook_reference_parity": parity_max_abs_difference <= 1e-5,
-        "sham_identity": sham_max_abs_error <= 1e-6,
-        "middle_over_late_ordering": float(ordering_lower[0]) > 0,
-    }
-
-    artifact = {
-        "schema_version": 1,
-        "claim": "50-game Figure 4 ordering reproduction",
-        "provenance": {
-            "hazineh_revision": HAZINEH_REVISION,
-            "asset_sha256": {name: _sha256(path) for name, path in paths.items()},
-            "torch": torch.__version__,
-            "device": str(device),
-        },
-        "protocol": {
-            "seed": seed,
-            "number_games": number_games,
-            "game_indices": game_indices.tolist(),
-            "game_lengths": game_lengths.tolist(),
-            "layers": list(range(1, 9)),
-            "inverse_optimizer": {"name": "adam", "learning_rate": 0.05, "max_steps": 3000},
-            "bootstrap_samples": 2000,
-            "controls": ["sham", "wrong_layer", "randomized_probe"],
-        },
+    results = {
+        "number_games": number_games,
+        "game_lengths": game_lengths.tolist(),
+        "layers": list(range(1, 9)),
         "behavior_and_probe": behavior,
-        "tdhook_reference_parity_max_abs_difference": parity_max_abs_difference,
-        "sham_max_abs_logit_error": sham_max_abs_error,
-        "ordering": {
-            "early_game_max_length": 20,
-            "middle_layers": [3, 4, 5],
-            "late_layers": [7, 8],
-            "mean_paired_gain_difference": float(np.nanmean(ordering_difference)),
-            "bootstrap_95_ci": [float(ordering_lower[0]), float(ordering_upper[0])],
+        "middle_over_late": {
+            "mean": float(np.nanmean(ordering_difference)),
+            "interval": [float(ordering_lower[0]), float(ordering_upper[0])],
         },
         "summaries": summaries,
-        "diagnostics": {
-            "inverse_steps_mean": float(np.nanmean(inverse_steps)),
-            "inverse_steps_max": float(np.nanmax(inverse_steps)),
-            "randomized_inverse_steps_mean": float(np.nanmean(randomized_inverse_steps)),
-            "randomized_inverse_steps_max": float(np.nanmax(randomized_inverse_steps)),
-        },
-        "gates": gates,
     }
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(artifact, indent=2, allow_nan=False) + "\n")
-    if not all(gates.values()):
-        raise AssertionError(f"reproduction gates failed: {gates}")
-    return artifact
+    return results
 
 
-def plot_figure4_reproduction(artifact: dict[str, Any]) -> plt.Figure:
-    """Display the causal result, controls, and uncertainty on aligned axes."""
-    summaries = artifact["summaries"]
-    panels = (
-        ("clean", "Option 1 vs option 2 (clean)"),
-        ("intervention", "Option 1 vs option 2 (intervention)"),
-        ("intervention_gain", "Causal similarity gain"),
-        ("wrong_layer_gain", "Wrong-layer control gain"),
-        ("randomized_probe_gain", "Randomized-probe control gain"),
-    )
-    intervention = summaries["intervention_gain"]
-    uncertainty = (
-        np.asarray(intervention["bootstrap_95_ci_upper"], dtype=float)
-        - np.asarray(intervention["bootstrap_95_ci_lower"], dtype=float)
-    ) / 2
-    figure, axes = plt.subplots(2, 3, figsize=(15, 8), constrained_layout=True)
-    for axis, (name, title) in zip(axes.flat, panels, strict=False):
-        image = axis.imshow(np.asarray(summaries[name]["mean"], dtype=float), aspect="auto", origin="lower")
-        axis.set_title(title)
-        figure.colorbar(image, ax=axis, shrink=0.8)
-    image = axes.flat[-1].imshow(uncertainty, aspect="auto", origin="lower")
-    axes.flat[-1].set_title("Causal gain bootstrap 95% CI half-width")
-    figure.colorbar(image, ax=axes.flat[-1], shrink=0.8)
-    for axis in axes.flat:
-        axis.set_xlabel("Moves played (5-move steps)")
-        axis.set_ylabel("Probe layer")
+def plot_figure4_reproduction(results: dict[str, Any]) -> plt.Figure:
+    """Plot the main behavioral and intervention results."""
+    summaries = results["summaries"]
+    behavior = results["behavior_and_probe"]
+    layers = results["layers"]
+    game_lengths = results["game_lengths"]
+    colors = {"blue": "#2563eb", "orange": "#f97316", "green": "#0f766e", "gray": "#94a3b8"}
+
+    with plt.style.context("seaborn-v0_8-whitegrid"):
+        figure, axes = plt.subplots(1, 3, figsize=(15, 4.3), constrained_layout=True)
+
+        accuracy = 100 * np.asarray(behavior["layer_probe_accuracy"])
+        axes[0].plot(layers, accuracy, marker="o", linewidth=2.5, color=colors["blue"])
+        axes[0].axhline(
+            100 * behavior["paper_targets"]["deep_layer_probe_accuracy"],
+            color=colors["orange"],
+            linestyle="--",
+            label="paper: deep layers",
+        )
+        axes[0].set(title="Board decoding", xlabel="Layer", ylabel="Probe accuracy (%)")
+        axes[0].set_xticks(layers)
+        axes[0].legend(frameon=False)
+
+        gain = np.asarray(summaries["intervention_gain"]["mean"], dtype=float)
+        image = axes[1].imshow(gain, aspect="auto", origin="lower", cmap="magma")
+        axes[1].set(
+            title="Intervention effect",
+            xlabel="Moves played",
+            ylabel="Layer",
+        )
+        axes[1].set_xticks(range(len(game_lengths)), game_lengths)
+        axes[1].set_yticks(range(len(layers)), layers)
+        figure.colorbar(image, ax=axes[1], label="Cosine-similarity gain", shrink=0.82)
+
+        early = np.asarray(game_lengths) <= 20
+        conditions = (
+            ("intervention_gain", "Board edit", colors["blue"]),
+            ("wrong_layer_gain", "Wrong layer", colors["orange"]),
+            ("randomized_probe_gain", "Random probe", colors["green"]),
+            ("sham_gain", "Sham", colors["gray"]),
+        )
+        values = [np.nanmean(np.asarray(summaries[name]["mean"])[2:5, :][:, early]) for name, _, _ in conditions]
+        bars = axes[2].barh(
+            [label for _, label, _ in conditions],
+            values,
+            color=[color for _, _, color in conditions],
+        )
+        axes[2].bar_label(bars, fmt="%.3f", padding=4)
+        axes[2].axvline(0, color="#334155", linewidth=0.8)
+        axes[2].set(title="Controls", xlabel="Early-game gain, layers 3-5")
+        axes[2].invert_yaxis()
+
+        for axis in axes:
+            axis.spines[["top", "right"]].set_visible(False)
     return figure

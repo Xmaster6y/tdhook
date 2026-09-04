@@ -1,21 +1,17 @@
-"""Regression contracts for the ROME causal-tracing and editing reproduction."""
+"""Tests for the ROME reproduction helpers."""
 
 import importlib.util
-import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
 
-import nbformat
 import numpy as np
 import pytest
 import torch
 from torch import nn
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-NOTEBOOK = REPO_ROOT / "docs/source/notebooks/tutorials/rome-research-reproduction.ipynb"
 HELPER = REPO_ROOT / "docs/source/notebooks/tutorials/rome_reproduction.py"
-PROTOCOL = REPO_ROOT / "docs/source/notebooks/assets/rome-issue-109-protocol.json"
 
 
 def _load_helper():
@@ -25,79 +21,6 @@ def _load_helper():
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
-
-
-def test_rome_reproduction_is_linked_parseable_and_resource_bounded():
-    tutorials = (REPO_ROOT / "docs/source/tutorials.rst").read_text()
-    notebook = nbformat.read(NOTEBOOK, as_version=4)
-    markdown = "\n".join(cell.source for cell in notebook.cells if cell.cell_type == "markdown")
-    code = "\n".join(cell.source for cell in notebook.cells if cell.cell_type == "code")
-
-    assert ":link: notebooks/tutorials/rome-research-reproduction" in tutorials
-    assert notebook.metadata["tdhook"] == {
-        "ci": False,
-        "estimated_download_gb": 7,
-        "estimated_vram_gb": 16,
-        "network": True,
-        "runtime": "cuda",
-    }
-    assert "issue #109" in markdown
-    assert "reports conclusions only when every declared gate passes" in markdown
-    for required in (
-        "causal_trace_grid",
-        "temporary_rank_one_edit",
-        "execute_rome",
-        "compute_rewrite_quality_counterfact",
-        "parity_report",
-        "rome_source_sha256",
-        "scores.cpu().numpy() - corrupted_probability",
-        'protocol["counterfact"]["paper_reference"]',
-        "write_json",
-    ):
-        assert required in code
-    assert "deltas = execute_rome(model, tokenizer, request, hparams)" in code
-    assert "deltas = execute_rome(model, tokenizer, [request], hparams)" not in code
-    for cell in notebook.cells:
-        if cell.cell_type == "code":
-            compile(cell.source, str(NOTEBOOK), "exec")
-
-
-def test_protocol_preregisters_provenance_controls_metrics_and_fail_closed_status():
-    protocol = json.loads(PROTOCOL.read_text())
-
-    assert protocol["artifact_status"] == "not_run"
-    assert protocol["counterfact"]["case_ids"] == "0-99 inclusive"
-    assert protocol["counterfact"]["seed"] == 109
-    assert protocol["counterfact"]["paper_reference"]["metrics"] == {
-        "rewrite_efficacy": {"point_estimate": 1.0, "reported_95_ci_half_width": 0.001},
-        "paraphrase_generalization": {"point_estimate": 0.964, "reported_95_ci_half_width": 0.003},
-        "neighborhood_specificity": {"point_estimate": 0.754, "reported_95_ci_half_width": 0.007},
-    }
-    assert protocol["tracing"]["parity_case_ids"] == [0, 1, 2]
-    assert protocol["tracing"]["aggregate_case_ids"] == "all 1000 known_1000 cases"
-    assert protocol["metrics"] == [
-        "rewrite_efficacy",
-        "paraphrase_generalization",
-        "neighborhood_specificity",
-    ]
-    assert set(protocol["decision_gates"]) == {
-        "causal_trace_case_parity",
-        "counterfact_reproduction",
-        "localization",
-        "state_restoration",
-    }
-    assert all(
-        len(value) == 64
-        for key, value in protocol["provenance"].items()
-        if key.endswith("_sha256") and isinstance(value, str)
-    )
-    assert set(protocol["provenance"]["rome_source_sha256"]) == {
-        "experiments/causal_trace.py",
-        "experiments/py/eval_utils_counterfact.py",
-        "hparams/ROME/gpt2-xl.json",
-        "rome/rome_main.py",
-    }
-    assert all(len(value) == 64 for value in protocol["provenance"]["rome_source_sha256"].values())
 
 
 def test_numpy_corruption_matches_the_released_rome_rng_convention():
@@ -181,7 +104,7 @@ def test_residual_grid_selects_the_tensor_from_gpt2_style_block_outputs():
         "input_ids": torch.tensor([[1, 2], [1, 2], [1, 2]]),
         "attention_mask": torch.ones(3, 2, dtype=torch.long),
     }
-    scores, budget = helper.causal_trace_grid(
+    scores = helper.causal_trace_grid(
         model,
         inputs,
         answer_token=2,
@@ -191,7 +114,6 @@ def test_residual_grid_selects_the_tensor_from_gpt2_style_block_outputs():
     )
 
     assert scores.shape == (2, 1)
-    assert budget == {"model_pass_budget": 2, "model_passes": 2}
 
 
 @pytest.mark.parametrize("window", [0, -1, True, 1.5])

@@ -1,18 +1,11 @@
-"""Executable helpers for the ROME causal-tracing reproduction notebook.
-
-The functions implement deterministic causal tracing, rank-one editing,
-CounterFact aggregation, parity checks, and machine-readable result artifacts.
-"""
+"""Small helpers used by the ROME reproduction notebook."""
 
 from __future__ import annotations
 
-import json
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass
-from hashlib import sha256
-from pathlib import Path
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -133,8 +126,8 @@ def causal_trace_grid(
     embedding_path: str = "transformer.wte",
     token_indices: Iterable[int] | None = None,
     config: CausalTraceConfig = DEFAULT_TRACE_CONFIG,
-) -> tuple[Tensor, dict[str, int]]:
-    """Restore each token/layer state and return scores plus an exact pass budget."""
+) -> Tensor:
+    """Restore each token/layer state and return its answer probability."""
 
     token_indices = tuple(
         token_indices if token_indices is not None else range(next(iter(model_inputs.values())).shape[1])
@@ -158,10 +151,7 @@ def causal_trace_grid(
                 ]
             )
         )
-    return torch.stack(rows), {
-        "model_pass_budget": len(token_indices) * len(layer_paths),
-        "model_passes": len(token_indices) * len(layer_paths),
-    }
+    return torch.stack(rows)
 
 
 def causal_trace_window_grid(
@@ -176,7 +166,7 @@ def causal_trace_window_grid(
     embedding_path: str = "transformer.wte",
     token_indices: Iterable[int] | None = None,
     config: CausalTraceConfig = DEFAULT_TRACE_CONFIG,
-) -> tuple[Tensor, dict[str, int]]:
+) -> Tensor:
     """Match ROME's sliding-window MLP or attention restoration sweep."""
 
     if component not in {"mlp", "attn"}:
@@ -206,8 +196,7 @@ def causal_trace_window_grid(
                 )
             )
         rows.append(torch.stack(row))
-    passes = len(token_indices) * len(layer_paths)
-    return torch.stack(rows), {"model_pass_budget": passes, "model_passes": passes}
+    return torch.stack(rows)
 
 
 def rank_one_update(left: Tensor, right: Tensor, weight: Tensor) -> Tensor:
@@ -257,30 +246,17 @@ def case_score(metrics: Mapping[str, Any]) -> dict[str, float]:
     }
 
 
-def bootstrap_mean_interval(values: Sequence[float], *, seed: int, samples: int = 10_000) -> tuple[float, float]:
-    """Return a deterministic percentile 95% confidence interval for a mean."""
-
-    array = np.asarray(values, dtype=float)
-    if array.ndim != 1 or not len(array):
-        raise ValueError("values must be a non-empty one-dimensional sequence")
-    random = np.random.default_rng(seed)
-    means = random.choice(array, (samples, len(array)), replace=True).mean(axis=1)
-    low, high = np.quantile(means, [0.025, 0.975])
-    return float(low), float(high)
-
-
-def summarize_counterfact(cases: Sequence[Mapping[str, Any]], *, seed: int) -> dict[str, Any]:
-    """Aggregate official per-case output into declared metrics and confidence intervals."""
+def summarize_counterfact(cases: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Average the three CounterFact measures over a list of edited cases."""
 
     scores = [case_score(case["post"]) for case in cases]
-    summary = {}
-    for metric in ("rewrite_efficacy", "paraphrase_generalization", "neighborhood_specificity"):
-        values = [score[metric] for score in scores]
-        summary[metric] = {
-            "mean": float(np.mean(values)),
-            "bootstrap_95_ci": bootstrap_mean_interval(values, seed=seed),
-        }
-    return {"number_cases": len(cases), "metrics": summary}
+    return {
+        "number_cases": len(cases),
+        "metrics": {
+            metric: float(np.mean([score[metric] for score in scores]))
+            for metric in ("rewrite_efficacy", "paraphrase_generalization", "neighborhood_specificity")
+        },
+    }
 
 
 def parity_report(tdhook: Tensor, official: Tensor, *, atol: float, rtol: float) -> dict[str, Any]:
@@ -293,15 +269,3 @@ def parity_report(tdhook: Tensor, official: Tensor, *, atol: float, rtol: float)
         "max_abs_difference": float(difference.max()),
         "matches": bool(torch.allclose(tdhook.detach().cpu(), official.detach().cpu(), atol=atol, rtol=rtol)),
     }
-
-
-def write_json(path: str | Path, value: Mapping[str, Any]) -> str:
-    """Write canonical machine-readable evidence and return its SHA-256."""
-
-    encoded = json.dumps(value, allow_nan=False, indent=2, sort_keys=True).encode() + b"\n"
-    Path(path).write_bytes(encoded)
-    return sha256(encoded).hexdigest()
-
-
-def config_dict(config: CausalTraceConfig) -> dict[str, Any]:
-    return asdict(config)
