@@ -2,7 +2,9 @@
 
 import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
 
+import numpy as np
 import torch
 from torch import nn
 
@@ -60,3 +62,47 @@ def test_othello_capture_and_replacement_use_workflow_artifacts():
     torch.testing.assert_close(logits, inputs)
     torch.testing.assert_close(replaced, replacement)
     assert not model.blocks[0]._forward_hooks
+
+
+def test_othello_metrics_capture_all_layers_of_explicit_tensordict_wrapper():
+    helper = _load_figure4_helper()
+
+    class TinyOthello(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.blocks = nn.ModuleList([nn.Identity() for _ in range(8)])
+
+        def forward(self, inputs):
+            hidden = torch.ones(*inputs.shape, 3)
+            for block in self.blocks:
+                hidden = block(hidden)
+            logits = torch.zeros(*inputs.shape, 61)
+            logits[..., 1] = 1
+            return logits, None
+
+    class Board:
+        def __init__(self):
+            self.state = np.zeros((8, 8), dtype=np.int64)
+
+        def umpire(self, move):
+            pass
+
+        def get_valid_moves(self):
+            return [0]
+
+    bias = torch.tensor([0.0, 1.0, 0.0]).repeat(64)
+    probes = [(torch.zeros(192, 3), bias) for _ in range(8)]
+    games = np.zeros((100, 59), dtype=np.int64)
+    model = TinyOthello()
+    metrics = helper._probe_and_behavior_metrics(
+        model,
+        probes,
+        games,
+        games,
+        SimpleNamespace(OthelloBoardState=Board),
+        torch.device("cpu"),
+    )
+    assert metrics["layer_probe_accuracy"] == [1.0] * 8
+    assert metrics["legal_move_rate"] == 1.0
+    assert metrics["evaluated_next_move_positions"] == 5800
+    assert all(not block._forward_hooks for block in model.blocks)

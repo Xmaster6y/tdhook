@@ -245,12 +245,12 @@ def _probe_and_behavior_metrics(
     model_module = TensorDictModule(model, in_keys=["input"], out_keys=["output", "aux"])
     with torch.inference_mode():
         result = Workflow(
-            ActivationCaching(r"blocks\.[0-7]$", cache_key=cache_key),
+            ActivationCaching(r"module.blocks\.[0-7]$", cache_key=cache_key),
         )(model_module, TensorDict({"input": inputs}, batch_size=[]))
     logits = result["output"]
     layer_accuracy = []
     for layer, probe in enumerate(probes):
-        predictions = _probe_logits(result[(*cache_key, f"blocks.{layer}")], probe).argmax(-1)
+        predictions = _probe_logits(result[(*cache_key, f"module.blocks.{layer}")], probe).argmax(-1)
         layer_accuracy.append(float((predictions[:, 5:54] == labels[:, 5:54]).float().mean().cpu()))
 
     playable = [square for square in range(64) if square not in (27, 28, 35, 36)]
