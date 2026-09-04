@@ -87,12 +87,6 @@ class BackwardCapture(Method):
             return builder.build()
 
 
-class EmptyProgram(Method):
-    def _install_hooks(self, module: BoundModule) -> BoundHookProgram:
-        with HookProgramBuilder() as builder:
-            return builder.build()
-
-
 class InvalidOutput(TensorDictModuleBase):
     in_keys = ["input"]
     out_keys = ["output"]
@@ -536,9 +530,22 @@ def test_workflow_binding_restores_hooks_when_later_validation_fails(default_tes
     else:
         raise AssertionError("workflow accepted a missing TensorDict dependency")
 
+    assert model.calls == 0
+    assert capture.values == []
     captured = len(capture.values)
     model(torch.ones(2, 10))
     assert len(capture.values) == captured
+
+
+def test_workflow_dependency_preflight_does_not_clear_a_method_cache(default_test_model):
+    cache = TensorDict({"sentinel": torch.ones(1)}, batch_size=[])
+    method = ActivationCaching("linear1", cache=cache)
+
+    with pytest.raises(ValueError, match="missing TensorDict keys"):
+        Workflow(method)(default_test_model, TensorDict(batch_size=[]))
+
+    assert list(cache.keys()) == ["sentinel"]
+    torch.testing.assert_close(cache["sentinel"], torch.ones(1))
 
 
 def test_workflow_validates_public_boundary_types(default_test_model):
@@ -606,12 +613,30 @@ def test_workflow_rejects_invalid_method_protocol_results(default_test_model):
     class MissingBinding(Method):
         _binding_class = MissingBindingContext
 
+    class NonModuleContractContext(BoundMethod):
+        @property
+        def module(self):
+            return object()
+
+    class NonModuleContract(Method):
+        _binding_class = NonModuleContractContext
+
+    class InvalidContractContext(BoundMethod):
+        @property
+        def module(self):
+            return TensorDictModule(lambda value: value, in_keys=["input"], out_keys=["output"])
+
+    class InvalidContract(Method):
+        _binding_class = InvalidContractContext
+
     data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
     cases = (
         (InvalidSpec(), "ExecutionSpec"),
         (InvalidContext(), "BoundMethod"),
         (InvalidPrepared(), "TensorDictModuleBase"),
         (MissingBinding(), "invalid bound module"),
+        (NonModuleContract(), "TensorDictModuleBase"),
+        (InvalidContract(), "invalid bound module"),
     )
     for method, message in cases:
         try:

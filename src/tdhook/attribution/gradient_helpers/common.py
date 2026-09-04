@@ -2,12 +2,18 @@ from abc import ABCMeta, abstractmethod
 from typing import Callable, Optional, Tuple, List, Dict
 
 import torch
-from tensordict.nn import TensorDictModule, TensorDictSequential, TensorDictModuleBase
+from tensordict.nn import TensorDictModule, TensorDictModuleBase
 from tensordict import TensorDict
 from tensordict.utils import NestedKey
 
 from tdhook.methods import Method
-from tdhook.modules import FunctionModule, flatten_select_reshape_call, IntermediateKeysCleaner, ModuleCallWithCache
+from tdhook.modules import (
+    _CacheRefSequential,
+    FunctionModule,
+    flatten_select_reshape_call,
+    IntermediateKeysCleaner,
+    ModuleCallWithCache,
+)
 from tdhook._types import join_keys
 from tdhook.modules import BoundModule
 from tdhook.hooks import HookFactory, MutableWeakRef, TensorDictRef
@@ -15,28 +21,26 @@ from tdhook.execution import ExecutionSpec, GradientMode
 from tdhook.runtime import BoundHookProgram, HookProgramBuilder, HookSpec
 
 
-class _GradientPipeline(TensorDictSequential):
+class _GradientPipeline(_CacheRefSequential):
     """Named access to resources shared by a gradient method binding."""
 
-    def __init__(self, *modules, cache_ref: TensorDictRef):
-        super().__init__(*modules)
-        self._cache_ref = cache_ref
-
-    @property
-    def cache_ref(self) -> TensorDictRef:
-        return self._cache_ref
+    def __init__(self, *modules, cache_ref: TensorDictRef, register_inputs, module_call, attributor):
+        super().__init__(*modules, cache_ref=cache_ref)
+        object.__setattr__(self, "_register_inputs", register_inputs)
+        object.__setattr__(self, "_module_call", module_call)
+        object.__setattr__(self, "_attributor", attributor)
 
     @property
     def register_inputs(self):
-        return self[1]
+        return self._register_inputs
 
     @property
     def module_call(self):
-        return self[2]
+        return self._module_call
 
     @property
     def attributor(self):
-        return self[3]
+        return self._attributor
 
 
 class GradientAttribution(Method, metaclass=ABCMeta):
@@ -101,40 +105,45 @@ class GradientAttribution(Method, metaclass=ABCMeta):
             raise ValueError("Additional init keys must not be in the in_keys or out_keys")
 
         cache_ref = TensorDictRef(TensorDict())
-        modules = [
-            TensorDictModule(
-                lambda *tensors: tensors,
-                in_keys=in_keys,
-                out_keys=register_in_keys,
-            ),
-            FunctionModule(
-                self._register_inputs_fn,
-                in_keys=register_in_keys,
-                out_keys=mod_in_keys,
-            ),
-            ModuleCallWithCache(
-                module,
-                in_key="_mod_in",
-                out_key="_mod_out",
-                stored_keys=cache_in_keys + cache_out_keys,
-                cache_ref=cache_ref,
-                cache_as_output=False,
-            ),
-            FunctionModule(
-                lambda td: self._attributor_fn(td, cache_ref),
-                in_keys=(mod_in_keys if self._use_inputs else [])
-                + (mod_out_keys if self._use_outputs else [])
-                + self._additional_init_keys,
-                out_keys=attr_keys,
-            ),
-        ]
+        register_values = TensorDictModule(
+            lambda *tensors: tensors,
+            in_keys=in_keys,
+            out_keys=register_in_keys,
+        )
+        register_inputs = FunctionModule(
+            self._register_inputs_fn,
+            in_keys=register_in_keys,
+            out_keys=mod_in_keys,
+        )
+        module_call = ModuleCallWithCache(
+            module,
+            in_key="_mod_in",
+            out_key="_mod_out",
+            stored_keys=cache_in_keys + cache_out_keys,
+            cache_ref=cache_ref,
+            cache_as_output=False,
+        )
+        attributor = FunctionModule(
+            lambda td: self._attributor_fn(td, cache_ref),
+            in_keys=(mod_in_keys if self._use_inputs else [])
+            + (mod_out_keys if self._use_outputs else [])
+            + self._additional_init_keys,
+            out_keys=attr_keys,
+        )
+        modules = [register_values, register_inputs, module_call, attributor]
         if self._clean_intermediate_keys:
             modules.append(
                 IntermediateKeysCleaner(
                     intermediate_keys=["_register_in", "_mod_in", "_mod_out", "_cache_in", "_cache_out"]
                 )
             )
-        return _GradientPipeline(*modules, cache_ref=cache_ref)
+        return _GradientPipeline(
+            *modules,
+            cache_ref=cache_ref,
+            register_inputs=register_inputs,
+            module_call=module_call,
+            attributor=attributor,
+        )
 
     def _install_hooks(self, module: BoundModule) -> BoundHookProgram:
         with HookProgramBuilder() as program:
@@ -326,7 +335,13 @@ class GradientAttributionWithBaseline(GradientAttribution):
                 )
             )
 
-        return _GradientPipeline(*modules, cache_ref=pipeline.cache_ref)
+        return _GradientPipeline(
+            *modules,
+            cache_ref=pipeline.cache_ref,
+            register_inputs=pipeline.register_inputs,
+            module_call=pipeline.module_call,
+            attributor=pipeline.attributor,
+        )
 
     @abstractmethod
     def _reduce_baselines_fn(self, td: TensorDict, in_keys: List[NestedKey]) -> TensorDict:

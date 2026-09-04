@@ -10,7 +10,7 @@ from typing import List
 
 import pytest
 
-from tdhook.methods import Method
+from tdhook.methods import BoundMethod, Method
 from tdhook.modules import BoundModule
 from tdhook.hooks import MultiHookHandle
 from tdhook.runtime import HookProgramBuilder, HookSpec
@@ -52,8 +52,11 @@ class PrepFlagFactory(Method):
         out_keys: List[NestedKey],
         extra_relative_path: str,
     ) -> TensorDictModule:
-        setattr(module, self.flag_name, 1)
         return module
+
+    def _install_hooks(self, module):
+        setattr(module.hook_root, self.flag_name, 1)
+        return MultiHookHandle()
 
     def _restore_module(
         self,
@@ -84,6 +87,7 @@ class RemoveFailureHandle:
 
 class RestoreAfterRemovalFailureFactory(PrepFlagFactory):
     def _install_hooks(self, module):
+        setattr(module.hook_root, self.flag_name, 1)
         return MultiHookHandle([RemoveFailureHandle(True, [])])
 
 
@@ -133,6 +137,10 @@ class TestBaseContext:
 
 
 class TestBoundMethodLifecycle:
+    def test_internal_binding_root_requires_a_tensordict_module_and_relative_path(self):
+        with pytest.raises(TypeError, match="TensorDict module and relative path"):
+            BoundMethod(Method(), torch.nn.Identity(), hook_root=TensorDictModule(torch.nn.Identity(), [], []))
+
     def test_hook_failure_cleanup_requires_an_active_bound_program(self, default_test_model):
         context = Method().bind(default_test_model)
 
@@ -267,6 +275,7 @@ class TestTensorDictModuleContext:
         assert not hasattr(td_mod, "prep_flag")
 
         ctx = PrepFlagFactory().bind(td_mod)
+        assert not hasattr(td_mod, "prep_flag")
         with ctx as hm:
             assert isinstance(hm, BoundModule)
             assert getattr(td_mod, "prep_flag") == 1

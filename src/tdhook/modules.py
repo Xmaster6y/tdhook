@@ -1,4 +1,4 @@
-from tensordict.nn import TensorDictModuleWrapper, TensorDictModuleBase
+from tensordict.nn import TensorDictModuleWrapper, TensorDictModuleBase, TensorDictSequential
 from tensordict import NonTensorData, TensorDict, TensorDictBase
 from tensordict.utils import NestedKey
 from typing import Callable, Optional, TYPE_CHECKING, List
@@ -165,6 +165,14 @@ class ModuleCallWithCache(TensorDictModuleBase):
             4 * " ",
         )
         return f"{type(self).__name__}(\n{fields})"
+
+
+class _CacheRefSequential(TensorDictSequential):
+    """Internal sequential wrapper carrying a cache reference for hook callbacks."""
+
+    def __init__(self, *modules, cache_ref: MutableWeakRef | TensorDictRef):
+        super().__init__(*modules)
+        self.cache_ref = cache_ref
 
 
 class PGDModule(TensorDictModuleBase):

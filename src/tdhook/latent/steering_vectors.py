@@ -1,14 +1,20 @@
 from typing import Callable, Optional, List
 
 from tensordict import TensorDict
-from tensordict.nn import TensorDictModuleBase, TensorDictSequential
+from tensordict.nn import TensorDictModuleBase
 from tensordict.utils import NestedKey
 
 from tdhook.methods import Method
 from tdhook.execution import ExecutionSpec
 from tdhook.hooks import HookFactory, MutableWeakRef
 from tdhook.latent._targets import activation_target
-from tdhook.modules import BoundModule, IntermediateKeysCleaner, ModuleCallWithCache, FunctionModule
+from tdhook.modules import (
+    BoundModule,
+    _CacheRefSequential,
+    IntermediateKeysCleaner,
+    ModuleCallWithCache,
+    FunctionModule,
+)
 from tdhook.runtime import BoundHookProgram, HookProgramBuilder, HookSpec
 from tdhook.targets import Target
 
@@ -23,12 +29,6 @@ def _replace_selected_output(value: object, replacement: object, target: Target 
     if target is None:
         return replacement
     return target.replace_output(value, replacement)
-
-
-class _ActivationAdditionPipeline(TensorDictSequential):
-    def __init__(self, *modules, cache_ref: MutableWeakRef):
-        super().__init__(*modules)
-        self.cache_ref = cache_ref
 
 
 class SteeringVectors(Method):
@@ -129,7 +129,7 @@ class ActivationAddition(Method):
                     intermediate_keys=["_positive_cache", "_positive_out", "_negative_cache", "_negative_out"]
                 )
             )
-        return _ActivationAdditionPipeline(*modules, cache_ref=cache_ref)
+        return _CacheRefSequential(*modules, cache_ref=cache_ref)
 
     def _install_hooks(self, module: BoundModule) -> BoundHookProgram:
         cache_ref = module.td_module.cache_ref

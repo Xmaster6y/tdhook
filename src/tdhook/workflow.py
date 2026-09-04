@@ -13,6 +13,7 @@ from tensordict.nn import TensorDictModuleBase
 from tensordict.utils import NestedKey
 from torch import Tensor, nn
 
+from tdhook._types import tensor_leaf_items
 from tdhook.methods import BoundMethod
 from tdhook.execution import AutogradLifetime, ExecutionSpec, GradientMode
 
@@ -51,7 +52,6 @@ class _BoundMethodNode:
     execution_spec: ExecutionSpec
     module: TensorDictModuleBase
     binding: BoundMethod
-    program: object | None
     allow_output_overwrite: bool = False
 
 
@@ -67,16 +67,8 @@ class _OperatorNode:
 _ExecutionNode = _BoundMethodNode | _OperatorNode
 
 
-def _artifact_leaf_items(data: TensorDictBase):
-    return (
-        (key, value)
-        for key, value in data.items(include_nested=True, leaves_only=False)
-        if not isinstance(value, TensorDictBase)
-    )
-
-
 def _artifact_leaf_keys(data: TensorDictBase) -> frozenset[NestedKey]:
-    return frozenset(key for key, _ in _artifact_leaf_items(data))
+    return frozenset(key for key, _ in tensor_leaf_items(data))
 
 
 @dataclass(frozen=True)
@@ -97,7 +89,7 @@ class _HandoffArtifact:
         if not (shared or consolidated):
             return None
 
-        for key, value in _artifact_leaf_items(data):
+        for key, value in tensor_leaf_items(data):
             if not isinstance(value, Tensor):
                 raise WorkflowHandoffError(
                     f"Workflow handoff artifact key {key!r} must contain a Tensor, got {type(value).__name__}"
@@ -230,7 +222,6 @@ def _method_spec(method: WorkflowMethod) -> ExecutionSpec:
 
 
 def _bind_method(
-    stack: ExitStack,
     index: int,
     method: WorkflowMethod,
     model: nn.Module,
@@ -240,7 +231,7 @@ def _bind_method(
     binding = method.bind(model)
     if not isinstance(binding, BoundMethod):
         raise TypeError(f"{type(method).__name__}.bind(model) must return a BoundMethod, got {type(binding).__name__}")
-    bound_module = stack.enter_context(binding)
+    bound_module = binding.module
     if not isinstance(bound_module, TensorDictModuleBase):
         raise TypeError(
             f"{type(method).__name__}.bind(model) must bind a TensorDictModuleBase, got {type(bound_module).__name__}"
@@ -260,7 +251,6 @@ def _bind_method(
         execution_spec=_method_spec(method),
         module=bound_module,
         binding=binding,
-        program=binding.program,
         allow_output_overwrite=allow_output_overwrite,
     )
 
@@ -281,10 +271,11 @@ def _key_paths_overlap(left: NestedKey, right: NestedKey) -> bool:
 
 
 def _validate_workflow_method(node: _BoundMethodNode) -> None:
+    program = node.binding.program
     if (
         node.execution_spec.gradient_mode is not GradientMode.REQUIRED
-        and node.program is not None
-        and any(spec.direction in {"bwd", "bwd_pre"} for spec in node.program.hooks)
+        and program is not None
+        and any(spec.direction in {"bwd", "bwd_pre"} for spec in program.hooks)
     ):
         raise ValueError(
             f"Workflow step {node.name!r} installs backward hooks but does not own an autograd-enabled execution"
@@ -413,55 +404,68 @@ class Workflow:
             raise TypeError(f"Workflow model must be a torch.nn.Module, got {type(model).__name__}")
         if not isinstance(data, TensorDictBase):
             raise TypeError(f"Workflow data must be a TensorDict, got {type(data).__name__}")
-        handoff = _HandoffArtifact.inspect(data)
-        current = handoff.working_copy() if handoff is not None else data
-        working = current
-        completed: list[_ExecutionNode] = []
-
-        for index, step in enumerate(self.steps[:-1]):
-            actual = step.step if isinstance(step, WorkflowUpdate) else step
-            if _method_step(actual) and _method_spec(actual).autograd_lifetime is AutogradLifetime.BACKWARD:
-                if any(
-                    _method_step(later.step if isinstance(later, WorkflowUpdate) else later)
-                    for later in self.steps[index + 1 :]
-                ):
-                    raise ValueError(
-                        "A deferred-backward workflow method cannot precede another model-executing method"
-                    )
-
+        nodes: list[_ExecutionNode] = []
         for index, step in enumerate(self.steps):
             overwrite = isinstance(step, WorkflowUpdate)
             actual = step.step if overwrite else step
             name = _step_name(index, actual)
             if isinstance(actual, TensorDictModuleBase):
-                node: _ExecutionNode = _OperatorNode(
-                    name=name,
-                    operator=actual,
-                    in_keys=tuple(actual.in_keys),
-                    out_keys=tuple(actual.out_keys),
-                    allow_output_overwrite=overwrite,
+                nodes.append(
+                    _OperatorNode(
+                        name=name,
+                        operator=actual,
+                        in_keys=tuple(actual.in_keys),
+                        out_keys=tuple(actual.out_keys),
+                        allow_output_overwrite=overwrite,
+                    )
                 )
-                _validate_dependencies((*completed, node), data)
-                _validate_runtime_dependencies((node,), current)
-                if handoff is not None:
-                    handoff.validate_step(node.out_keys, None)
-                current = actual(current)
+            else:
+                nodes.append(_bind_method(index, actual, model, allow_output_overwrite=overwrite))
+
+        _validate_dependencies(nodes, data)
+        for index, node in enumerate(nodes[:-1]):
+            if (
+                isinstance(node, _BoundMethodNode)
+                and node.execution_spec.autograd_lifetime is AutogradLifetime.BACKWARD
+            ):
+                if any(isinstance(later, _BoundMethodNode) for later in nodes[index + 1 :]):
+                    raise ValueError(
+                        "A deferred-backward workflow method cannot precede another model-executing method"
+                    )
+
+        handoff = _HandoffArtifact.inspect(data)
+        if handoff is not None:
+            for node in nodes:
+                spec = node.execution_spec if isinstance(node, _BoundMethodNode) else None
+                handoff.validate_step(node.out_keys, spec)
+        current = handoff.working_copy() if handoff is not None else data
+        working = current
+
+        for node in nodes:
+            _validate_runtime_dependencies((node,), current)
+            if isinstance(node, _OperatorNode):
+                current = node.operator(current)
                 if not isinstance(current, TensorDictBase):
                     raise TypeError(
-                        f"Workflow operator {name!r} must return a TensorDict, got {type(current).__name__}"
+                        f"Workflow operator {node.name!r} must return a TensorDict, got {type(current).__name__}"
                     )
                 if handoff is not None:
-                    handoff.commit(current, working, name, node.out_keys)
-                completed.append(node)
+                    handoff.commit(current, working, node.name, node.out_keys)
                 continue
 
             with ExitStack() as stack:
-                node = _bind_method(stack, index, actual, model, allow_output_overwrite=overwrite)
+                bound_module = stack.enter_context(node.binding)
+                if not isinstance(bound_module, TensorDictModuleBase):
+                    raise TypeError(
+                        f"Workflow method {node.name!r} must enter a TensorDictModuleBase, "
+                        f"got {type(bound_module).__name__}"
+                    )
+                if bound_module is not node.module:
+                    raise TypeError(
+                        f"Workflow method {node.name!r} entered an invalid bound module, "
+                        f"got {type(bound_module).__name__}"
+                    )
                 _validate_workflow_method(node)
-                _validate_dependencies((*completed, node), data)
-                _validate_runtime_dependencies((node,), current)
-                if handoff is not None:
-                    handoff.validate_step(node.out_keys, node.execution_spec)
                 result = node.module(current)
                 if result is not None:
                     current = result
@@ -474,8 +478,7 @@ class Workflow:
                     node.binding.on_hook_failure(cleanup.close)
                     cleanup.arm(current, node.model_out_keys)
             if handoff is not None:
-                handoff.commit(current, working, name, node.out_keys)
-            completed.append(node)
+                handoff.commit(current, working, node.name, node.out_keys)
         if handoff is not None:
             current = handoff.result()
         return current

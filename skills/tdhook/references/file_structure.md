@@ -14,6 +14,7 @@ src/tdhook/
 ├── __init__.py           # Public API
 ├── _optional_deps.py     # Lazy imports (sklearn, captum, etc.)
 ├── _types.py             # Nested-key validation and composition helpers
+├── artifacts.py          # Distributed TensorDict artifact transport
 ├── concepts.py           # Concept definitions and utilities
 ├── methods.py            # Method and BoundMethod lifecycle
 ├── dimension.py          # Dimension-estimation workflow helpers

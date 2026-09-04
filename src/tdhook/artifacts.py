@@ -10,17 +10,11 @@ from tensordict import TensorDictBase
 from tensordict.utils import NestedKey
 from torch import Tensor
 
+from tdhook._types import tensor_leaf_items
+
 
 class WorkflowArtifactError(RuntimeError):
     """A TensorDict does not satisfy a distributed workflow artifact contract."""
-
-
-def _leaf_items(data: TensorDictBase):
-    return (
-        (key, value)
-        for key, value in data.items(include_nested=True, leaves_only=False)
-        if not isinstance(value, TensorDictBase)
-    )
 
 
 @dataclass(frozen=True)
@@ -46,7 +40,7 @@ class WorkflowArtifactSchema:
         if not isinstance(data, TensorDictBase):
             raise TypeError(f"Workflow artifact must be a TensorDict, got {type(data).__name__}")
         tensors = []
-        for key, value in _leaf_items(data):
+        for key, value in tensor_leaf_items(data):
             if not isinstance(value, Tensor):
                 raise WorkflowArtifactError(
                     f"Workflow artifact key {key!r} must contain a Tensor, got {type(value).__name__}"
@@ -68,7 +62,7 @@ class WorkflowArtifactSchema:
         if data.device != self.device:
             raise WorkflowArtifactError(f"Workflow artifact device is {data.device}, expected {self.device}")
 
-        items = tuple(_leaf_items(data))
+        items = tuple(tensor_leaf_items(data))
         keys = tuple(key for key, _ in items)
         if keys != self.keys:
             raise WorkflowArtifactError(f"Workflow artifact keys are {keys!r}, expected {self.keys!r}")
