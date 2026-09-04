@@ -367,14 +367,14 @@ def plot_figure4_reproduction(results: dict[str, Any]) -> plt.Figure:
             linestyle="--",
             label="paper: deep layers",
         )
-        axes[0].set(title="The board becomes linearly readable", xlabel="Layer", ylabel="Probe accuracy (%)")
+        axes[0].set(title="Board decoding", xlabel="Layer", ylabel="Probe accuracy (%)")
         axes[0].set_xticks(layers)
         axes[0].legend(frameon=False)
 
         gain = np.asarray(summaries["intervention_gain"]["mean"], dtype=float)
         image = axes[1].imshow(gain, aspect="auto", origin="lower", cmap="magma")
         axes[1].set(
-            title="Editing the board state changes move logits",
+            title="Intervention effect",
             xlabel="Moves played",
             ylabel="Layer",
         )
@@ -397,7 +397,7 @@ def plot_figure4_reproduction(results: dict[str, Any]) -> plt.Figure:
         )
         axes[2].bar_label(bars, fmt="%.3f", padding=4)
         axes[2].axvline(0, color="#334155", linewidth=0.8)
-        axes[2].set(title="Only the meaningful edit has a large effect", xlabel="Early-game gain, layers 3-5")
+        axes[2].set(title="Controls", xlabel="Early-game gain, layers 3-5")
         axes[2].invert_yaxis()
 
         for axis in axes:
