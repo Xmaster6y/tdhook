@@ -4,6 +4,7 @@ import importlib.util
 from pathlib import Path
 
 import torch
+from torch import nn
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIGURE4_HELPER = REPO_ROOT / "docs/source/notebooks/tutorials/othello_figure4.py"
@@ -36,3 +37,26 @@ def test_othello_inverse_map_returns_the_post_update_converged_value():
     assert steps == 1
     assert torch.equal(returned_logits.argmax(-1), desired_board)
     torch.testing.assert_close(torch.tensor(final_loss), returned_loss)
+
+
+def test_othello_capture_and_replacement_use_workflow_artifacts():
+    helper = _load_figure4_helper()
+
+    class TinyOthello(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.blocks = nn.ModuleList([nn.Identity()])
+
+        def forward(self, inputs):
+            return self.blocks[0](inputs), None
+
+    model = TinyOthello()
+    inputs = torch.randn(2, 3, 512)
+    captured, logits = helper._capture(model, inputs, layer=0)
+    replacement = torch.zeros_like(captured)
+    replaced = helper._replace(model, inputs, layer=0, replacement=replacement)
+
+    torch.testing.assert_close(captured, inputs)
+    torch.testing.assert_close(logits, inputs)
+    torch.testing.assert_close(replaced, replacement)
+    assert not model.blocks[0]._forward_hooks

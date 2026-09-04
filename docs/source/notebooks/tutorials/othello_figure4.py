@@ -16,10 +16,13 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+from tensordict import TensorDict
+from tensordict.nn import TensorDictModule
 from torch.nn import functional as F
 
-from tdhook.session import HookSession
+from tdhook.latent import ActivationCaching, SteeringVectors
 from tdhook.targets import Target
+from tdhook.workflow import Workflow
 
 HAZINEH_REVISION = "e52217b4b756d22579b28f24c7b1b2355c8f8914"
 HAZINEH_BASE = (
@@ -78,16 +81,21 @@ def _target(layer: int) -> Target:
 
 
 def _capture(model: torch.nn.Module, inputs: torch.Tensor, layer: int) -> tuple[torch.Tensor, torch.Tensor]:
-    with torch.inference_mode(), HookSession(model) as session:
-        captured = session.capture(_target(layer))
-        logits = model(inputs)[0]
-    return captured.values[-1], logits
+    target = _target(layer)
+    cache_key = ("activations", "selected")
+    artifacts = TensorDict({"input": inputs}, batch_size=[])
+    model_module = TensorDictModule(model, in_keys=["input"], out_keys=["output", "aux"])
+    with torch.inference_mode():
+        result = Workflow(ActivationCaching(target, cache_key=cache_key))(model_module, artifacts)
+    return result[(*cache_key, target.module_path)], result["output"]
 
 
 def _replace(model: torch.nn.Module, inputs: torch.Tensor, layer: int, replacement: torch.Tensor) -> torch.Tensor:
-    with torch.inference_mode(), HookSession(model) as session:
-        session.replace(_target(layer), replacement)
-        return model(inputs)[0]
+    method = SteeringVectors([_target(layer)], lambda **_kwargs: replacement)
+    model_module = TensorDictModule(model, in_keys=["input"], out_keys=["output", "aux"])
+    with torch.inference_mode():
+        result = Workflow(method)(model_module, TensorDict({"input": inputs}, batch_size=[]))
+    return result["output"]
 
 
 def _probe_logits(value: torch.Tensor, probe: tuple[torch.Tensor, torch.Tensor]) -> torch.Tensor:
@@ -233,14 +241,16 @@ def _probe_and_behavior_metrics(
     parity = torch.tensor([(-1) ** position for position in range(59)], device=device).view(1, 59, 1, 1)
     labels = (states_tensor * parity + 1).long().reshape(100, 59, 64)
 
-    captures = []
-    with torch.inference_mode(), HookSession(model) as session:
-        for layer in range(8):
-            captures.append(session.capture(_target(layer)))
-        logits = model(inputs)[0]
+    cache_key = ("activations", "layers")
+    model_module = TensorDictModule(model, in_keys=["input"], out_keys=["output", "aux"])
+    with torch.inference_mode():
+        result = Workflow(
+            ActivationCaching(r"blocks\.[0-7]$", cache_key=cache_key),
+        )(model_module, TensorDict({"input": inputs}, batch_size=[]))
+    logits = result["output"]
     layer_accuracy = []
-    for captured, probe in zip(captures, probes, strict=True):
-        predictions = _probe_logits(captured.values[-1], probe).argmax(-1)
+    for layer, probe in enumerate(probes):
+        predictions = _probe_logits(result[(*cache_key, f"blocks.{layer}")], probe).argmax(-1)
         layer_accuracy.append(float((predictions[:, 5:54] == labels[:, 5:54]).float().mean().cpu()))
 
     playable = [square for square in range(64) if square not in (27, 28, 35, 36)]
