@@ -412,14 +412,19 @@ def run_figure4_reproduction(
 
 def plot_figure4_reproduction(results: dict[str, Any]) -> plt.Figure:
     """Plot the main behavioral and intervention results."""
+    from matplotlib.colors import TwoSlopeNorm
+
+    from demo_figures import STYLE
+
     summaries = results["summaries"]
     behavior = results["behavior_and_probe"]
     layers = results["layers"]
     game_lengths = results["game_lengths"]
     colors = {"blue": "#2563eb", "orange": "#f97316", "green": "#0f766e", "gray": "#94a3b8"}
 
-    with plt.style.context("seaborn-v0_8-whitegrid"):
-        figure, axes = plt.subplots(1, 3, figsize=(15, 4.3), constrained_layout=True)
+    with plt.rc_context(STYLE):
+        figure, axes = plt.subplots(1, 3, figsize=(17, 5.5), constrained_layout=True)
+        figure.suptitle("Othello interventions · 50 games, eight layers", fontsize=21)
 
         accuracy = 100 * np.asarray(behavior["layer_probe_accuracy"])
         axes[0].plot(layers, accuracy, marker="o", linewidth=2.5, color=colors["blue"])
@@ -434,13 +439,15 @@ def plot_figure4_reproduction(results: dict[str, Any]) -> plt.Figure:
         axes[0].legend(frameon=False)
 
         gain = np.asarray(summaries["intervention_gain"]["mean"], dtype=float)
-        image = axes[1].imshow(gain, aspect="auto", origin="lower", cmap="magma")
+        limit = max(float(np.nanmax(np.abs(gain))), 1e-6)
+        norm = TwoSlopeNorm(vmin=-limit, vcenter=0, vmax=limit)
+        image = axes[1].imshow(gain, aspect="auto", origin="lower", cmap="RdBu_r", norm=norm)
         axes[1].set(
             title="Intervention effect",
             xlabel="Moves played",
             ylabel="Layer",
         )
-        axes[1].set_xticks(range(len(game_lengths)), game_lengths)
+        axes[1].set_xticks(range(0, len(game_lengths), 2), game_lengths[::2])
         axes[1].set_yticks(range(len(layers)), layers)
         figure.colorbar(image, ax=axes[1], label="Cosine-similarity gain", shrink=0.82)
 
@@ -461,6 +468,7 @@ def plot_figure4_reproduction(results: dict[str, Any]) -> plt.Figure:
         axes[2].axvline(0, color="#334155", linewidth=0.8)
         axes[2].set(title="Controls", xlabel="Early-game gain, layers 3-5")
         axes[2].invert_yaxis()
+        axes[2].margins(x=0.3)
 
         for axis in axes:
             axis.spines[["top", "right"]].set_visible(False)

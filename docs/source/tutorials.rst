@@ -111,10 +111,17 @@ Complete workflows
 Composition in the demonstration notebooks
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The concept-attribution and chess-dimension notebooks correspond to the two
-use cases in the accepted ECML demonstration paper. Start with these when
-presenting composition: they combine existing methods through named artifacts,
-not new attribution or dimension estimators.
+The ECML presentation focuses on Othello, Circuit Insights (WeightLens and
+CircuitLens), and ROME. Together they illustrate representation analysis,
+activation intervention, circuit analysis, and weight editing through named
+artifacts. The concept-attribution and chess-dimension notebooks retain the
+original paper's two use cases as additional examples.
+
+The three presentation notebooks include dependency schematics and export each
+result figure to ``demo-figures/`` in the working directory: SVG for adaptation
+and 300-dpi PNG for slides. The plots retain explicit evaluation populations
+and controls; diagram arrows summarize analysis dependencies rather than claim
+to be executable runtime plans.
 
 Each workflow declares the keys that its steps consume and produce. A step
 receives the result of its producer through the TensorDict; plotting and
@@ -211,7 +218,7 @@ scientific conclusions require the reported metrics and comparison criteria.
       Reproduce published behavior and linear-probe results, then validate
       intervention parity.
 
-   .. grid-item-card:: WeightLens and CircuitLens Reproduction
+   .. grid-item-card:: Circuit Insights: WeightLens and CircuitLens
       :link: notebooks/tutorials/weight-circuit-research-reproduction
       :link-type: doc
       :class-card: surface
