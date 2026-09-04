@@ -15,6 +15,17 @@ DEMO_DOCUMENTS = (
     ("tutorials.rst", "notebooks/methods/representation-similarity.ipynb"),
 )
 DEMO_NOTEBOOKS = tuple(REPO_ROOT / "docs/source" / path for _, path in DEMO_DOCUMENTS)
+ALL_NOTEBOOKS = tuple((REPO_ROOT / "docs/source/notebooks").rglob("*.ipynb"))
+
+
+@pytest.mark.parametrize("path", ALL_NOTEBOOKS, ids=lambda path: path.stem)
+def test_documented_notebook_is_executed(path: Path):
+    notebook = nbformat.read(path, as_version=4)
+    code_cells = [cell for cell in notebook.cells if cell.cell_type == "code"]
+
+    assert all(cell.source.strip() for cell in code_cells)
+    assert all(cell.execution_count is not None for cell in code_cells)
+    assert all(output.output_type != "error" for cell in code_cells for output in cell.outputs)
 
 
 def test_demo_notebooks_are_linked_from_the_top_level_docs():

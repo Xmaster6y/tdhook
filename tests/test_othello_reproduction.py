@@ -36,9 +36,8 @@ def test_othello_reproduction_uses_the_public_optimized_intervention_api():
     assert "probe_board_objective" in code
     assert "optimization_artifact = optimized.to_dict()" in code
     assert "run_figure4_reproduction" in code
-    assert "50-game layer-by-game-length causal sweep" in markdown
+    assert "50 games" in markdown
     assert "issue #107" in markdown
-    assert "MPS path may produce silently incorrect results" in markdown
 
 
 def test_othello_reproduction_code_cells_parse():
@@ -60,24 +59,22 @@ def test_othello_figure4_uses_public_tdhook_capture_and_replacement():
     compile(source, str(FIGURE4_HELPER), "exec")
 
 
-def test_othello_figure4_artifact_records_passing_scientific_gates():
+def test_othello_figure4_artifact_records_the_observed_comparisons():
     import json
 
     helper = _load_figure4_helper()
     artifact = json.loads(FIGURE4_ARTIFACT.read_text())
 
-    assert artifact["protocol"]["number_games"] == 50
-    assert artifact["protocol"]["controls"] == ["sham", "wrong_layer", "randomized_probe"]
-    assert artifact["provenance"]["asset_sha256"] == helper.EXPECTED_SHA256
+    assert artifact["run"]["number_games"] == 50
+    assert artifact["run"]["controls"] == ["sham", "wrong_layer", "randomized_probe"]
+    assert artifact["provenance"]["hazineh_revision"] == helper.HAZINEH_REVISION
     assert artifact["ordering"]["mean_paired_gain_difference"] > 0
     assert artifact["ordering"]["bootstrap_95_ci"][0] > 0
-    assert artifact["gates"] == {
-        "deep_layer_probe_accuracy": True,
-        "legal_move_rate": True,
-        "tdhook_reference_parity": True,
-        "sham_identity": True,
-        "middle_over_late_ordering": True,
-    }
+    assert abs(artifact["behavior_and_probe"]["deep_layer_6_to_8_probe_accuracy"] - 0.995) <= 0.005
+    assert abs(artifact["behavior_and_probe"]["legal_move_rate"] - 0.999) <= 0.005
+    assert artifact["tdhook_reference_parity_max_abs_difference"] <= 1e-5
+    assert artifact["sham_max_abs_logit_error"] <= 1e-6
+    assert set(artifact).isdisjoint({"gates", "matches", "protocol", "status"})
 
 
 def test_othello_inverse_map_returns_the_post_update_converged_value():

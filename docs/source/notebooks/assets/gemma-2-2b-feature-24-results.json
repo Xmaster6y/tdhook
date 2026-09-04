@@ -1,0 +1,113 @@
+{
+  "circuit_tracer": "0.5.0",
+  "circuitlens": {
+    "examples": 12,
+    "matching_examples": 12,
+    "numerical_differences": {
+      "max_attention_score_abs_delta": 0.0043784379959106445,
+      "max_target_activation_abs_delta": 0.0625
+    }
+  },
+  "cluster_report": {
+    "examples": 12,
+    "labels": [
+      0,
+      0,
+      1,
+      1,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+    ],
+    "nonempty_signatures": 8,
+    "reference_full_sample_labels_for_same_inputs": [
+      -1,
+      -1,
+      0,
+      0,
+      -1,
+      -1,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  "device": "cuda",
+  "device_name": "NVIDIA A100 80GB PCIe MIG 3g.40gb",
+  "dtype": "torch.bfloat16",
+  "feature": {
+    "index": 24,
+    "layer": 0
+  },
+  "model": "google/gemma-2-2b",
+  "numerical_discrepancies": {
+    "max_attention_score_abs_delta": 0.0043784379959106445,
+    "max_target_activation_abs_delta": 0.0625
+  },
+  "reference": {
+    "circuit_dataset": "egolimblevskaia/circuitlens-gemma-2-2b-transcoder-circuit-analysis",
+    "circuit_dataset_revision": "fcd78fd98c3de6cc869d7df9e7d0f4a864ffea50",
+    "circuit_file": "analysis_layer_0.jsonl",
+    "circuitlens_revision": "d24b7e3a71ea1fbce0800056eb7333d1a282303d",
+    "model": "google/gemma-2-2b",
+    "model_revision": "c5ebcd40d208330abc697524c919956e692655cf",
+    "transcoder_revision": "bd5773156dea09893636c801df1237d0410307d2",
+    "transcoder_set": "mwhanna/gemma-scope-transcoders",
+    "weight_dataset": "egolimblevskaia/weightlens-gemma-2-2b-transcoder-descriptions",
+    "weight_dataset_revision": "aa51f4ee40784ac7af168932e2505fe3e4bab833",
+    "weight_file": "feature_analysis_layer_0.json",
+    "weightlens_revision": "93f820024034bb9b1829f7f09c1483ec3bc71f49"
+  },
+  "sample_count": 12,
+  "scikit_learn": "1.7.1",
+  "scope": [
+    "12 of 100 published examples for one feature",
+    "layer 0 has no upstream transcoder-feature contributors",
+    "no 24M-token activation collection",
+    "no paper-wide table, description, evaluation, or causal-effect reproduction"
+  ],
+  "seed": 127,
+  "tdhook": "0.2.1",
+  "tdhook_revision": "2c1552dc36ce044ea68e48cfd05d0021f1d34af0",
+  "torch": "2.7.1+cu126",
+  "transcoder_set": "mwhanna/gemma-scope-transcoders",
+  "transformer_lens": "3.2.1",
+  "weightlens": {
+    "observed": {
+      "embedding_negative": [
+        115269,
+        143572
+      ],
+      "embedding_positive": [
+        19538,
+        4818
+      ],
+      "output_positive_labels": [
+        "tvguidetime",
+        " HasFactory"
+      ]
+    },
+    "published": {
+      "embedding_negative": [
+        115269,
+        143572
+      ],
+      "embedding_positive": [
+        19538,
+        4818
+      ],
+      "output_positive_labels": [
+        "tvguidetime",
+        " HasFactory"
+      ]
+    }
+  }
+}

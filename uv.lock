@@ -1817,6 +1817,22 @@ wheels = [
 ]
 
 [[package]]
+name = "nltk"
+version = "3.10.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "click" },
+    { name = "defusedxml" },
+    { name = "joblib" },
+    { name = "regex" },
+    { name = "tqdm" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e0/e6/fe51d2bb1a3b446f59c5c8165999a9fee208bc346af90a7cbf7657bc0d75/nltk-3.10.3.tar.gz", hash = "sha256:bb9327a461c3811c2fa4900e03840401f2126adfb30c0072827c433bd2444ea4", size = 5137152, upload-time = "2026-08-12T23:46:37.258Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b6/6d/ebd2af4640b12168fdf0cb74b6118df2f32a2f62ec7e0c06fbfd80706639/nltk-3.10.3-py3-none-any.whl", hash = "sha256:ff9598a8e20518ee0d557745890cc4435b9578489e2dcbc69c4f81fa060caf7c", size = 1798643, upload-time = "2026-08-12T23:44:13.478Z" },
+]
+
+[[package]]
 name = "nnsight"
 version = "0.7.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3688,6 +3704,7 @@ notebooks = [
     { name = "ipywidgets" },
     { name = "nbclient" },
     { name = "nbformat" },
+    { name = "nltk" },
 ]
 scripts = [
     { name = "captum" },
@@ -3749,6 +3766,7 @@ notebooks = [
     { name = "ipywidgets", specifier = ">=8.0.0" },
     { name = "nbclient", specifier = ">=0.10.2" },
     { name = "nbformat", specifier = ">=5.10.4" },
+    { name = "nltk", specifier = ">=3.9.1" },
 ]
 scripts = [
     { name = "captum", specifier = ">=0.8.0" },

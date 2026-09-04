@@ -1,0 +1,89 @@
+{
+  "counterfact": {
+    "metrics": {
+      "neighborhood_specificity": 0.6900000000000001,
+      "paraphrase_generalization": 0.9,
+      "rewrite_efficacy": 1.0
+    },
+    "number_cases": 10
+  },
+  "device_name": "NVIDIA A100 80GB PCIe",
+  "model": "gpt2-xl",
+  "model_revision": "15ea56dee5df4983c59b2538573817e1667135e2",
+  "paper_table_4": {
+    "neighborhood_specificity": 0.754,
+    "paraphrase_generalization": 0.964,
+    "rewrite_efficacy": 1.0
+  },
+  "rome_revision": "0874014cd9837e4365f3e6f3c71400ef11509e04",
+  "temporary_edits_restored": true,
+  "trace": {
+    "allclose": true,
+    "case_ids": [
+      0,
+      1,
+      2
+    ],
+    "cases": [
+      {
+        "case_id": 0,
+        "clean_probability": 0.09484539926052094,
+        "mlp": {
+          "atol": 1e-05,
+          "matches": true,
+          "max_abs_difference": 1.4901161193847656e-08,
+          "rtol": 1e-05
+        },
+        "model_answer": "Antarctica",
+        "prompt": "Vinson Massif is located in the continent of",
+        "published_answer": "Antarctica",
+        "residual": {
+          "atol": 1e-05,
+          "matches": true,
+          "max_abs_difference": 1.1175870895385742e-08,
+          "rtol": 1e-05
+        }
+      },
+      {
+        "case_id": 1,
+        "clean_probability": 0.6837078332901001,
+        "mlp": {
+          "atol": 1e-05,
+          "matches": true,
+          "max_abs_difference": 2.9802322387695312e-08,
+          "rtol": 1e-05
+        },
+        "model_answer": "Apple",
+        "prompt": "Beats Music is owned by",
+        "published_answer": "Apple",
+        "residual": {
+          "atol": 1e-05,
+          "matches": true,
+          "max_abs_difference": 1.1920928955078125e-07,
+          "rtol": 1e-05
+        }
+      },
+      {
+        "case_id": 2,
+        "clean_probability": 0.2555024325847626,
+        "mlp": {
+          "atol": 1e-05,
+          "matches": true,
+          "max_abs_difference": 3.725290298461914e-09,
+          "rtol": 1e-05
+        },
+        "model_answer": "Amazon",
+        "prompt": "Audible.com is owned by",
+        "published_answer": "Amazon",
+        "residual": {
+          "atol": 1e-05,
+          "matches": true,
+          "max_abs_difference": 2.9802322387695312e-08,
+          "rtol": 1e-05
+        }
+      }
+    ],
+    "max_mlp_difference": 2.9802322387695312e-08,
+    "max_residual_difference": 1.1920928955078125e-07
+  }
+}
