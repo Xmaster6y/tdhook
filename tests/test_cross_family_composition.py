@@ -4,7 +4,7 @@ from torch import nn
 from tensordict import TensorDict
 from tensordict.nn import TensorDictModule
 
-from tdhook.methods import Method
+from tdhook.contexts import HookingContextFactory
 from tdhook.latent import ActivationCaching, Probing
 from tdhook.weights import Adapters
 from tdhook.workflow import Workflow
@@ -66,7 +66,7 @@ def test_workflow_supports_nested_multiple_input_output_keys():
     in_keys = [("inputs", "left"), ("inputs", "right")]
     out_keys = [("outputs", "sum"), ("outputs", "difference")]
     model = TensorDictModule(Pair(), in_keys=in_keys, out_keys=out_keys)
-    workflow = Workflow(Method())
+    workflow = Workflow(HookingContextFactory())
     left = torch.arange(6, dtype=torch.float32).reshape(2, 3)
     right = torch.full((2, 3), 2.0)
     data = TensorDict({"inputs": {"left": left, "right": right}}, batch_size=[2])

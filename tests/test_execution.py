@@ -1,13 +1,13 @@
 import pytest
 
 from tdhook.attribution import ActivationMaximisation, IntegratedGradients, Saliency
-from tdhook.methods import Method
+from tdhook.contexts import HookingContextFactory
 from tdhook.execution import AutogradLifetime, ExecutionSpec, GradientMode
 from tdhook.latent import ActivationAddition, ActivationPatching
 
 
 def test_base_method_declares_one_optional_gradient_model_pass():
-    assert Method().execution_spec == ExecutionSpec()
+    assert HookingContextFactory().execution_spec == ExecutionSpec()
 
 
 def test_gradient_methods_own_their_execution_requirements():

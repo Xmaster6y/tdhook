@@ -4,7 +4,7 @@ from torch import nn
 from tensordict import TensorDict
 from tensordict.utils import NestedKey
 
-from tdhook.modules import BoundModule
+from tdhook.modules import HookedModule
 from tdhook.hooks import MultiHookManager, HookFactory, DIRECTION_TO_RETURN
 from tdhook.attribution.gradient_helpers import GradientAttribution
 from tdhook.runtime import BoundHookProgram, HookProgramBuilder, HookSpec
@@ -51,7 +51,7 @@ class GuidedBackpropagation(GradientAttribution):
         self._hook_manager = MultiHookManager(pattern=r".+", classes_to_skip=classes_to_skip)
         self._multiply_by_inputs = multiply_by_inputs
 
-    def _install_hooks(self, module: BoundModule) -> BoundHookProgram:
+    def _hook_module(self, module: HookedModule) -> BoundHookProgram:
         def hook_factory(name: str) -> Callable:
             def callback(**kwargs):
                 return tuple(

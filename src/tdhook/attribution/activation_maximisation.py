@@ -5,12 +5,12 @@ from tensordict.nn import TensorDictModule, TensorDictModuleBase, TensorDictSequ
 from tensordict.utils import NestedKey
 
 from tdhook.attribution.saliency import Saliency
-from tdhook.methods import Method
+from tdhook.contexts import HookingContextFactory
 from tdhook.execution import ExecutionSpec, GradientMode
 from tdhook.modules import IntermediateKeysCleaner, PGDModule
 
 
-class ActivationMaximisation(Method):
+class ActivationMaximisation(HookingContextFactory):
     """
     Activation maximisation :cite:`Mahendran2015VisualizingDC`.
     """
@@ -29,7 +29,7 @@ class ActivationMaximisation(Method):
         clean_intermediate_keys: bool = True,
     ):
         super().__init__()
-        self._binding_kwargs["pre_methods"] = [
+        self._hooking_context_kwargs["pre_factories"] = [
             Saliency(
                 use_inputs=True,
                 use_outputs=False,
@@ -59,7 +59,7 @@ class ActivationMaximisation(Method):
 
         return ExecutionSpec(model_passes=self._n_steps, gradient_mode=GradientMode.REQUIRED)
 
-    def _bind_module(
+    def _prepare_module(
         self,
         module: TensorDictModuleBase,
         in_keys: List[NestedKey],

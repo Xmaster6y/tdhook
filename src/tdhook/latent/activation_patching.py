@@ -3,11 +3,11 @@ from typing import Callable, Optional, List
 from tensordict.nn import TensorDictModuleBase
 from tensordict.utils import NestedKey
 
-from tdhook.methods import Method
+from tdhook.contexts import HookingContextFactory
 from tdhook.execution import ExecutionSpec
 from tdhook.hooks import HookFactory, register_hook_to_module
 from tdhook.latent._targets import activation_target
-from tdhook.modules import BoundModule, _CacheRefSequential, ModuleCallWithCache, IntermediateKeysCleaner, ModuleCall
+from tdhook.modules import HookedModule, _CacheRefSequential, ModuleCallWithCache, IntermediateKeysCleaner, ModuleCall
 from tdhook.runtime import BoundHookProgram, CaptureSource, HookProgramBuilder, HookSpec
 from tdhook.targets import Target
 
@@ -24,7 +24,7 @@ def _replace_selected_output(value: object, replacement: object, target: Target 
     return target.replace_output(value, replacement)
 
 
-class ActivationPatching(Method):
+class ActivationPatching(HookingContextFactory):
     """
     Causal mediation analysis :cite:`Vig2020InvestigatingGB` and latent editing :cite:`belrose2023leace,Dreyer2023FromHT`.
     """
@@ -50,7 +50,7 @@ class ActivationPatching(Method):
     def execution_spec(self) -> ExecutionSpec:
         return ExecutionSpec(model_passes=2)
 
-    def _bind_module(
+    def _prepare_module(
         self,
         module: TensorDictModuleBase,
         in_keys: List[NestedKey],
@@ -77,7 +77,7 @@ class ActivationPatching(Method):
             modules.append(IntermediateKeysCleaner(intermediate_keys=["_cache"]))
         return _CacheRefSequential(*modules, cache_ref=clean_call.cache_ref)
 
-    def _install_hooks(self, module: BoundModule) -> BoundHookProgram:
+    def _hook_module(self, module: HookedModule) -> BoundHookProgram:
         cache_ref = module.td_module.cache_ref
         captured_outputs = []
         with HookProgramBuilder() as program:

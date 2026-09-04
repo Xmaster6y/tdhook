@@ -6,43 +6,43 @@ from tensordict.nn import TensorDictModuleBase, TensorDictModule
 from tensordict import TensorDict
 from tensordict.utils import NestedKey
 
-from tdhook.modules import BoundModule
+from tdhook.modules import HookedModule
 from tdhook.hooks import MultiHookHandle
 from tdhook._types import is_nested_key
 from tdhook.execution import ExecutionSpec
 from tdhook.runtime import BoundHookProgram, HookProgram, TargetOccurrenceEvidence
 
 
-class BoundMethod:
-    """One model-specific method binding with deterministic cleanup."""
+class HookingContext:
+    """One model-specific method context with deterministic cleanup."""
 
     def __init__(
         self,
-        method: "Method",
+        factory: "HookingContextFactory",
         module: nn.Module,
         in_keys: Optional[List[NestedKey] | Dict[NestedKey, str]] = None,
         out_keys: Optional[List[NestedKey]] = None,
-        pre_methods: Optional[List["Method"]] = None,
+        pre_factories: Optional[List["HookingContextFactory"]] = None,
         *,
         hook_root: Optional[TensorDictModuleBase] = None,
         relative_path: Optional[str] = None,
     ):
-        self._prepare = method._bind_module
-        self._restore = method._restore_module
-        self._spawn = method._spawn_bound_module
-        self._hook = method._install_hooks
+        self._prepare = factory._prepare_module
+        self._restore = factory._restore_module
+        self._spawn = factory._spawn_hooked_module
+        self._hook = factory._hook_module
         self._in_context = False
         self._handle = None
         self._install_started = False
         self._program = None
         self._occurrence_evidence: tuple[TargetOccurrenceEvidence, ...] = ()
-        self._bound_module: BoundModule | None = None
-        self._pre_bindings: list[BoundMethod] = []
+        self._hooked_module: HookedModule | None = None
+        self._pre_contexts: list[HookingContext] = []
         self._stack = None
 
         if hook_root is not None:
             if not isinstance(module, TensorDictModuleBase) or relative_path is None:
-                raise TypeError("Internal method bindings require a TensorDict module and relative path")
+                raise TypeError("Internal method contexts require a TensorDict module and relative path")
             self._module = module
             self._hook_root = hook_root
             self._extra_relative_path = relative_path
@@ -58,15 +58,15 @@ class BoundMethod:
         self._in_keys = self._module.in_keys
         self._out_keys = self._module.out_keys
         working_module = self._module
-        for pre_method in pre_methods or ():
-            child = pre_method._bind(
+        for pre_factory in pre_factories or ():
+            child = pre_factory._prepare(
                 working_module,
                 self._in_keys,
                 self._out_keys,
                 hook_root=self._hook_root,
                 relative_path=self._extra_relative_path,
             )
-            self._pre_bindings.append(child)
+            self._pre_contexts.append(child)
             working_module = child.module
         self._working_module = working_module
         method_module = self._prepare(
@@ -79,27 +79,27 @@ class BoundMethod:
 
     def __enter__(self):
         if self._in_context:
-            raise RuntimeError("Cannot enter a method binding twice")
+            raise RuntimeError("Cannot enter a method context twice")
         self._in_context = True
         self._program = None
         self._occurrence_evidence = ()
 
         try:
             with ExitStack() as stack:
-                for child in self._pre_bindings:
+                for child in self._pre_contexts:
                     stack.enter_context(child)
                 self._stack = stack.pop_all()
-            self._bound_module = self._declared_module
+            self._hooked_module = self._declared_module
             self._install_started = True
-            self._handle = self._hook(self._bound_module)
+            self._handle = self._hook(self._hooked_module)
             self._program = getattr(self._handle, "program", None)
-            return self._bound_module
+            return self._hooked_module
         except BaseException:
             self._abort_enter()
             raise
 
     def _abort_enter(self) -> None:
-        """Undo a partial binding without allowing one cleanup failure to skip another."""
+        """Undo a partial context without allowing one cleanup failure to skip another."""
         try:
             if self._handle is not None:
                 self._handle.remove()
@@ -113,26 +113,26 @@ class BoundMethod:
                         self._stack.__exit__(None, None, None)
                 finally:
                     self._in_context = False
-                    self._bound_module = None
+                    self._hooked_module = None
                     self._handle = None
                     self._install_started = False
                     self._stack = None
 
     @property
     def program(self) -> HookProgram | None:
-        """Return the model-free hook program installed by this binding."""
+        """Return the model-free hook program installed by this context."""
 
         return self._program
 
     @property
-    def module(self) -> BoundModule:
-        """Return the bound module contract without entering the binding."""
+    def module(self) -> HookedModule:
+        """Return the hooked module contract without entering the context."""
 
         return self._declared_module
 
     @property
     def occurrence_evidence(self) -> tuple[TargetOccurrenceEvidence, ...]:
-        """Return validated target-occurrence evidence from this binding."""
+        """Return validated target-occurrence evidence from this context."""
 
         if isinstance(self._handle, BoundHookProgram):
             return self._occurrence_evidence + self._renumber_occurrence_evidence(self._handle.occurrence_evidence)
@@ -165,28 +165,28 @@ class BoundMethod:
         """Register cleanup to run if a bound hook raises during execution."""
 
         if self._handle is None:
-            raise RuntimeError("Hook failure cleanup is only available inside an active binding")
+            raise RuntimeError("Hook failure cleanup is only available inside an active context")
         if not isinstance(self._handle, BoundHookProgram):
             raise TypeError("Hook failure cleanup requires a BoundHookProgram")
         self._handle.on_hook_failure(callback)
 
     @property
     def executes_model_directly(self) -> bool:
-        """Whether the bound wrapper executes the caller's TensorDict module unchanged."""
+        """Whether the hooked wrapper executes the caller's TensorDict module unchanged."""
 
-        if not self._in_context or self._bound_module is None:
-            raise RuntimeError("Direct-execution state is only available inside an active binding")
-        return self._bound_module.td_module is self._module
+        if not self._in_context or self._hooked_module is None:
+            raise RuntimeError("Direct-execution state is only available inside an active context")
+        return self._hooked_module.td_module is self._module
 
     @property
     def model_in_keys(self) -> tuple[NestedKey, ...]:
-        """Return the caller-owned model signature used by this binding."""
+        """Return the caller-owned model signature used by this context."""
 
         return tuple(self._in_keys)
 
     @property
     def model_out_keys(self) -> tuple[NestedKey, ...]:
-        """Return the caller-owned model outputs used by this binding."""
+        """Return the caller-owned model outputs used by this context."""
 
         return tuple(self._out_keys)
 
@@ -206,7 +206,7 @@ class BoundMethod:
                 cleanup_error = cleanup_error or error
         finally:
             self._in_context = False
-            self._bound_module = None
+            self._hooked_module = None
             self._handle = None
             self._install_started = False
             if self._stack is not None:
@@ -221,30 +221,30 @@ class BoundMethod:
     @contextmanager
     def disable_hooks(self) -> Generator[None, None, None]:
         if not self._in_context:
-            raise RuntimeError("Cannot disable hooks outside an active binding")
+            raise RuntimeError("Cannot disable hooks outside an active context")
         self._handle.remove()
         self._retain_occurrence_evidence(self._handle)
         try:
             yield
         finally:
-            self._handle = self._hook(self._bound_module)
+            self._handle = self._hook(self._hooked_module)
             self._program = getattr(self._handle, "program", None)
 
     @contextmanager
     def disable(self) -> Generator[nn.Module, None, None]:
         if not self._in_context:
-            raise RuntimeError("Cannot disable a method outside an active binding")
+            raise RuntimeError("Cannot disable a method outside an active context")
         with self.disable_hooks():
             try:
                 yield self._restore(self._working_module, self._in_keys, self._out_keys, self._extra_relative_path)
             finally:
-                self._bound_module.module = self._prepare(
+                self._hooked_module.module = self._prepare(
                     self._working_module, self._in_keys, self._out_keys, self._extra_relative_path
                 )
 
 
-class CachedBoundMethod(BoundMethod):
-    """A method binding that owns or publishes an activation cache."""
+class HookingContextWithCache(HookingContext):
+    """A method context that owns or publishes an activation cache."""
 
     def __init__(self, *args, cache: Optional[TensorDict] = None, clear_cache: bool = True, **kwargs):
         self._cache = TensorDict() if cache is None else cache
@@ -266,15 +266,15 @@ class CachedBoundMethod(BoundMethod):
         return super().__enter__()
 
 
-class Method:
+class HookingContextFactory:
     """Base class for a configured interpretability method."""
 
-    _bound_module_class = BoundModule
-    _binding_class = BoundMethod
+    _hooked_module_class = HookedModule
+    _hooking_context_class = HookingContext
 
     def __init__(self):
-        self._binding_kwargs = {}
-        self._bound_module_kwargs = {}
+        self._hooking_context_kwargs = {}
+        self._hooked_module_kwargs = {}
 
     @property
     def execution_spec(self) -> ExecutionSpec:
@@ -282,13 +282,13 @@ class Method:
 
         return ExecutionSpec()
 
-    def bind(
+    def prepare(
         self,
         module: nn.Module,
         in_keys: Optional[List[NestedKey] | Dict[NestedKey, str]] = None,
         out_keys: Optional[List[NestedKey]] = None,
-    ) -> "BoundMethod":
-        """Build the managed binding for ``module`` without installing hooks."""
+    ) -> "HookingContext":
+        """Build the managed context for ``module`` without installing hooks."""
         if isinstance(module, TensorDictModuleBase):
             if in_keys is not None:
                 for key in in_keys:
@@ -303,9 +303,9 @@ class Method:
                     if key not in module.out_keys:
                         raise ValueError(f"Key {key} not in module.out_keys")
 
-        return self._bind(module, in_keys, out_keys)
+        return self._prepare(module, in_keys, out_keys)
 
-    def _bind(
+    def _prepare(
         self,
         module: nn.Module,
         in_keys: Optional[List[NestedKey] | Dict[NestedKey, str]],
@@ -313,18 +313,18 @@ class Method:
         *,
         hook_root: Optional[TensorDictModuleBase] = None,
         relative_path: Optional[str] = None,
-    ) -> BoundMethod:
-        return self._binding_class(
+    ) -> HookingContext:
+        return self._hooking_context_class(
             self,
             module,
             in_keys,
             out_keys,
             hook_root=hook_root,
             relative_path=relative_path,
-            **self._binding_kwargs,
+            **self._hooking_context_kwargs,
         )
 
-    def _bind_module(
+    def _prepare_module(
         self,
         module: TensorDictModuleBase,
         in_keys: List[NestedKey],
@@ -344,18 +344,18 @@ class Method:
     ) -> TensorDictModuleBase:
         return module
 
-    def _spawn_bound_module(
-        self, prep_module: TensorDictModuleBase, binding: "BoundMethod", extra_relative_path: str
-    ) -> BoundModule:
+    def _spawn_hooked_module(
+        self, prep_module: TensorDictModuleBase, context: "HookingContext", extra_relative_path: str
+    ) -> HookedModule:
         kwargs = {
-            **self._bound_module_kwargs,
-            "hook_root": binding._hook_root,
+            **self._hooked_module_kwargs,
+            "hook_root": context._hook_root,
             "relative_path": extra_relative_path,
         }
-        return self._bound_module_class(prep_module, binding=binding, **kwargs)
+        return self._hooked_module_class(prep_module, hooking_context=context, **kwargs)
 
-    def _install_hooks(self, module: BoundModule) -> MultiHookHandle:
+    def _hook_module(self, module: HookedModule) -> MultiHookHandle:
         return MultiHookHandle()
 
 
-__all__ = ["BoundMethod", "Method"]
+__all__ = ["HookingContext", "HookingContextFactory"]

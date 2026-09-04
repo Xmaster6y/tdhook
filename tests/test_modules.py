@@ -3,11 +3,11 @@ import torch
 from tensordict import TensorDict
 from tensordict.nn import TensorDictModule, TensorDictModuleBase
 
-from tdhook.methods import Method
+from tdhook.contexts import HookingContextFactory
 from tdhook.hooks import MutableWeakRef
 from tdhook.modules import (
     FunctionModule,
-    BoundModule,
+    HookedModule,
     IntermediateKeysCleaner,
     ModuleCall,
     ModuleCallWithCache,
@@ -102,10 +102,10 @@ def test_pgd_module_updates_and_clamps_working_values():
 
 
 def test_bound_module_is_context_owned_and_finalizes_results(default_test_model):
-    context = Method().bind(default_test_model)
+    context = HookingContextFactory().prepare(default_test_model)
     with context as prepared:
-        assert isinstance(prepared, BoundModule)
-        assert "BoundModule" in repr(prepared)
+        assert isinstance(prepared, HookedModule)
+        assert "HookedModule" in repr(prepared)
         result = prepared(TensorDict({"input": torch.ones(2, 10)}, batch_size=[2]))
         assert result["output"].shape == (2, 5)
 

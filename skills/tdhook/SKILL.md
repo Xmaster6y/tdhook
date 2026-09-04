@@ -11,7 +11,7 @@ metadata:
 
 # tdhook
 
-Interpretability with TensorDict and PyTorch hooks. One pattern: `with Method(...).bind(model) as hooked: td = hooked(td)`.
+Interpretability with TensorDict and PyTorch hooks. One pattern: `with SomeMethod(...).prepare(model) as hooked: td = hooked(td)`.
 
 **Docs**: [Home](https://tdhook.readthedocs.io/en/latest/) · [Tutorials](https://tdhook.readthedocs.io/en/latest/tutorials.html) · [API](https://tdhook.readthedocs.io/en/latest/api/index.html) · **GitHub**: [Xmaster6y/tdhook](https://github.com/Xmaster6y/tdhook) · **Paper**: [arXiv:2509.25475](https://arxiv.org/abs/2509.25475)
 
@@ -46,7 +46,7 @@ from tdhook.attribution import IntegratedGradients
 def init_attr_targets(targets, _):
     return TensorDict(out=targets["output"][..., class_idx], batch_size=targets.batch_size)
 
-with IntegratedGradients(init_attr_targets=init_attr_targets).bind(model) as hooked:
+with IntegratedGradients(init_attr_targets=init_attr_targets).prepare(model) as hooked:
     td = hooked(TensorDict({"input": x, ("baseline", "input"): baseline}))
     attr = td.get(("attr", "input"))
 ```
@@ -73,7 +73,7 @@ with Probing(
     "transformer.h.(0|5|10).mlp$",
     manager.probe_factory,
     additional_keys=["labels", "step_type"],
-).bind(model, in_keys=["input_ids"], out_keys=["logits"]) as hooked:
+).prepare(model, in_keys=["input_ids"], out_keys=["logits"]) as hooked:
     hooked(train_td)  # step_type="fit"
     hooked(test_td)   # step_type="predict"
 ```
@@ -111,14 +111,14 @@ cached = captured.values[-1]
 
 ```python
 # Attribution (needs baseline for IG)
-with IntegratedGradients(init_attr_targets=init_fn).bind(model) as hooked:
+with IntegratedGradients(init_attr_targets=init_fn).prepare(model) as hooked:
     td = hooked(TensorDict({"input": x, ("baseline", "input"): baseline}))
     attr = td.get(("attr", "input"))
 
 # Steering: extract and apply
-with ActivationAddition(["layer.7.mlp"]).bind(model) as hooked:
+with ActivationAddition(["layer.7.mlp"]).prepare(model) as hooked:
     steer = hooked(TensorDict({("positive","input"): pos, ("negative","input"): neg})).get(("steer","layer.7.mlp"))
-with SteeringVectors(modules_to_steer=["layer.7.mlp"], steer_fn=lambda k, o: o + scale*steer).bind(model) as hooked:
+with SteeringVectors(modules_to_steer=["layer.7.mlp"], steer_fn=lambda k, o: o + scale*steer).prepare(model) as hooked:
     out = hooked(TensorDict({"input": x}))
 ```
 
@@ -139,9 +139,9 @@ with SteeringVectors(modules_to_steer=["layer.7.mlp"], steer_fn=lambda k, o: o +
 | Issue | Solution |
 |-------|----------|
 | `KeyError` on TensorDict | Use tuple keys: `("attr", "input")`, `("baseline", "input")` |
-| HuggingFace model fails | Pass `in_keys=["input_ids"]`, `out_keys=["logits"]` to `bind()` |
+| HuggingFace model fails | Pass `in_keys=["input_ids"]`, `out_keys=["logits"]` to `prepare()` |
 | `BilinearProbeManager` shape mismatch | Call `manager.before_all()` before forwards, `manager.after_all()` after |
-| Module path not found | Match paths relative to the model passed to `bind`; see [api.md](references/api.md) Module Path Resolution |
+| Module path not found | Match paths relative to the model passed to `prepare`; see [api.md](references/api.md) Module Path Resolution |
 | Probing `step_type` missing | Add `additional_keys=["labels", "step_type"]` and pass both in TensorDict |
 | IG baseline wrong shape | Ensure `("baseline", "input")` matches `"input"` shape and device |
 
@@ -202,7 +202,7 @@ For Colab setup: see [tutorials.md](references/tutorials.md) Setup section.
 | File | Contents |
 |------|----------|
 | [references/README.md](references/README.md) | Overview |
-| [references/api.md](references/api.md) | Full API: BoundModule, methods by category |
+| [references/api.md](references/api.md) | Full API: HookedModule, methods by category |
 | [references/tutorials.md](references/tutorials.md) | Use-case tutorials |
 | [references/issues.md](references/issues.md) | GitHub issues & solutions |
 | [references/file_structure.md](references/file_structure.md) | Contributor-only source-tree navigation |

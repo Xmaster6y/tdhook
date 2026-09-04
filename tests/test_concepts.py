@@ -227,7 +227,7 @@ def test_conditioned_method_preserves_base_initialisation_and_guards_hook_order(
     Workflow(method)(default_test_model, artifacts)
     assert len(calls) == 2
 
-    with method.bind(default_test_model) as bound_module:
+    with method.prepare(default_test_model) as bound_module:
         bound = method._bindings[bound_module.td_module]
         callback = bound._output_grad_callbacks["linear1"]
         with pytest.raises(RuntimeError, match="not loaded"):
@@ -236,7 +236,7 @@ def test_conditioned_method_preserves_base_initialisation_and_guards_hook_order(
 
 def test_conditioned_selection_is_local_to_each_execution_context(default_test_model):
     method = ChannelConditionedLRP(LRP(warn_on_missing_rule=False), condition_module="linear1")
-    with method.bind(default_test_model) as bound_module:
+    with method.prepare(default_test_model) as bound_module:
         bound = method._bindings[bound_module.td_module]
         initialise = bound._init_attr_inputs
         callback = bound._output_grad_callbacks["linear1"]

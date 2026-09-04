@@ -3,8 +3,8 @@ from typing import Callable, Optional, List
 from tensordict import TensorDict, TensorDictBase
 from tensordict.utils import NestedKey
 
-from tdhook.modules import BoundModule
-from tdhook.methods import Method, CachedBoundMethod
+from tdhook.modules import HookedModule
+from tdhook.contexts import HookingContextFactory, HookingContextWithCache
 from tdhook.hooks import MultiHookManager, HookFactory, HookDirection
 from tdhook.runtime import BoundHookProgram, HookProgramBuilder, HookSpec
 from tdhook.targets import Target
@@ -22,7 +22,7 @@ def _keys_overlap(left: NestedKey, right: NestedKey) -> bool:
     return left_path[:common] == right_path[:common]
 
 
-class ActivationCachingModule(BoundModule):
+class ActivationCachingModule(HookedModule):
     """A bound capture method that publishes a shallow cache snapshot.
 
     Tensor leaves retain their native storage. In particular, publishing a
@@ -40,12 +40,12 @@ class ActivationCachingModule(BoundModule):
     def finalize_tensordict(self, data: TensorDictBase) -> TensorDictBase:
         if self.cache_key is None:
             return data
-        if self.binding is None:
-            raise RuntimeError("ActivationCachingModule requires an active method binding")
-        return data.set(self.cache_key, self.binding.cache.copy())
+        if self.hooking_context is None:
+            raise RuntimeError("ActivationCachingModule requires an active method context")
+        return data.set(self.cache_key, self.hooking_context.cache.copy())
 
 
-class ActivationCaching(Method):
+class ActivationCaching(HookingContextFactory):
     """Cache model activations in a caller-visible TensorDict.
 
     A locked or memory-mapped ``cache`` must contain every captured key with
@@ -56,8 +56,8 @@ class ActivationCaching(Method):
     Maximally activating samples :cite:`Chen2020ConceptWF` and attention visualisation :cite:`Abnar2020QuantifyingAF`.
     """
 
-    _binding_class = CachedBoundMethod
-    _bound_module_class = ActivationCachingModule
+    _hooking_context_class = HookingContextWithCache
+    _hooked_module_class = ActivationCachingModule
 
     def __init__(
         self,
@@ -87,9 +87,9 @@ class ActivationCaching(Method):
             raise TypeError("cache_key must be a TensorDict nested key or None")
         if cache is not None and cache.is_locked and clear_cache:
             raise ValueError("locked or memory-mapped caches require clear_cache=False")
-        self._binding_kwargs["cache"] = cache
-        self._binding_kwargs["clear_cache"] = clear_cache
-        self._bound_module_kwargs["cache_key"] = cache_key
+        self._hooking_context_kwargs["cache"] = cache
+        self._hooking_context_kwargs["clear_cache"] = clear_cache
+        self._hooked_module_kwargs["cache_key"] = cache_key
 
         self._key_pattern = key_pattern
         self._relative = relative
@@ -104,7 +104,7 @@ class ActivationCaching(Method):
     def cache_key(self) -> NestedKey | None:
         """Return the native TensorDict key used to publish captured activations."""
 
-        return self._bound_module_kwargs["cache_key"]
+        return self._hooked_module_kwargs["cache_key"]
 
     @property
     def key_pattern(self) -> str | Target:
@@ -116,8 +116,8 @@ class ActivationCaching(Method):
         self._target = None
         self._hook_manager.pattern = key_pattern
 
-    def _install_hooks(self, module: BoundModule) -> BoundHookProgram:
-        cache = module.binding.cache
+    def _hook_module(self, module: HookedModule) -> BoundHookProgram:
+        cache = module.hooking_context.cache
 
         def hook_factory(name: str, direction: HookDirection) -> Callable:
             nonlocal self, cache

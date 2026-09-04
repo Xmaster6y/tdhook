@@ -66,13 +66,13 @@ class TestProbing:
 
         context = Probing(key, probe_factory, relative=relative)
 
-        with context.bind(default_test_model) as hooked_module:
+        with context.prepare(default_test_model) as hooked_module:
             inputs = TensorDict({"input": torch.randn(2, 10)}, batch_size=2)
             hooked_module(inputs)
             assert key in probes
             assert probes[key].called
 
-        assert hooked_module.binding.program == HookProgram((HookSpec(key, "probe", "fwd"),))
+        assert hooked_module.hooking_context.program == HookProgram((HookSpec(key, "probe", "fwd"),))
         assert all(not submodule._forward_hooks for submodule in default_test_model.modules())
 
     def test_key_pattern_is_mutable(self, default_test_model):
@@ -90,7 +90,7 @@ class TestProbing:
     def test_additional_keys_require_the_root_capture(self, default_test_model):
         context = Probing("linear1", lambda *_: ExampleProbe(), additional_keys=["labels"])
 
-        with context.bind(default_test_model) as prepared:
+        with context.prepare(default_test_model) as prepared:
             prepared(
                 TensorDict(
                     {"input": torch.ones(1, 10), "labels": torch.ones(1)},
@@ -118,7 +118,7 @@ class TestProbing:
             batch_size=[1],
         )
 
-        with context.bind(default_test_model) as prepared:
+        with context.prepare(default_test_model) as prepared:
             prepared(data)["output"].sum().backward()
 
         assert len(observed) == 1
@@ -134,7 +134,7 @@ class TestProbing:
 
         context = Probing("linear1|linear2", probe_factory)
 
-        with context.bind(default_test_model) as hooked_module:
+        with context.prepare(default_test_model) as hooked_module:
             inputs = TensorDict({"input": torch.randn(2, 10)}, batch_size=2)
             hooked_module(inputs)
 
@@ -176,12 +176,12 @@ class TestProbing:
             },
             batch_size=4,
         )
-        with context.bind(default_test_model) as hooked_module:
+        with context.prepare(default_test_model) as hooked_module:
             hooked_module(fit_data)
         estimator = manager.estimators["linear2_fwd"]
 
         predict_data = fit_data.clone().set("step_type", "predict")
-        with context.bind(default_test_model) as hooked_module:
+        with context.prepare(default_test_model) as hooked_module:
             hooked_module(predict_data)
 
         assert manager.estimators["linear2_fwd"] is estimator
@@ -647,7 +647,7 @@ class TestBilinearProbeManager:
         )
 
         manager.before_all()
-        with context.bind(default_test_model) as hooked_module:
+        with context.prepare(default_test_model) as hooked_module:
             for _ in range(3):
                 batch = TensorDict(
                     {
@@ -672,7 +672,7 @@ class TestBilinearProbeManager:
 
         assert manager.results["fit", "linear1_linear2_fwd", "accuracy"].ndim == 0
         assert manager.results["predict", "linear1_linear2_fwd", "accuracy"].ndim == 0
-        assert hooked_module.binding.program == HookProgram(
+        assert hooked_module.hooking_context.program == HookProgram(
             (
                 HookSpec("", "capture_inputs", "fwd_pre"),
                 HookSpec("linear1", "probe", "fwd"),

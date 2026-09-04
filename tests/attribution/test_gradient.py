@@ -101,7 +101,7 @@ class TestGradientAttribution:
             attributions = captum_attributor.attribute(input_data, abs=absolute)
 
         tdhook_context_factory = Saliency(absolute=absolute)
-        with tdhook_context_factory.bind(module) as hooked_module:
+        with tdhook_context_factory.prepare(module) as hooked_module:
             output = hooked_module(TensorDict({"input": input_data}, batch_size=batch_size))
 
         torch.testing.assert_close(output.get(("attr", "input")), attributions)
@@ -122,7 +122,7 @@ class TestGradientAttribution:
         attributions = captum_attributor.attribute(input_data)
 
         tdhook_context_factory = Saliency(multiply_by_inputs=True)
-        with tdhook_context_factory.bind(module) as hooked_module:
+        with tdhook_context_factory.prepare(module) as hooked_module:
             output = hooked_module(TensorDict({"input": input_data}))
 
         torch.testing.assert_close(output.get(("attr", "input")), attributions)
@@ -171,7 +171,7 @@ class TestGradientAttribution:
         tdhook_context_factory = IntegratedGradients(
             compute_convergence_delta=True, multiply_by_inputs=multiply_by_inputs
         )
-        with tdhook_context_factory.bind(module) as hooked_module:
+        with tdhook_context_factory.prepare(module) as hooked_module:
             output = hooked_module(
                 TensorDict({"input": input_data, ("baseline", "input"): baseline}, batch_size=batch_size)
             )
@@ -197,7 +197,7 @@ class TestGradientAttribution:
         sum_tdhook_context_factory = IntegratedGradients(
             compute_convergence_delta=True, multiply_by_inputs=multiply_by_inputs
         )
-        with sum_tdhook_context_factory.bind(captum_module) as hooked_module:
+        with sum_tdhook_context_factory.prepare(captum_module) as hooked_module:
             sum_output = hooked_module(
                 TensorDict({"input": input_data, ("baseline", "input"): baseline}, batch_size=3)
             )
@@ -210,7 +210,7 @@ class TestGradientAttribution:
             init_attr_targets=lambda td, _: td.apply(lambda t: t[..., (4, 7)]),
             multiply_by_inputs=multiply_by_inputs,
         )
-        with tdhook_context_factory.bind(module) as hooked_module:
+        with tdhook_context_factory.prepare(module) as hooked_module:
             output = hooked_module(TensorDict({"input": input_data, ("baseline", "input"): baseline}, batch_size=3))
 
         torch.testing.assert_close(output.get(("attr", "input")), attributions)
@@ -350,7 +350,7 @@ class TestGradCAM:
         tdhook_context_factory = GradCAM(
             modules_to_attribute={"linear2": DimsConfig(weight_pooling_dims=None, feature_sum_dims=None)},
         )
-        with tdhook_context_factory.bind(default_test_model) as hooked_module:
+        with tdhook_context_factory.prepare(default_test_model) as hooked_module:
             output = hooked_module(TensorDict({"input": input_data}, batch_size=3))
 
         assert output.get(("attr", "linear2")).shape == (3, 20)
@@ -361,7 +361,7 @@ class TestGuidedBackpropagation:
         input_data = torch.randn(3, 10)
 
         tdhook_context_factory = GuidedBackpropagation()
-        with tdhook_context_factory.bind(default_test_model) as hooked_module:
+        with tdhook_context_factory.prepare(default_test_model) as hooked_module:
             output = hooked_module(TensorDict({"input": input_data}, batch_size=3))
 
         assert output.get(("attr", "input")).shape == (3, 10)
@@ -370,7 +370,7 @@ class TestGuidedBackpropagation:
         input_data = torch.randn(3, 10)
 
         tdhook_context_factory = GuidedBackpropagation()
-        with tdhook_context_factory.bind(default_test_model) as hooked_module:
+        with tdhook_context_factory.prepare(default_test_model) as hooked_module:
             output = hooked_module(TensorDict({"input": input_data}, batch_size=3))
 
         gradients = output.get(("attr", "input"))
@@ -381,7 +381,7 @@ class TestGuidedBackpropagation:
         input_data = torch.randn(3, 10, requires_grad=True)
 
         tdhook_context_factory = GuidedBackpropagation(input_modules=["linear1"], use_inputs=False)
-        with tdhook_context_factory.bind(default_test_model) as hooked_module:
+        with tdhook_context_factory.prepare(default_test_model) as hooked_module:
             output = hooked_module(TensorDict({"input": input_data}, batch_size=3))
 
         gradients = output.get(("attr", "linear1"))
@@ -389,7 +389,7 @@ class TestGuidedBackpropagation:
         assert torch.all(gradients >= 0)
 
         expected_modules = [name for name, _ in default_test_model.named_modules() if name]
-        assert hooked_module.binding.program == HookProgram(
+        assert hooked_module.hooking_context.program == HookProgram(
             tuple(HookSpec(name, "replace", "bwd") for name in expected_modules)
             + (HookSpec("linear1", "capture", "fwd"),)
         )
@@ -402,7 +402,7 @@ class TestLatentAttribution:
 
         tdhook_context_factory = Saliency(target_modules=["linear2"], use_outputs=False)
 
-        with tdhook_context_factory.bind(default_test_model) as hooked_module:
+        with tdhook_context_factory.prepare(default_test_model) as hooked_module:
             output = hooked_module(TensorDict({"input": input_data}, batch_size=3))
 
         hidden = default_test_model.activation(default_test_model.linear1(input_data))
@@ -417,7 +417,7 @@ class TestLatentAttribution:
 
         tdhook_context_factory = Saliency(input_modules=["linear1"], use_inputs=False)
 
-        with tdhook_context_factory.bind(default_test_model) as hooked_module:
+        with tdhook_context_factory.prepare(default_test_model) as hooked_module:
             output = hooked_module(TensorDict({"input": input_data}, batch_size=3))
 
         linear1 = default_test_model.linear1(input_data)
@@ -438,7 +438,7 @@ class TestLatentAttribution:
             input_modules=["linear1"], use_inputs=False, output_grad_callbacks={"linear1": grad_callback}
         )
 
-        with tdhook_context_factory.bind(default_test_model) as hooked_module:
+        with tdhook_context_factory.prepare(default_test_model) as hooked_module:
             output = hooked_module(TensorDict({"input": input_data}, batch_size=3))
 
         assert torch.all(output.get(("attr", "linear1")) >= 0)
@@ -453,7 +453,7 @@ class TestLatentAttribution:
             target_modules=["linear2"],
         )
 
-        with tdhook_context_factory.bind(default_test_model) as hooked_module:
+        with tdhook_context_factory.prepare(default_test_model) as hooked_module:
             output = hooked_module(TensorDict({"input": input_data}, batch_size=3))
 
         linear1 = default_test_model.linear1(input_data)
@@ -474,10 +474,10 @@ class TestLatentAttribution:
             target_modules=["linear2"],
             output_grad_callbacks={"linear1": grad_callback},
         )
-        with context.bind(default_test_model) as hooked_module:
+        with context.prepare(default_test_model) as hooked_module:
             hooked_module(TensorDict({"input": torch.randn(3, 10)}, batch_size=3))
 
-        assert hooked_module.binding.program == HookProgram(
+        assert hooked_module.hooking_context.program == HookProgram(
             (
                 HookSpec("linear1", "capture", "fwd"),
                 HookSpec("linear2", "capture", "fwd"),
@@ -500,7 +500,7 @@ class TestActivationMaximisation:
             init_attr_targets=init_attr_targets,
         )
 
-        with tdhook_context_factory.bind(default_test_model) as hooked_module:
+        with tdhook_context_factory.prepare(default_test_model) as hooked_module:
             output = hooked_module(TensorDict({"input": input_data}, batch_size=3))
 
         linear1 = default_test_model.linear1(input_data)
@@ -522,7 +522,7 @@ class TestInitFunctions:
 
         tdhook_context_factory = Saliency(init_attr_inputs=init_attr_inputs, additional_init_keys=["additional"])
 
-        with tdhook_context_factory.bind(default_test_model) as hooked_module:
+        with tdhook_context_factory.prepare(default_test_model) as hooked_module:
             output = hooked_module(TensorDict({"input": input_data, "additional": additional_data}, batch_size=3))
 
         expected_grad = torch.autograd.grad(

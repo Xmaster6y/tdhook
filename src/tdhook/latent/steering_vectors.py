@@ -4,12 +4,12 @@ from tensordict import TensorDict
 from tensordict.nn import TensorDictModuleBase
 from tensordict.utils import NestedKey
 
-from tdhook.methods import Method
+from tdhook.contexts import HookingContextFactory
 from tdhook.execution import ExecutionSpec
 from tdhook.hooks import HookFactory, MutableWeakRef
 from tdhook.latent._targets import activation_target
 from tdhook.modules import (
-    BoundModule,
+    HookedModule,
     _CacheRefSequential,
     IntermediateKeysCleaner,
     ModuleCallWithCache,
@@ -31,7 +31,7 @@ def _replace_selected_output(value: object, replacement: object, target: Target 
     return target.replace_output(value, replacement)
 
 
-class SteeringVectors(Method):
+class SteeringVectors(HookingContextFactory):
     """
     Steering vectors :cite:`rimsky2023steering`.
     """
@@ -47,7 +47,7 @@ class SteeringVectors(Method):
         self._modules_to_steer = [path for path, _target in self._targets_to_steer]
         self._steer_fn = steer_fn
 
-    def _install_hooks(self, module: BoundModule) -> BoundHookProgram:
+    def _hook_module(self, module: HookedModule) -> BoundHookProgram:
         with HookProgramBuilder() as program:
             for module_key, target in self._targets_to_steer:
 
@@ -63,7 +63,7 @@ class SteeringVectors(Method):
             return program.build()
 
 
-class ActivationAddition(Method):
+class ActivationAddition(HookingContextFactory):
     def __init__(
         self,
         modules_to_steer: List[str | Target],
@@ -87,7 +87,7 @@ class ActivationAddition(Method):
     def execution_spec(self) -> ExecutionSpec:
         return ExecutionSpec(model_passes=2)
 
-    def _bind_module(
+    def _prepare_module(
         self,
         module: TensorDictModuleBase,
         in_keys: List[NestedKey],
@@ -131,7 +131,7 @@ class ActivationAddition(Method):
             )
         return _CacheRefSequential(*modules, cache_ref=cache_ref)
 
-    def _install_hooks(self, module: BoundModule) -> BoundHookProgram:
+    def _hook_module(self, module: HookedModule) -> BoundHookProgram:
         cache_ref = module.td_module.cache_ref
         with HookProgramBuilder() as program:
             for module_key, target in self._targets_to_steer:

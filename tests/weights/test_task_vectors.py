@@ -29,10 +29,10 @@ class TestTaskVectors:
         pretrained_model = nn.Sequential(nn.Linear(10, 20), nn.ReLU(), nn.Linear(20, 5))
         finetuned_model = nn.Sequential(nn.Linear(10, 20), nn.ReLU(), nn.Linear(20, 5))
 
-        binding = task_vectors.bind(pretrained_model)
-        with binding as hooked_module:
+        context = task_vectors.prepare(pretrained_model)
+        with context as hooked_module:
             vector = hooked_module.get_task_vector(finetuned_model)
-            alpha = binding.compute_alpha(vector)
+            alpha = context.compute_alpha(vector)
             assert alpha == 0.1
 
     def test_get_task_vectors(self):
@@ -50,7 +50,7 @@ class TestTaskVectors:
         pretrained_model = nn.Sequential(nn.Linear(10, 20), nn.ReLU(), nn.Linear(20, 5))
         finetuned_model = nn.Sequential(nn.Linear(10, 20), nn.ReLU(), nn.Linear(20, 5))
 
-        with task_vectors.bind(pretrained_model) as hooked_module:
+        with task_vectors.prepare(pretrained_model) as hooked_module:
             learn_vector = hooked_module.get_task_vector(finetuned_model)
             forget_vector = hooked_module.get_forget_vector(finetuned_model)
             new_weights = hooked_module.get_weights(learn_vector, forget_vector, alpha=0.1)
@@ -67,7 +67,7 @@ class TestTaskVectors:
         finetuned = nn.Linear(3, 2)
         original = {key: value.detach().clone() for key, value in model.state_dict().items()}
 
-        with task_vectors.bind(model) as hooked:
+        with task_vectors.prepare(model) as hooked:
             vector = hooked.get_task_vector(finetuned)
             with hooked.with_applied_vectors(vector, alpha=0.5):
                 assert hooked.applied_program == HookProgram((HookSpec("", "replace_parameters", None),))
@@ -86,7 +86,7 @@ class TestTaskVectors:
         finetuned = nn.Linear(3, 2)
         original = {key: value.detach().clone() for key, value in model.state_dict().items()}
 
-        with task_vectors.bind(model) as hooked:
+        with task_vectors.prepare(model) as hooked:
             vector = hooked.get_task_vector(finetuned)
             with pytest.raises(RuntimeError, match="evaluation failed"):
                 with hooked.with_applied_vectors(vector, alpha=0.5):

@@ -4,7 +4,7 @@ import torch.nn as nn
 from tensordict.nn import TensorDictModuleBase
 from tensordict.utils import NestedKey
 
-from tdhook.methods import Method
+from tdhook.contexts import HookingContextFactory
 from tdhook.hooks import (
     MultiHookManager,
     HookFactory,
@@ -12,7 +12,7 @@ from tdhook.hooks import (
     DIRECTION_TO_RETURN,
     register_hook_to_module,
 )
-from tdhook.modules import BoundModule
+from tdhook.modules import HookedModule
 from tdhook.runtime import BoundHookProgram, HookProgramBuilder, HookSpec
 from tdhook._types import is_nested_key
 
@@ -21,7 +21,7 @@ class Probe(Protocol):
     def step(self, data: Any, **kwargs) -> Any: ...
 
 
-class _ProbingBoundModule(BoundModule):
+class _ProbingHookedModule(HookedModule):
     """Expose probe metadata as native inputs without mutating the model contract."""
 
     def __init__(self, *args, additional_keys: list[NestedKey], **kwargs):
@@ -33,14 +33,14 @@ class _ProbingBoundModule(BoundModule):
         return self._probing_in_keys
 
 
-class Probing(Method):
+class Probing(HookingContextFactory):
     """
     Linear probing :cite:`alain2018understanding` and concept activation vectors :cite:`kim2018interpretability`.
     """
 
     default_classes_to_hook = (nn.Module,)
     default_classes_to_skip = (nn.ModuleList, nn.Sequential, TensorDictModuleBase)
-    _bound_module_class = _ProbingBoundModule
+    _hooked_module_class = _ProbingHookedModule
 
     def __init__(
         self,
@@ -63,7 +63,7 @@ class Probing(Method):
         self._additional_keys = list(additional_keys or [])
         if not all(is_nested_key(key) for key in self._additional_keys):
             raise TypeError("additional_keys must contain TensorDict nested keys")
-        self._bound_module_kwargs["additional_keys"] = self._additional_keys
+        self._hooked_module_kwargs["additional_keys"] = self._additional_keys
 
     @property
     def key_pattern(self) -> str:
@@ -74,7 +74,7 @@ class Probing(Method):
         self._key_pattern = key_pattern
         self._hook_manager.pattern = key_pattern
 
-    def _install_hooks(self, module: BoundModule) -> BoundHookProgram:
+    def _hook_module(self, module: HookedModule) -> BoundHookProgram:
         additional_items = None
         forward_active = False
         backward_active = False
