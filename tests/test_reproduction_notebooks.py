@@ -50,20 +50,23 @@ def test_multistep_notebook_code_compiles(filename: str):
 
 
 def _workflow_statements(filename, first_function):
-    """Select the actual cell statements from a function through its workflow call."""
-    notebook = json.loads((NOTEBOOK_DIR / filename).read_text())
-    for cell in notebook["cells"]:
-        if cell["cell_type"] != "code":
-            continue
-        tree = ast.parse(_python_source("".join(cell["source"])))
-        for index, statement in enumerate(tree.body):
-            if isinstance(statement, ast.FunctionDef) and statement.name == first_function:
-                body = []
-                for node in tree.body[index:]:
-                    if isinstance(node, ast.With):  # Plotting is independent of the workflow.
-                        break
-                    body.append(node)
-                return compile(ast.Module(body=body, type_ignores=[]), filename, "exec")
+    """Execute a notebook section across cell boundaries through its result read."""
+    final_result = {
+        "project_feature": "output_items",
+        "publish_circuit_batch": "clusters",
+        "channel_intrinsic_dimension": "backbone_dims",
+    }[first_function]
+    tree = ast.parse(_compilable_code(NOTEBOOK_DIR / filename))
+    for index, statement in enumerate(tree.body):
+        if isinstance(statement, ast.FunctionDef) and statement.name == first_function:
+            body = []
+            for node in tree.body[index:]:
+                body.append(node)
+                if isinstance(node, ast.Assign) and any(
+                    isinstance(target, ast.Name) and target.id == final_result for target in node.targets
+                ):
+                    return compile(ast.Module(body=body, type_ignores=[]), filename, "exec")
+            raise AssertionError(f"Missing workflow result: {final_result}")
     raise AssertionError(f"Missing notebook function: {first_function}")
 
 
