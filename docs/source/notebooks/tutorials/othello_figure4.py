@@ -46,8 +46,7 @@ def _download_assets(cache: Path) -> dict[str, Path]:
     paths: dict[str, Path] = {}
     for name, url in ASSET_URLS.items():
         path = cache / name
-        if not path.exists():
-            urllib.request.urlretrieve(url, path)
+        urllib.request.urlretrieve(url, path)
         paths[name] = path
     return paths
 
@@ -382,7 +381,7 @@ def run_figure4_reproduction(
     ordering_difference = middle_per_game - late_per_game
     ordering_lower, ordering_upper = _bootstrap_mean_ci(ordering_difference[:, None], seed=seed)
     artifact = {
-        "reproduction": "50-game Figure 4 ordering",
+        "reproduction": f"{number_games}-game Figure 4 ordering",
         "provenance": {
             "hazineh_revision": HAZINEH_REVISION,
             "torch": torch.__version__,

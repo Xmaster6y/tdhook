@@ -30,12 +30,24 @@ def test_reproduction_is_linked_and_declares_its_resource_boundary():
 def test_documented_reproduction_contains_executed_results():
     notebook = nbformat.read(NOTEBOOK, as_version=4)
     code_cells = [cell for cell in notebook.cells if cell.cell_type == "code"]
+    reference = json.loads(REFERENCE.read_text())
     result = json.loads(RESULT.read_text())
 
     assert code_cells and all(cell.execution_count is not None for cell in code_cells)
     assert any(cell.outputs for cell in code_cells)
-    assert result["weightlens"]["observed"] == result["weightlens"]["published"]
+    published_weightlens = {
+        "embedding_positive": [item["token_id"] for item in reference["weightlens"]["embedding_positive"]],
+        "embedding_negative": [item["token_id"] for item in reference["weightlens"]["embedding_negative"]],
+        "output_positive_labels": reference["weightlens"]["output_positive_labels"],
+    }
+    assert result["weightlens"]["published"] == published_weightlens
+    assert result["weightlens"]["observed"] == published_weightlens
     assert result["circuitlens"]["matching_examples"] == result["sample_count"]
+    assert all(item["observed"] == item["published"] for item in result["circuitlens"]["comparisons"])
+    assert [item["published"] for item in result["circuitlens"]["comparisons"]] == [
+        sorted([entry["head"], entry["source_token"]] for entry in sample["attention"])
+        for sample in reference["samples"]
+    ]
     assert result["feature"] == {"layer": 0, "index": 24}
     assert result["sample_count"] == 12
     assert "A100" in result["device_name"]

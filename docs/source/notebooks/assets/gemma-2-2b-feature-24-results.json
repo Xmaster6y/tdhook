@@ -1,6 +1,160 @@
 {
   "circuit_tracer": "0.5.0",
   "circuitlens": {
+    "comparisons": [
+      {
+        "observed": [],
+        "published": []
+      },
+      {
+        "observed": [],
+        "published": []
+      },
+      {
+        "observed": [
+          [
+            0,
+            11
+          ],
+          [
+            5,
+            11
+          ]
+        ],
+        "published": [
+          [
+            0,
+            11
+          ],
+          [
+            5,
+            11
+          ]
+        ]
+      },
+      {
+        "observed": [
+          [
+            0,
+            41
+          ],
+          [
+            4,
+            41
+          ]
+        ],
+        "published": [
+          [
+            0,
+            41
+          ],
+          [
+            4,
+            41
+          ]
+        ]
+      },
+      {
+        "observed": [],
+        "published": []
+      },
+      {
+        "observed": [],
+        "published": []
+      },
+      {
+        "observed": [
+          [
+            4,
+            4
+          ]
+        ],
+        "published": [
+          [
+            4,
+            4
+          ]
+        ]
+      },
+      {
+        "observed": [
+          [
+            0,
+            7
+          ]
+        ],
+        "published": [
+          [
+            0,
+            7
+          ]
+        ]
+      },
+      {
+        "observed": [
+          [
+            0,
+            7
+          ]
+        ],
+        "published": [
+          [
+            0,
+            7
+          ]
+        ]
+      },
+      {
+        "observed": [
+          [
+            0,
+            5
+          ]
+        ],
+        "published": [
+          [
+            0,
+            5
+          ]
+        ]
+      },
+      {
+        "observed": [
+          [
+            0,
+            14
+          ]
+        ],
+        "published": [
+          [
+            0,
+            14
+          ]
+        ]
+      },
+      {
+        "observed": [
+          [
+            0,
+            47
+          ],
+          [
+            4,
+            46
+          ]
+        ],
+        "published": [
+          [
+            0,
+            47
+          ],
+          [
+            4,
+            46
+          ]
+        ]
+      }
+    ],
     "examples": 12,
     "matching_examples": 12,
     "numerical_differences": {

@@ -59,6 +59,24 @@ def test_othello_figure4_uses_public_tdhook_capture_and_replacement():
     compile(source, str(FIGURE4_HELPER), "exec")
 
 
+def test_othello_figure4_refreshes_cached_assets(tmp_path, monkeypatch):
+    helper = _load_figure4_helper()
+    calls = []
+
+    def download(url, path):
+        calls.append((url, path))
+        path.write_text(url)
+
+    monkeypatch.setattr(helper.urllib.request, "urlretrieve", download)
+    for name in helper.ASSET_URLS:
+        (tmp_path / name).write_text("stale")
+
+    paths = helper._download_assets(tmp_path)
+
+    assert len(calls) == len(helper.ASSET_URLS)
+    assert all(path.read_text() == helper.ASSET_URLS[name] for name, path in paths.items())
+
+
 def test_othello_figure4_artifact_records_the_observed_comparisons():
     import json
 

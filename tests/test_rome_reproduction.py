@@ -51,6 +51,7 @@ def test_rome_reproduction_is_linked_parseable_and_resource_bounded():
         "compute_rewrite_quality_counterfact",
         "parity_report",
         "summarize_counterfact",
+        "--untracked-files=no",
     ):
         assert required in code
     assert "deltas = execute_rome(model, tokenizer, request, hparams)" in code
