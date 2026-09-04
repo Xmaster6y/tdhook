@@ -20,11 +20,8 @@ def main(expected_version: str) -> None:
     workflow = Workflow(ActivationCaching("0", cache_key=("activations", "hidden")))
     data = TensorDict({"input": torch.ones(2, 3)}, batch_size=[2])
 
-    plan = workflow.plan(model, data)
     result = workflow(model, data)
 
-    if plan.model_passes != 1:
-        raise RuntimeError(f"Expected one model pass, found {plan.model_passes}")
     if result["output"].shape != (2, 2):
         raise RuntimeError(f"Unexpected model output shape: {result['output'].shape}")
     if result["activations", "hidden"]["0"].shape != (2, 4):

@@ -20,7 +20,7 @@ image_tensor = transforms(image)  # [C, H, W]
 def init_attr_targets(targets, _):
     return TensorDict(out=targets["output"][..., 340], batch_size=targets.batch_size)  # zebra = 340
 
-with IntegratedGradients(init_attr_targets=init_attr_targets).prepare(model) as hooked:
+with IntegratedGradients(init_attr_targets=init_attr_targets).bind(model) as hooked:
     td = TensorDict({
         "input": image_tensor,
         ("baseline", "input"): torch.zeros_like(image_tensor),
@@ -54,7 +54,7 @@ with Probing(
     "transformer.h.(0|5|10).mlp$",
     manager.probe_factory,
     additional_keys=["labels", "step_type"],
-).prepare(model, in_keys=["input_ids"], out_keys=["logits"]) as hooked:
+).bind(model, in_keys=["input_ids"], out_keys=["logits"]) as hooked:
     with torch.no_grad():
         hooked(TensorDict({"input_ids": train_ids, "labels": train_labels, "step_type": "fit"}, batch_size=...))
         hooked(TensorDict({"input_ids": test_ids, "labels": test_labels, "step_type": "predict"}, batch_size=...))
@@ -76,7 +76,7 @@ positive_inputs = tokenizer.encode("I am rich.", return_tensors="pt")
 negative_inputs = tokenizer.encode("I am poor.", return_tensors="pt")
 
 # 1. Extract
-with ActivationAddition(["transformer.h.7.mlp"]).prepare(model) as hooked:
+with ActivationAddition(["transformer.h.7.mlp"]).bind(model) as hooked:
     td = hooked(TensorDict({
         ("positive", "input"): positive_inputs,
         ("negative", "input"): negative_inputs,
@@ -86,7 +86,7 @@ with ActivationAddition(["transformer.h.7.mlp"]).prepare(model) as hooked:
 # 2. Apply
 def steer_fn(module_key, output):
     return output + scale * steering_vector
-with SteeringVectors(modules_to_steer=["transformer.h.7.mlp"], steer_fn=steer_fn).prepare(model) as hooked:
+with SteeringVectors(modules_to_steer=["transformer.h.7.mlp"], steer_fn=steer_fn).bind(model) as hooked:
     hooked(TensorDict({"input": base_inputs}, batch_size=1))
 ```
 
@@ -115,7 +115,7 @@ manager = BilinearProbeManager(
 )
 
 manager.before_all()
-with Probing(manager.key_pattern, manager.probe_factory, additional_keys=["labels", "step_type"]).prepare(model, in_keys=["input_ids"], out_keys=["logits"]) as hooked:
+with Probing(manager.key_pattern, manager.probe_factory, additional_keys=["labels", "step_type"]).bind(model, in_keys=["input_ids"], out_keys=["logits"]) as hooked:
     hooked(train_td)
     hooked(test_td)
 manager.after_all()
@@ -159,7 +159,7 @@ def compute_metrics(preds, labels):
     return {"r2": r2_score(labels, preds)}
 
 manager = ProbeManager(LinearRegression, {}, compute_metrics)
-with Probing("module.0$", manager.probe_factory, additional_keys=["labels", "step_type"]).prepare(
+with Probing("module.0$", manager.probe_factory, additional_keys=["labels", "step_type"]).bind(
     actor, in_keys=actor.in_keys, out_keys=actor.out_keys
 ) as hooked:
     batch["labels"] = batch["action"]
@@ -187,7 +187,7 @@ td = model(board)
 def best_logit_init_targets(td, _):
     return TensorDict(out=td["policy"].max(dim=-1).values, batch_size=td.batch_size)
 
-with Saliency(init_attr_targets=best_logit_init_targets).prepare(model) as hooked:
+with Saliency(init_attr_targets=best_logit_init_targets).bind(model) as hooked:
     td = hooked(td)
     attr = td.get(("attr", "input"))
 # Visualise on board
@@ -207,7 +207,7 @@ def patch_fn(output, output_to_patch, **_):
     output[:, 0] = output_to_patch[:, 0]
     return output
 
-with ActivationPatching(["linear2"], patch_fn=patch_fn).prepare(model) as hooked:
+with ActivationPatching(["linear2"], patch_fn=patch_fn).bind(model) as hooked:
     data = TensorDict({
         "input": source_input,
         ("patched", "input"): patched_input,
@@ -229,7 +229,7 @@ def importance_cb(parameter, **_):
     return parameter.abs()
 
 pruning = Pruning(importance_callback=importance_cb, amount_to_prune=0.5)
-with pruning.prepare(model) as hooked:
+with pruning.bind(model) as hooked:
     output = hooked(inp)  # Pruned
 # Model restored
 ```
@@ -249,7 +249,7 @@ class DoubleAdapter(nn.Module):
         return x * 2
 
 adapters = {"linear2": (DoubleAdapter(), "linear2", "linear2")}
-with Adapters(adapters=adapters).prepare(model) as hooked:
+with Adapters(adapters=adapters).bind(model) as hooked:
     patched_out = hooked(data)["output"]
 ```
 
@@ -273,9 +273,9 @@ task_vectors = TaskVectors(
     get_test_accuracy=get_test_accuracy,
     get_control_adequacy=get_control_adequacy,
 )
-with task_vectors.prepare(pretrained) as hooked:
+with task_vectors.bind(pretrained) as hooked:
     vector = hooked.get_task_vector(finetuned)
-    alpha = hooked.hooking_context.compute_alpha(vector)
+    alpha = hooked.binding.compute_alpha(vector)
     new_weights = hooked.get_weights(vector, forget_vector, alpha=alpha)
 ```
 

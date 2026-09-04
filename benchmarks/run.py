@@ -206,7 +206,7 @@ def _attribution_benchmark(
     def tdhook_operation() -> Tensor:
         values = inputs.detach().clone().requires_grad_(True)
         batch = TensorDict({"input": values}, batch_size=[config.batch_size])
-        with tdhook.prepare(model) as hooked_model:
+        with tdhook.bind(model) as hooked_model:
             result = hooked_model(batch)
         return result.get(("attr", "input"))
 

@@ -52,7 +52,7 @@ data = TensorDict(
     batch_size=[1],
 )
 
-with IntegratedGradients(init_attr_targets=select_score).prepare(model) as hooked_model:
+with IntegratedGradients(init_attr_targets=select_score).bind(model) as hooked_model:
     result = hooked_model(data)
 
 attributions = result["attr", "input"]

@@ -1,4 +1,4 @@
-"""Executable hook programs shared by interactive and prepared interfaces."""
+"""Executable hook programs shared by sessions and method bindings."""
 
 from __future__ import annotations
 
@@ -65,8 +65,8 @@ class HookSpec:
 
 
 @dataclass(frozen=True)
-class TargetOccurrencePlan:
-    """Tensor-free occurrence selection planned for one hook operation."""
+class TargetOccurrenceSpec:
+    """Tensor-free occurrence selection for one hook operation."""
 
     hook_index: int
     target_path: str
@@ -107,15 +107,15 @@ class HookProgram:
                 raise ValueError("capture dependencies must refer to a capture hook")
 
     @property
-    def occurrence_plans(self) -> tuple[TargetOccurrencePlan, ...]:
-        """Return immutable multi-occurrence plans in registration order."""
+    def occurrence_specs(self) -> tuple[TargetOccurrenceSpec, ...]:
+        """Return immutable multi-occurrence specifications in registration order."""
 
-        plans = []
+        specifications = []
         for hook_index, spec in enumerate(self.hooks):
             if spec.target is None or spec.target.occurrences is None or spec.direction is None:
                 continue
-            plans.append(
-                TargetOccurrencePlan(
+            specifications.append(
+                TargetOccurrenceSpec(
                     hook_index,
                     spec.target.module_path,
                     spec.operation,
@@ -123,7 +123,7 @@ class HookProgram:
                     spec.target.occurrences,
                 )
             )
-        return tuple(plans)
+        return tuple(specifications)
 
 
 @dataclass
@@ -432,6 +432,6 @@ __all__ = [
     "HookProgramBuilder",
     "HookSpec",
     "TargetOccurrenceEvidence",
-    "TargetOccurrencePlan",
+    "TargetOccurrenceSpec",
     "temporary_module_state",
 ]

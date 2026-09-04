@@ -34,13 +34,13 @@ class TestSteeringVectors:
 
         context = SteeringVectors(modules_to_steer, steer_fn=steer_fn)
 
-        with context.prepare(default_test_model) as hooked_module:
+        with context.bind(default_test_model) as hooked_module:
             data = TensorDict({"input": torch.randn(2, 10)}, batch_size=2)
             data = hooked_module(data)
             assert data.get("output").shape == (2, 5)
 
         assert steered_modules == list(modules_to_steer)
-        assert hooked_module.hooking_context.program == HookProgram(
+        assert hooked_module.binding.program == HookProgram(
             tuple(HookSpec(module_key, "replace", "fwd") for module_key in modules_to_steer)
         )
         assert all(not submodule._forward_hooks for submodule in default_test_model.modules())
@@ -49,12 +49,10 @@ class TestSteeringVectors:
         target = Target("linear2", "activation", -1, (0,))
         context = SteeringVectors([target], steer_fn=lambda module_key, output: torch.zeros_like(output))
 
-        with context.prepare(default_test_model) as hooked_module:
+        with context.bind(default_test_model) as hooked_module:
             hooked_module(TensorDict({"input": torch.randn(2, 10)}, batch_size=2))
 
-        assert hooked_module.hooking_context.program == HookProgram(
-            (HookSpec("linear2", "replace", "fwd", target=target),)
-        )
+        assert hooked_module.binding.program == HookProgram((HookSpec("linear2", "replace", "fwd", target=target),))
 
     def test_target_steering_changes_only_selected_units(self):
         model = torch.nn.Linear(3, 3, bias=False)
@@ -65,7 +63,7 @@ class TestSteeringVectors:
         with SteeringVectors(
             [target],
             steer_fn=lambda module_key, output: torch.zeros_like(output),
-        ).prepare(model) as prepared:
+        ).bind(model) as prepared:
             result = prepared(TensorDict({"input": torch.tensor([[1.0, 2.0, 3.0]])}, batch_size=[1]))
 
         torch.testing.assert_close(result["output"], torch.tensor([[1.0, 0.0, 3.0]]))
@@ -82,7 +80,7 @@ class TestSteeringVectors:
         target = Target("shared", "activation", -1, (0,), occurrences=(0,))
         data = TensorDict({"input": torch.tensor([[1.0, 2.0]])}, batch_size=[1])
 
-        with SteeringVectors([target], steer_fn=lambda module_key, output: torch.zeros_like(output)).prepare(
+        with SteeringVectors([target], steer_fn=lambda module_key, output: torch.zeros_like(output)).bind(
             Model()
         ) as prepared:
             result = prepared(data)
@@ -103,9 +101,9 @@ class TestActivationAddition:
     def test_simple_activation_addition(self, default_test_model, modules_to_steer):
         """Test creating a ActivationAddition."""
 
-        context = ActivationAddition(modules_to_steer)
+        context = ActivationAddition(modules_to_steer, cache_callback=lambda **kwargs: kwargs["output"])
 
-        with context.prepare(default_test_model) as hooked_module:
+        with context.bind(default_test_model) as hooked_module:
             data = TensorDict(
                 {("positive", "input"): torch.randn(2, 10), ("negative", "input"): torch.randn(2, 10)}, batch_size=2
             )
@@ -113,7 +111,7 @@ class TestActivationAddition:
             for module_key in modules_to_steer:
                 assert data.get(("steer", module_key)).shape == (20,)
 
-        assert hooked_module.hooking_context.program == HookProgram(
+        assert hooked_module.binding.program == HookProgram(
             tuple(HookSpec(module_key, "capture", "fwd") for module_key in modules_to_steer)
         )
         assert all(not submodule._forward_hooks for submodule in default_test_model.modules())
@@ -140,7 +138,7 @@ class TestActivationAddition:
             batch_size=[1],
         )
 
-        with ActivationAddition([target]).prepare(model) as prepared:
+        with ActivationAddition([target], cache_callback=lambda **kwargs: kwargs["output"]).bind(model) as prepared:
             result = prepared(data)
 
         torch.testing.assert_close(result["steer", "linear"], torch.tensor([4.0]))
@@ -164,7 +162,7 @@ class TestActivationAddition:
             batch_size=[1],
         )
 
-        with ActivationAddition([target]).prepare(Model()) as prepared:
+        with ActivationAddition([target]).bind(Model()) as prepared:
             result = prepared(data)
 
         torch.testing.assert_close(result["steer", "shared"], torch.tensor([3.0]))

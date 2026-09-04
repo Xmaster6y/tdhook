@@ -1,14 +1,20 @@
 from typing import Callable, Optional, List
 
 from tensordict import TensorDict
-from tensordict.nn import TensorDictModuleBase, TensorDictSequential
+from tensordict.nn import TensorDictModuleBase
 from tensordict.utils import NestedKey
 
-from tdhook.contexts import HookingContextFactory
+from tdhook.methods import Method
 from tdhook.execution import ExecutionSpec
 from tdhook.hooks import HookFactory, MutableWeakRef
 from tdhook.latent._targets import activation_target
-from tdhook.modules import HookedModule, IntermediateKeysCleaner, ModuleCallWithCache, FunctionModule
+from tdhook.modules import (
+    BoundModule,
+    _CacheRefSequential,
+    IntermediateKeysCleaner,
+    ModuleCallWithCache,
+    FunctionModule,
+)
 from tdhook.runtime import BoundHookProgram, HookProgramBuilder, HookSpec
 from tdhook.targets import Target
 
@@ -25,7 +31,7 @@ def _replace_selected_output(value: object, replacement: object, target: Target 
     return target.replace_output(value, replacement)
 
 
-class SteeringVectors(HookingContextFactory):
+class SteeringVectors(Method):
     """
     Steering vectors :cite:`rimsky2023steering`.
     """
@@ -41,7 +47,7 @@ class SteeringVectors(HookingContextFactory):
         self._modules_to_steer = [path for path, _target in self._targets_to_steer]
         self._steer_fn = steer_fn
 
-    def _hook_module(self, module: HookedModule) -> BoundHookProgram:
+    def _install_hooks(self, module: BoundModule) -> BoundHookProgram:
         with HookProgramBuilder() as program:
             for module_key, target in self._targets_to_steer:
 
@@ -53,11 +59,11 @@ class SteeringVectors(HookingContextFactory):
                 hook = HookFactory.make_setting_hook(None, callback=callback)
                 spec = HookSpec(module_key, "replace", "fwd", target=target)
                 register = program.register_path if target is None else program.register_target
-                register(module, hook, spec, relative_path=module.relative_path)
+                register(module.hook_root, hook, spec, relative_path=module.relative_path)
             return program.build()
 
 
-class ActivationAddition(HookingContextFactory):
+class ActivationAddition(Method):
     def __init__(
         self,
         modules_to_steer: List[str | Target],
@@ -77,13 +83,11 @@ class ActivationAddition(HookingContextFactory):
         self._clean_intermediate_keys = clean_intermediate_keys
         self._cache_callback = cache_callback
 
-        self._hooked_module_kwargs["relative_path"] = "td_module.module[0]._td_module"
-
     @property
     def execution_spec(self) -> ExecutionSpec:
         return ExecutionSpec(model_passes=2)
 
-    def _prepare_module(
+    def _bind_module(
         self,
         module: TensorDictModuleBase,
         in_keys: List[NestedKey],
@@ -125,10 +129,10 @@ class ActivationAddition(HookingContextFactory):
                     intermediate_keys=["_positive_cache", "_positive_out", "_negative_cache", "_negative_out"]
                 )
             )
-        return TensorDictSequential(*modules)
+        return _CacheRefSequential(*modules, cache_ref=cache_ref)
 
-    def _hook_module(self, module: HookedModule) -> BoundHookProgram:
-        cache_ref = module.td_module[0].cache_ref
+    def _install_hooks(self, module: BoundModule) -> BoundHookProgram:
+        cache_ref = module.td_module.cache_ref
         with HookProgramBuilder() as program:
             for module_key, target in self._targets_to_steer:
 
@@ -145,7 +149,7 @@ class ActivationAddition(HookingContextFactory):
                 )
                 spec = HookSpec(module_key, "capture", "fwd", target=target)
                 register = program.register_path if target is None else program.register_target
-                register(module, hook, spec, relative_path=module.relative_path)
+                register(module.hook_root, hook, spec, relative_path=module.relative_path)
             return program.build()
 
     def _compute_steering_vectors(self, td: TensorDict) -> TensorDict:

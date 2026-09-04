@@ -1,4 +1,4 @@
-"""Shared target normalization for prepared activation methods."""
+"""Shared target normalization for activation methods."""
 
 from tdhook.targets import Target
 
@@ -11,7 +11,7 @@ def activation_target(value: str | Target, *, argument: str) -> tuple[str, Targe
     if not isinstance(value, Target):
         raise TypeError(f"{argument} entries must be module paths or Targets")
     if value.kind != "activation":
-        raise ValueError("prepared activation methods require activation Targets")
+        raise ValueError("activation methods require activation Targets")
     return value.module_path, value
 
 

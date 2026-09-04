@@ -9,7 +9,7 @@ from tensordict.utils import NestedKey
 from tdhook.attribution.gradient_helpers import GradientAttribution
 from tdhook._types import join_keys
 from tdhook.attribution.lrp_helpers.rules import Rule
-from tdhook.modules import HookedModule
+from tdhook.modules import BoundModule
 from tdhook.runtime import BoundHookProgram, HookProgramBuilder, HookSpec
 
 
@@ -25,8 +25,9 @@ class _LRPModule(TensorDictModuleBase):
     def forward(self, data: TensorDictBase) -> TensorDictBase:
         return self.module(data)
 
-    def __getitem__(self, index):
-        return self.module[index]
+    @property
+    def cache_ref(self):
+        return self.module.cache_ref
 
 
 class LRP(GradientAttribution):
@@ -71,18 +72,17 @@ class LRP(GradientAttribution):
         self._rule_mapper = rule_mapper or (lambda name, module: None)
         self._warn_on_missing_rule = warn_on_missing_rule
         self._skip_modules = skip_modules
-        self._hooked_module_kwargs["relative_path"] = "td_module.module.module[2]._td_module"
 
-    def _prepare_module(self, module, in_keys, out_keys, extra_relative_path):
-        prepared = super()._prepare_module(module, in_keys, out_keys, extra_relative_path)
+    def _bind_module(self, module, in_keys, out_keys, extra_relative_path):
+        pipeline = super()._bind_module(module, in_keys, out_keys, extra_relative_path)
         public_in_keys = [*in_keys, *self._additional_init_keys]
         attribution_sources = [*(in_keys if self._use_inputs else ()), *self._input_modules]
         public_out_keys = [*out_keys, *(join_keys(self._attr_key, key) for key in attribution_sources)]
-        return _LRPModule(prepared, public_in_keys, public_out_keys)
+        return _LRPModule(pipeline, public_in_keys, public_out_keys)
 
-    def _hook_module(self, module: HookedModule) -> BoundHookProgram:
+    def _install_hooks(self, module: BoundModule) -> BoundHookProgram:
         with HookProgramBuilder() as program:
-            root = program.resolve_path(module, "", relative_path=module.relative_path)
+            root = program.resolve_path(module.hook_root, "", relative_path=module.relative_path)
             for name, child in root.named_modules():
                 if self._skip_modules and self._skip_modules(name, child):
                     continue

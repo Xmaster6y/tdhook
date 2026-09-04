@@ -10,16 +10,16 @@ from tensordict.nn import TensorDictModule
 from torch import nn
 from torch.nn.parallel import DistributedDataParallel
 
-from tdhook.latent import ActivationCaching
-from tdhook.session import HookSession
-from tdhook.targets import Target
-from tdhook.workflow import (
-    Workflow,
+from tdhook.artifacts import (
     WorkflowArtifactError,
     WorkflowArtifactSchema,
     receive_workflow_artifact,
     send_workflow_artifact,
 )
+from tdhook.latent import ActivationCaching
+from tdhook.session import HookSession
+from tdhook.targets import Target
+from tdhook.workflow import Workflow
 
 
 class _DistributedModel(nn.Module):

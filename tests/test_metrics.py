@@ -10,7 +10,7 @@ from tdhook.attribution import Saliency
 class TestSensitivityMetric:
     def test_sensitivity_basic(self, default_test_model):
         """Test basic sensitivity calculation."""
-        with Saliency(clean_intermediate_keys=False).prepare(default_test_model) as hooked_module:
+        with Saliency(clean_intermediate_keys=False).bind(default_test_model) as hooked_module:
             data = TensorDict({"input": torch.randn(2, 10)}, batch_size=[2])
             hooked_module(data)
 
@@ -25,7 +25,7 @@ class TestSensitivityMetric:
 class TestInfidelityMetric:
     def test_infidelity_basic(self, default_test_model):
         """Test basic infidelity calculation."""
-        with Saliency(clean_intermediate_keys=False).prepare(default_test_model) as hooked_module:
+        with Saliency(clean_intermediate_keys=False).bind(default_test_model) as hooked_module:
             data = TensorDict({"input": torch.randn(2, 10)}, batch_size=[2])
             hooked_module(data)
 

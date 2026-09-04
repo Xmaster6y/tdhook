@@ -4,7 +4,6 @@ from torch import nn
 from tensordict import TensorDict
 from tensordict.tensorclass import NonTensorData
 
-from tests.composition_conformance import assert_conformance
 from tdhook.dimension import (
     ActivationSamples,
     DimensionEstimation,
@@ -55,20 +54,7 @@ def test_conditioned_dimension_workflow_has_one_capture_pass_and_frozen_channel_
     )
     artifacts = TensorDict({"input": inputs}, batch_size=[len(inputs)])
 
-    plan = workflow.plan(model, artifacts)
     result = workflow(model, artifacts)
-    assert_conformance(
-        "test_conditioned_dimension_workflow_has_one_capture_pass_and_frozen_channel_fixture",
-        plan,
-        status="supported",
-    )
-
-    assert [(execution.steps, execution.model_passes) for execution in plan.executions] == [
-        (("0:ActivationCaching",), 1),
-        (("1:ActivationSamples",), 0),
-        (("2:DimensionEstimation",), 0),
-        (("3:DimensionSummary",), 0),
-    ]
     torch.testing.assert_close(result[("metrics", "dimension")].data, torch.full((4,), 3.0))
     assert result[("activations", "cache")]["0"].shape == (8, 4, 2, 2)
     assert result[("activations", "samples")].data.shape == (4, 8, 4)
@@ -113,10 +99,8 @@ def test_conditioned_dimension_workflow_matches_cpu_on_cuda(activation_fixture):
         TwoNnDimensionEstimator(),
     )
     cuda_data = TensorDict({"input": cuda_inputs}, batch_size=[len(cuda_inputs)])
-    cuda_plan = cuda_workflow.plan(cuda_model, cuda_data)
     cuda_result = cuda_workflow(cuda_model, cuda_data)
 
-    assert cuda_plan.model_passes == 1
     assert cuda_result[("metrics", "dimension")].data.device.type == "cuda"
     torch.testing.assert_close(
         cuda_result[("metrics", "dimension")].data.cpu(),
@@ -159,10 +143,8 @@ def test_multiple_cached_layers_can_feed_independent_conditioned_slices(activati
         ActivationSamples("second", spatial_conditioned_samples, out_key=("activations", "second")),
     )
 
-    plan = workflow.plan(model, artifacts)
     result = workflow(model, artifacts)
 
-    assert plan.model_passes == 0
     assert result[("activations", "first")].data.shape == (4, 8, 4)
     assert result[("activations", "second")].data.shape == (4, 8, 4)
 
@@ -183,12 +165,10 @@ def test_existing_estimators_are_swappable_tensordict_operators(estimator):
     artifacts = TensorDict({"activations": {"samples": NonTensorData(samples, batch_size=[2])}}, batch_size=[2])
     workflow = Workflow(DimensionEstimation(estimator))
 
-    plan = workflow.plan(nn.Identity(), artifacts)
     result = workflow(nn.Identity(), artifacts)
 
     dimensions = result[("metrics", "dimension")].data
     assert dimensions.shape[0] == 1
-    assert plan.model_passes == 0
 
 
 def test_dimension_operator_accepts_an_estimator_with_nested_internal_keys():

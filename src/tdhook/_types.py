@@ -1,3 +1,4 @@
+from tensordict import TensorDictBase
 from tensordict.utils import NestedKey
 
 
@@ -29,3 +30,13 @@ def join_keys(prefix: NestedKey, key: NestedKey) -> tuple[str, ...]:
     prefix_parts = (prefix,) if isinstance(prefix, str) else prefix
     key_parts = (key,) if isinstance(key, str) else key
     return (*prefix_parts, *key_parts)
+
+
+def tensor_leaf_items(data: TensorDictBase):
+    """Iterate over non-TensorDict leaves and their nested keys."""
+
+    return (
+        (key, value)
+        for key, value in data.items(include_nested=True, leaves_only=False)
+        if not isinstance(value, TensorDictBase)
+    )

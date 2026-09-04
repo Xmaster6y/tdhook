@@ -4,7 +4,6 @@ import pytest
 import torch
 from tensordict import TensorDict
 
-from tests.composition_conformance import assert_conformance
 from tdhook.attribution import LRP
 from tdhook.concepts import (
     ChannelConditionedLRP,
@@ -41,28 +40,16 @@ def _artifacts(seed=0):
     )
 
 
-def test_concept_attribution_workflow_is_declared_inspectable_and_matches_frozen_fixture(get_model):
+def test_concept_attribution_workflow_matches_frozen_fixture(get_model):
     model = get_model(seed=42)
     state_before = {key: value.detach().clone() for key, value in model.state_dict().items()}
     module_types_before = {name: type(module) for name, module in model.named_modules()}
     artifacts = _artifacts()
     workflow = _workflow()
 
-    plan = workflow.plan(model, artifacts)
-    assert_conformance(
-        "test_concept_attribution_workflow_is_declared_inspectable_and_matches_frozen_fixture",
-        plan,
-        status="supported",
-    )
     first = workflow(model, artifacts.clone())
     second = workflow(model, artifacts.clone())
 
-    assert plan.model_passes == 2
-    assert [execution.steps for execution in plan.executions] == [
-        ("0:LRP",),
-        ("1:ConceptSelection",),
-        ("2:ChannelConditionedLRP",),
-    ]
     selection = first["metrics", "concept_selection"]
     assert set(selection.keys()) == {"positive_mean", "negative_mean", "scores", "channel", "direction", "score"}
     assert selection["direction"].unique().item() == 1
@@ -240,8 +227,8 @@ def test_conditioned_method_preserves_base_initialisation_and_guards_hook_order(
     Workflow(method)(default_test_model, artifacts)
     assert len(calls) == 2
 
-    with method.prepare(default_test_model) as prepared:
-        bound = method._prepared[prepared.td_module]
+    with method.bind(default_test_model) as bound_module:
+        bound = method._bindings[bound_module.td_module]
         callback = bound._output_grad_callbacks["linear1"]
         with pytest.raises(RuntimeError, match="not loaded"):
             callback((torch.ones(2, 20),))
@@ -249,8 +236,8 @@ def test_conditioned_method_preserves_base_initialisation_and_guards_hook_order(
 
 def test_conditioned_selection_is_local_to_each_execution_context(default_test_model):
     method = ChannelConditionedLRP(LRP(warn_on_missing_rule=False), condition_module="linear1")
-    with method.prepare(default_test_model) as prepared:
-        bound = method._prepared[prepared.td_module]
+    with method.bind(default_test_model) as bound_module:
+        bound = method._bindings[bound_module.td_module]
         initialise = bound._init_attr_inputs
         callback = bound._output_grad_callbacks["linear1"]
         first_context = copy_context()
