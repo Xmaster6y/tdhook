@@ -5,8 +5,12 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 import torch
+from tensordict import TensorDict
 from torch import nn
+
+from tdhook.workflow import Workflow
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIGURE4_HELPER = REPO_ROOT / "docs/source/notebooks/tutorials/othello_figure4.py"
@@ -105,4 +109,47 @@ def test_othello_metrics_capture_all_layers_of_explicit_tensordict_wrapper():
     assert metrics["layer_probe_accuracy"] == [1.0] * 8
     assert metrics["legal_move_rate"] == 1.0
     assert metrics["evaluated_next_move_positions"] == 5800
+    assert all(not block._forward_hooks for block in model.blocks)
+
+
+def test_option_workflow_consumes_replacement_artifacts(monkeypatch):
+    helper = _load_figure4_helper()
+
+    class TinyOthello(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.blocks = nn.ModuleList([nn.Identity() for _ in range(8)])
+
+        def forward(self, inputs):
+            for block in self.blocks:
+                inputs = block(inputs)
+            return inputs, None
+
+    # Fix the solver result; this test checks composition, not convergence.
+    monkeypatch.setattr(helper, "_inverse_map", lambda initial, *args: (initial + 1, 1, 0.0))
+    model = TinyOthello()
+    inputs = torch.randn(1, 2, 512)
+    # The released model's helper reshapes to 512 dimensions.
+    probe = (torch.randn(192, 512), torch.zeros(192))
+    workflow = helper.option_intervention_workflow(model, 0, probe, probe)
+    result = workflow(model, TensorDict({"reference_input": inputs, "alternative_input": inputs.clone()}, []))
+    assert len(workflow.steps) == 8
+    assert set(result["metrics", "scores"]) == {"clean", "intervention", "sham", "wrong_layer", "randomized_probe"}
+    torch.testing.assert_close(result["logits", "intervention"], result["replacement", "intervention"])
+
+    consumer = Workflow(workflow.steps[3])
+    with pytest.raises(ValueError, match="missing"):
+        consumer(model, TensorDict({"alternative_input": inputs}, []))
+    replacement = torch.zeros_like(inputs)
+    changed = consumer(
+        model,
+        TensorDict(
+            {
+                "alternative_input": inputs,
+                ("replacement", "intervention"): replacement,
+            },
+            [],
+        ),
+    )
+    torch.testing.assert_close(changed["logits", "intervention"], replacement)
     assert all(not block._forward_hooks for block in model.blocks)

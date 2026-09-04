@@ -16,7 +16,7 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-from tensordict import TensorDict
+from tensordict import NonTensorData, TensorDict
 from tensordict.nn import TensorDictModule
 from torch.nn import functional as F
 
@@ -173,40 +173,92 @@ def _evaluate_options(
     probe: tuple[torch.Tensor, torch.Tensor],
     randomized_probe: tuple[torch.Tensor, torch.Tensor],
 ) -> dict[str, float]:
-    option_1_activation, option_1_logits = _capture(model, option_1, layer)
-    option_2_activation, option_2_logits = _capture(model, option_2, layer)
-    desired = _probe_logits(option_1_activation[:, -1], probe).argmax(-1).expand(len(option_2), -1)
-    optimized, _, _ = _inverse_map(option_2_activation[:, -1], desired, probe)
-    delta = optimized - option_2_activation[:, -1]
+    workflow = option_intervention_workflow(model, layer, probe, randomized_probe)
+    result = workflow(model, TensorDict({"reference_input": option_1, "alternative_input": option_2}, []))
+    return result["metrics", "scores"]
 
-    replacement = option_2_activation.clone()
-    replacement[:, -1] = optimized
-    intervention_logits = _replace(model, option_2, layer, replacement)
 
-    sham_logits = _replace(model, option_2, layer, option_2_activation)
+def option_intervention_workflow(model, layer, probe, randomized_probe) -> Workflow:
+    """Capture both options, derive replacements, apply controls, and score.
 
-    wrong_layer = (layer + 4) % 8
-    wrong_activation, _ = _capture(model, option_2, wrong_layer)
-    wrong_replacement = wrong_activation.clone()
-    wrong_replacement[:, -1] += delta
-    wrong_logits = _replace(model, option_2, wrong_layer, wrong_replacement)
+    Model and probe configuration is fixed when constructing the workflow.
+    Every per-game activation, replacement, and prediction travels through
+    declared TensorDict keys rather than a closure over an earlier result.
+    """
 
-    random_desired = _probe_logits(option_1_activation[:, -1], randomized_probe).argmax(-1).expand(len(option_2), -1)
-    random_optimized, _, _ = _inverse_map(option_2_activation[:, -1], random_desired, randomized_probe)
-    random_replacement = option_2_activation.clone()
-    random_replacement[:, -1] = random_optimized
-    randomized_logits = _replace(model, option_2, layer, random_replacement)
+    def replacements(reference, alternative):
+        desired = _probe_logits(reference[:, -1], probe).argmax(-1).expand(len(alternative), -1)
+        optimized, _, _ = _inverse_map(alternative[:, -1], desired, probe)
+        replacement = alternative.clone()
+        replacement[:, -1] = optimized
+        delta = optimized - alternative[:, -1]
+        random_desired = _probe_logits(reference[:, -1], randomized_probe).argmax(-1).expand(len(alternative), -1)
+        random_optimized, _, _ = _inverse_map(alternative[:, -1], random_desired, randomized_probe)
+        random_replacement = alternative.clone()
+        random_replacement[:, -1] = random_optimized
+        return replacement, delta, random_replacement
 
-    reference = option_1_logits[:, -1].expand(len(option_2), -1)
-    clean_similarity = _cosine(option_2_logits[:, -1], reference).mean()
-    scores = {
-        "clean": float(clean_similarity.cpu()),
-        "intervention": float(_cosine(intervention_logits[:, -1], reference).mean().cpu()),
-        "sham": float(_cosine(sham_logits[:, -1], reference).mean().cpu()),
-        "wrong_layer": float(_cosine(wrong_logits[:, -1], reference).mean().cpu()),
-        "randomized_probe": float(_cosine(randomized_logits[:, -1], reference).mean().cpu()),
-    }
-    return scores
+    def wrong_layer_prediction(inputs, delta):
+        wrong_layer = (layer + 4) % 8
+        wrong_activation, _ = _capture(model, inputs, wrong_layer)
+        replacement = wrong_activation.clone()
+        replacement[:, -1] += delta
+        return _replace(model, inputs, wrong_layer, replacement)
+
+    def score(reference, clean, intervention, sham, wrong_layer, randomized):
+        reference = reference[:, -1].expand(len(clean), -1)
+        predictions = dict(
+            clean=clean, intervention=intervention, sham=sham, wrong_layer=wrong_layer, randomized_probe=randomized
+        )
+        return NonTensorData(
+            {name: float(_cosine(logits[:, -1], reference).mean().cpu()) for name, logits in predictions.items()}
+        )
+
+    steps = [
+        TensorDictModule(
+            lambda inputs: _capture(model, inputs, layer),
+            ["reference_input"],
+            [("activations", "reference"), ("logits", "reference")],
+        ),
+        TensorDictModule(
+            lambda inputs: _capture(model, inputs, layer),
+            ["alternative_input"],
+            [("activations", "alternative"), ("logits", "clean")],
+        ),
+        TensorDictModule(
+            replacements,
+            [("activations", "reference"), ("activations", "alternative")],
+            [("replacement", "intervention"), ("replacement", "delta"), ("replacement", "randomized")],
+        ),
+    ]
+    for condition, source in (
+        ("intervention", ("replacement", "intervention")),
+        ("sham", ("activations", "alternative")),
+        ("randomized", ("replacement", "randomized")),
+    ):
+        steps.append(
+            TensorDictModule(
+                lambda inputs, value: _replace(model, inputs, layer, value),
+                ["alternative_input", source],
+                [("logits", condition)],
+            )
+        )
+    steps.extend(
+        [
+            TensorDictModule(
+                wrong_layer_prediction, ["alternative_input", ("replacement", "delta")], [("logits", "wrong_layer")]
+            ),
+            TensorDictModule(
+                score,
+                [
+                    ("logits", name)
+                    for name in ("reference", "clean", "intervention", "sham", "wrong_layer", "randomized")
+                ],
+                [("metrics", "scores")],
+            ),
+        ]
+    )
+    return Workflow(*steps)
 
 
 def _bootstrap_mean_ci(values: np.ndarray, *, seed: int, samples: int = 2000) -> tuple[np.ndarray, np.ndarray]:

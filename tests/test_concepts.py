@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
 
 import pytest
@@ -8,6 +9,7 @@ from tdhook.attribution import LRP
 from tdhook.concepts import (
     ChannelConditionedLRP,
     ConceptSelection,
+    _contextual_gradient_hook,
     _uniform_selection,
     concept_channel_gradient_callback,
 )
@@ -261,6 +263,29 @@ def test_conditioned_selection_is_local_to_each_execution_context(default_test_m
     assert torch.equal(first[:, 1], torch.zeros(2))
     assert torch.equal(second[:, 0], torch.zeros(2))
     assert torch.equal(second[:, 1], -torch.ones(2))
+
+
+def test_forward_selection_survives_backward_on_another_thread(default_test_model):
+    method = ChannelConditionedLRP(LRP(warn_on_missing_rule=False), condition_module="linear1")
+    with method.prepare(default_test_model) as module:
+        bound = method._bindings[module.td_module]
+        inputs = TensorDict({"input": torch.ones(2, 10)}, [2])
+        bound._init_attr_inputs(
+            inputs, _conditioned_artifacts(torch.zeros(2, dtype=torch.long), torch.ones(2, dtype=torch.long))
+        )
+        first = _contextual_gradient_hook(bound._output_grad_callbacks["linear1"])
+        bound._init_attr_inputs(
+            inputs, _conditioned_artifacts(torch.ones(2, dtype=torch.long), -torch.ones(2, dtype=torch.long))
+        )
+        second = _contextual_gradient_hook(bound._output_grad_callbacks["linear1"])
+        with ThreadPoolExecutor(max_workers=1) as worker:
+            first_gradient = worker.submit(first, torch.ones(2, 20)).result()
+            second_gradient = worker.submit(second, torch.ones(2, 20)).result()
+    assert first_gradient[:, 0].eq(1).all()
+    assert first_gradient[:, 1:].eq(0).all()
+    assert second_gradient[:, 1].eq(-1).all()
+    assert second_gradient[:, 0].eq(0).all()
+    assert second_gradient[:, 2:].eq(0).all()
 
 
 def test_concept_channel_gradient_callback_validates_its_selection_and_shape():
