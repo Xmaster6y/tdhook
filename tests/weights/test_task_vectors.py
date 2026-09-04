@@ -34,6 +34,12 @@ class TestTaskVectors:
             vector = hooked_module.get_task_vector(finetuned_model)
             alpha = context.compute_alpha(vector)
             assert alpha == 0.1
+            inferred_weights = hooked_module.get_weights(vector)
+            expected_weights = hooked_module._weights + vector * alpha
+            for inferred, expected in zip(
+                inferred_weights.flatten_keys().values(), expected_weights.flatten_keys().values()
+            ):
+                torch.testing.assert_close(inferred, expected)
 
     def test_get_task_vectors(self):
         """Test getting task vectors."""
