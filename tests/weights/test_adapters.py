@@ -21,7 +21,7 @@ class TestAdapters:
         adapters = {"linear2": (_DoubleAdapter(), adapter_source, adapter_target)}
         ctx_factory = Adapters(adapters=adapters)
 
-        with ctx_factory.bind(default_test_model) as hooked:
+        with ctx_factory.prepare(default_test_model) as hooked:
             patched_data = hooked(data.clone())
             patched_out = patched_data["output"]
             assert not torch.allclose(baseline_out, patched_out)
@@ -37,7 +37,7 @@ class TestAdapters:
                 source=CaptureSource(0, detach=False) if adapter_source != adapter_target else None,
             )
         )
-        assert hooked.binding.program == HookProgram(tuple(expected_specs))
+        assert hooked.hooking_context.program == HookProgram(tuple(expected_specs))
 
         restored_out = default_test_model(data["input"])
         assert torch.allclose(baseline_out, restored_out)
@@ -52,7 +52,7 @@ class TestAdapters:
         adapters = {"broken": (_DoubleAdapter(), "linear1", "missing")}
 
         with pytest.raises(ValueError, match="missing"):
-            with Adapters(adapters).bind(default_test_model):
+            with Adapters(adapters).prepare(default_test_model):
                 pass
 
         assert not default_test_model.linear1._forward_hooks
@@ -72,7 +72,7 @@ class TestAdapters:
         model = ConditionalSource()
         method = Adapters({"conditional": (_DoubleAdapter(), "source", "destination")})
 
-        with method.bind(model) as prepared:
+        with method.prepare(model) as prepared:
             prepared(TensorDict({"input": torch.ones(1, 2)}, batch_size=[1]))
             with pytest.raises(RuntimeError, match="fresh source capture"):
                 prepared(TensorDict({"input": -torch.ones(1, 2)}, batch_size=[1]))

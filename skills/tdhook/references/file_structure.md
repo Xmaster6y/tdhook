@@ -16,13 +16,13 @@ src/tdhook/
 ├── _types.py             # Nested-key validation and composition helpers
 ├── artifacts.py          # Distributed TensorDict artifact transport
 ├── concepts.py           # Concept definitions and utilities
-├── methods.py            # Method and BoundMethod lifecycle
+├── contexts.py           # HookingContextFactory and HookingContext lifecycle
 ├── dimension.py          # Dimension-estimation workflow helpers
 ├── execution.py          # Internal execution requirements
 ├── hooks.py              # Hook factories and low-level handles
 ├── interventions.py      # Optimized activation interventions
 ├── metrics.py            # InfidelityMetric, SensitivityMetric
-├── modules.py            # BoundModule and TensorDict wrappers
+├── modules.py            # HookedModule and TensorDict wrappers
 ├── paths.py              # Safe submodule-path resolution
 ├── runtime.py            # Immutable hook programs and bound execution
 ├── session.py            # Public imperative HookSession lifecycle

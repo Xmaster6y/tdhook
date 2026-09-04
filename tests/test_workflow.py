@@ -7,10 +7,10 @@ from tensordict import TensorDict
 from tensordict.nn import TensorDictModule, TensorDictModuleBase
 from torch import nn
 
-from tdhook.methods import BoundMethod, Method
+from tdhook.contexts import HookingContext, HookingContextFactory
 from tdhook.execution import AutogradLifetime, ExecutionSpec, GradientMode
 from tdhook.latent import ActivationCaching
-from tdhook.modules import BoundModule
+from tdhook.modules import HookedModule
 from tdhook.runtime import BoundHookProgram, HookProgramBuilder, HookSpec
 from tdhook.targets import Target
 from tdhook.workflow import Workflow, WorkflowHandoffError, WorkflowUpdate, _DeferredAutogradCleanup
@@ -27,12 +27,12 @@ class CountingModel(nn.Module):
         return self.model(value)
 
 
-class CaptureOutput(Method):
+class CaptureOutput(HookingContextFactory):
     def __init__(self):
         super().__init__()
         self.values = []
 
-    def _install_hooks(self, module: BoundModule) -> BoundHookProgram:
+    def _hook_module(self, module: HookedModule) -> BoundHookProgram:
         def capture(_module, _args, output):
             self.values.append(output.detach())
 
@@ -46,8 +46,8 @@ class CaptureOutput(Method):
             return builder.build()
 
 
-class ReplaceOutput(Method):
-    def _install_hooks(self, module: BoundModule) -> BoundHookProgram:
+class ReplaceOutput(HookingContextFactory):
+    def _hook_module(self, module: HookedModule) -> BoundHookProgram:
         def replace(_module, _args, output):
             return output + 1
 
@@ -61,7 +61,7 @@ class ReplaceOutput(Method):
             return builder.build()
 
 
-class BackwardCapture(Method):
+class BackwardCapture(HookingContextFactory):
     def __init__(self, *, fail=False):
         super().__init__()
         self.values = []
@@ -71,7 +71,7 @@ class BackwardCapture(Method):
     def execution_spec(self):
         return ExecutionSpec(gradient_mode=GradientMode.REQUIRED, autograd_lifetime=AutogradLifetime.BACKWARD)
 
-    def _install_hooks(self, module: BoundModule) -> BoundHookProgram:
+    def _hook_module(self, module: HookedModule) -> BoundHookProgram:
         def capture(_module, _grad_input, grad_output):
             self.values.append(grad_output[0].detach())
             if self.fail:
@@ -95,7 +95,7 @@ class InvalidOutput(TensorDictModuleBase):
         return "not a tensordict"
 
 
-class DeferredInvalidMethod(Method):
+class DeferredInvalidMethod(HookingContextFactory):
     def __init__(self):
         super().__init__()
         self.context = None
@@ -104,15 +104,15 @@ class DeferredInvalidMethod(Method):
     def execution_spec(self):
         return ExecutionSpec(gradient_mode=GradientMode.REQUIRED, autograd_lifetime=AutogradLifetime.BACKWARD)
 
-    def bind(self, *args, **kwargs):
-        self.context = super().bind(*args, **kwargs)
+    def prepare(self, *args, **kwargs):
+        self.context = super().prepare(*args, **kwargs)
         return self.context
 
-    def _bind_module(self, module, in_keys, out_keys, extra_relative_path):
+    def _prepare_module(self, module, in_keys, out_keys, extra_relative_path):
         return InvalidOutput()
 
 
-class PublishingModule(BoundModule):
+class PublishingModule(HookedModule):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.out_keys = [*self.out_keys, "published"]
@@ -121,8 +121,8 @@ class PublishingModule(BoundModule):
         return data.set("published", torch.ones(*data.batch_size))
 
 
-class PublishingMethod(Method):
-    _bound_module_class = PublishingModule
+class PublishingMethod(HookingContextFactory):
+    _hooked_module_class = PublishingModule
 
 
 class HandoffMutation(TensorDictModuleBase):
@@ -336,7 +336,7 @@ def test_workflow_composes_a_method_and_native_tensordict_operator(default_test_
         in_keys=["prediction"],
         out_keys=[("summary", "mean")],
     )
-    workflow = Workflow(Method(), summarise)
+    workflow = Workflow(HookingContextFactory(), summarise)
     data = TensorDict({"source": {"input": torch.ones(2, 10)}}, batch_size=[2])
 
     result = workflow(model, data)
@@ -373,7 +373,7 @@ def test_method_publication_contract_applies_to_standalone_and_workflow_executio
     data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
     method = PublishingMethod()
 
-    with method.bind(default_test_model) as prepared:
+    with method.prepare(default_test_model) as prepared:
         standalone = prepared(data.clone())
     workflow_result = Workflow(method)(default_test_model, data.clone())
 
@@ -577,8 +577,8 @@ def test_workflow_method_does_not_require_optional_metadata(default_test_model):
         def execution_spec(self):
             return ExecutionSpec()
 
-        def bind(self, model):
-            return Method().bind(model)
+        def prepare(self, model):
+            return HookingContextFactory().prepare(model)
 
     data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
 
@@ -588,55 +588,55 @@ def test_workflow_method_does_not_require_optional_metadata(default_test_model):
 
 
 def test_workflow_rejects_invalid_method_protocol_results(default_test_model):
-    class InvalidSpec(Method):
+    class InvalidSpec(HookingContextFactory):
         @property
         def execution_spec(self):
             return object()
 
-    class InvalidContext(Method):
-        def bind(self, model):
+    class InvalidContext(HookingContextFactory):
+        def prepare(self, model):
             return object()
 
-    class NonModuleContext(BoundMethod):
+    class NonModuleContext(HookingContext):
         def __enter__(self):
             self._in_context = True
             return object()
 
-    class InvalidPrepared(Method):
-        _binding_class = NonModuleContext
+    class InvalidPrepared(HookingContextFactory):
+        _hooking_context_class = NonModuleContext
 
-    class MissingBindingContext(BoundMethod):
+    class MissingBindingContext(HookingContext):
         def __enter__(self):
             self._in_context = True
             return TensorDictModule(lambda value: value, in_keys=["input"], out_keys=["output"])
 
-    class MissingBinding(Method):
-        _binding_class = MissingBindingContext
+    class MissingBinding(HookingContextFactory):
+        _hooking_context_class = MissingBindingContext
 
-    class NonModuleContractContext(BoundMethod):
+    class NonModuleContractContext(HookingContext):
         @property
         def module(self):
             return object()
 
-    class NonModuleContract(Method):
-        _binding_class = NonModuleContractContext
+    class NonModuleContract(HookingContextFactory):
+        _hooking_context_class = NonModuleContractContext
 
-    class InvalidContractContext(BoundMethod):
+    class InvalidContractContext(HookingContext):
         @property
         def module(self):
             return TensorDictModule(lambda value: value, in_keys=["input"], out_keys=["output"])
 
-    class InvalidContract(Method):
-        _binding_class = InvalidContractContext
+    class InvalidContract(HookingContextFactory):
+        _hooking_context_class = InvalidContractContext
 
     data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
     cases = (
         (InvalidSpec(), "ExecutionSpec"),
-        (InvalidContext(), "BoundMethod"),
+        (InvalidContext(), "HookingContext"),
         (InvalidPrepared(), "TensorDictModuleBase"),
-        (MissingBinding(), "invalid bound module"),
+        (MissingBinding(), "invalid hooked module"),
         (NonModuleContract(), "TensorDictModuleBase"),
-        (InvalidContract(), "invalid bound module"),
+        (InvalidContract(), "invalid hooked module"),
     )
     for method, message in cases:
         try:
@@ -650,8 +650,8 @@ def test_workflow_rejects_invalid_method_protocol_results(default_test_model):
 def test_workflow_rejects_non_tensordict_step_results(default_test_model):
     data = TensorDict({"input": torch.ones(2, 10)}, batch_size=[2])
 
-    class InvalidMethod(Method):
-        def _bind_module(self, module, in_keys, out_keys, extra_relative_path):
+    class InvalidMethod(HookingContextFactory):
+        def _prepare_module(self, module, in_keys, out_keys, extra_relative_path):
             return InvalidOutput()
 
     for step, message in ((InvalidOutput(), "operator"), (InvalidMethod(), "method execution")):

@@ -1,4 +1,4 @@
-"""Method-owned execution requirements not represented by TensorDict modules."""
+"""HookingContextFactory-owned execution requirements not represented by TensorDict modules."""
 
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ class ExecutionSpec:
     TensorDict cannot express: the number of model passes and whether those
     passes require autograd and when autograd-dependent resources may be
     released. ``CALL`` methods complete their autograd work while they run;
-    ``BACKWARD`` methods require their hooks and bound state through a
+    ``BACKWARD`` methods require their hooks and prepared state through a
     caller-driven backward pass.
     """
 

@@ -14,9 +14,9 @@ from tensordict.utils import NestedKey
 
 from tdhook._types import is_nested_key, join_keys
 from tdhook.attribution import LRP
-from tdhook.methods import Method
+from tdhook.contexts import HookingContextFactory
 from tdhook.execution import ExecutionSpec
-from tdhook.modules import BoundModule
+from tdhook.modules import HookedModule
 from tdhook.runtime import BoundHookProgram
 
 
@@ -140,7 +140,7 @@ def _uniform_selection(selection: TensorDictBase) -> tuple[int, int]:
     return selected_channel, selected_direction
 
 
-class ChannelConditionedLRP(Method):
+class ChannelConditionedLRP(HookingContextFactory):
     """Run LRP using a channel selection read from the execution TensorDict.
 
     The configured method has no side cache shared between passes. Its bound
@@ -172,13 +172,13 @@ class ChannelConditionedLRP(Method):
         self.selection_key = selection_key
         self.attribution_key = attribution_key
         self._bindings: WeakKeyDictionary[TensorDictModuleBase, LRP] = WeakKeyDictionary()
-        self._bound_module_kwargs = dict(base._bound_module_kwargs)
+        self._hooked_module_kwargs = dict(base._hooked_module_kwargs)
 
     @property
     def execution_spec(self) -> ExecutionSpec:
         return self.base.execution_spec
 
-    def _bind_module(self, module, in_keys, out_keys, extra_relative_path):
+    def _prepare_module(self, module, in_keys, out_keys, extra_relative_path):
         bound = copy(self.base)
         bound._additional_init_keys = [
             *bound._additional_init_keys,
@@ -208,12 +208,12 @@ class ChannelConditionedLRP(Method):
 
         bound._init_attr_inputs = initialise
         bound._output_grad_callbacks = {**bound._output_grad_callbacks, self.condition_module: condition}
-        bound_module = bound._bind_module(module, in_keys, out_keys, extra_relative_path)
+        bound_module = bound._prepare_module(module, in_keys, out_keys, extra_relative_path)
         self._bindings[bound_module] = bound
         return bound_module
 
-    def _install_hooks(self, module: BoundModule) -> BoundHookProgram:
-        return self._bindings[module.td_module]._install_hooks(module)
+    def _hook_module(self, module: HookedModule) -> BoundHookProgram:
+        return self._bindings[module.td_module]._hook_module(module)
 
     def _restore_module(self, module, in_keys, out_keys, extra_relative_path):
         return module

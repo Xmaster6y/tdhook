@@ -5,14 +5,14 @@ from tensordict.nn import TensorDictModule
 from torch import nn
 from torch.nn.utils import prune
 
-from tdhook.methods import Method
+from tdhook.contexts import HookingContextFactory
 from tdhook.hooks import merge_paths
-from tdhook.modules import BoundModule
+from tdhook.modules import HookedModule
 from tdhook.paths import resolve_submodule_path
 from tdhook.runtime import BoundHookProgram, HookProgramBuilder, HookSpec
 
 
-class Pruning(Method):
+class Pruning(HookingContextFactory):
     """
     Relevance-based pruning :cite:`Yeom2019PruningBE` and circuit pruning :cite:`Pochinkov2024DissectingLM`.
     """
@@ -35,7 +35,7 @@ class Pruning(Method):
         self._skip_modules = skip_modules
         self._relative_path = relative_path or ""
 
-    def _install_hooks(self, module: BoundModule) -> BoundHookProgram:
+    def _hook_module(self, module: HookedModule) -> BoundHookProgram:
         root_path = merge_paths(module.relative_path, self._relative_path)
         root_module = resolve_submodule_path(module.hook_root, root_path)
         if self._pruning_reparameterizations(root_module):

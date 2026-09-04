@@ -17,9 +17,9 @@ def test_interactive_and_prepared_capture_share_one_program_model(default_test_m
         default_test_model(inputs)
 
     factory = ActivationCaching("linear2")
-    with factory.bind(default_test_model) as method:
+    with factory.prepare(default_test_model) as method:
         method(inputs)
-    prepared_program = method.binding.program
+    prepared_program = method.hooking_context.program
 
     assert prepared_program is not None
     assert [(spec.module_path, spec.operation, spec.direction, spec.prepend) for spec in session.program.hooks] == [
@@ -155,10 +155,10 @@ def test_program_builder_rejects_invalid_target_hook_specs():
     builder.remove()
 
 
-def test_program_omits_occurrence_specs_for_unselected_hooks():
+def test_program_omits_occurrence_plans_for_unselected_hooks():
     target = Target("", "activation", -1, (0,))
 
-    assert HookProgram((HookSpec("", "capture", "fwd", target=target),)).occurrence_specs == ()
+    assert HookProgram((HookSpec("", "capture", "fwd", target=target),)).occurrence_plans == ()
 
 
 def test_temporary_module_state_rejects_hook_specs():

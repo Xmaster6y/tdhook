@@ -11,7 +11,7 @@ from tdhook.hooks import (
 )
 
 if TYPE_CHECKING:
-    from tdhook.methods import BoundMethod
+    from tdhook.contexts import HookingContext
 
 
 def get_best_device():
@@ -256,19 +256,19 @@ class IntermediateKeysCleaner(TensorDictModuleBase):
         return f"{type(self).__name__}(\n{fields})"
 
 
-class BoundModule(TensorDictModuleWrapper):
-    """Internal execution wrapper owned by :class:`BoundMethod`."""
+class HookedModule(TensorDictModuleWrapper):
+    """Internal execution wrapper owned by :class:`HookingContext`."""
 
     def __init__(
         self,
         td_module: TensorDictModuleBase,
         hook_root: TensorDictModuleBase,
-        binding: Optional["BoundMethod"] = None,
+        hooking_context: Optional["HookingContext"] = None,
         relative_path: str = "",
     ):
         super().__init__(td_module)
         self._hook_root = hook_root
-        self._binding = binding
+        self._hooking_context = hooking_context
         self._relative_path = relative_path
 
     @property
@@ -289,8 +289,8 @@ class BoundModule(TensorDictModuleWrapper):
         return f"{type(self).__name__}(\n{fields})"
 
     @property
-    def binding(self) -> Optional["BoundMethod"]:
-        return self._binding
+    def hooking_context(self) -> Optional["HookingContext"]:
+        return self._hooking_context
 
     def finalize_tensordict(self, data: TensorDictBase) -> TensorDictBase:
         """Publish method-owned products after a shared model execution."""
@@ -298,7 +298,7 @@ class BoundModule(TensorDictModuleWrapper):
         return data
 
     def forward(self, *args, **kwargs):
-        if self._binding is not None and not self._binding._in_context:
-            raise RuntimeError("Contextual BoundModule must be called in context")
+        if self._hooking_context is not None and not self._hooking_context._in_context:
+            raise RuntimeError("Contextual HookedModule must be called in context")
         result = self.td_module(*args, **kwargs)
         return self.finalize_tensordict(result) if isinstance(result, TensorDictBase) else result

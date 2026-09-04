@@ -9,7 +9,7 @@ from tensordict.utils import NestedKey
 from tdhook.attribution.gradient_helpers import GradientAttribution
 from tdhook._types import join_keys
 from tdhook.attribution.lrp_helpers.rules import Rule
-from tdhook.modules import BoundModule
+from tdhook.modules import HookedModule
 from tdhook.runtime import BoundHookProgram, HookProgramBuilder, HookSpec
 
 
@@ -73,14 +73,14 @@ class LRP(GradientAttribution):
         self._warn_on_missing_rule = warn_on_missing_rule
         self._skip_modules = skip_modules
 
-    def _bind_module(self, module, in_keys, out_keys, extra_relative_path):
-        pipeline = super()._bind_module(module, in_keys, out_keys, extra_relative_path)
+    def _prepare_module(self, module, in_keys, out_keys, extra_relative_path):
+        pipeline = super()._prepare_module(module, in_keys, out_keys, extra_relative_path)
         public_in_keys = [*in_keys, *self._additional_init_keys]
         attribution_sources = [*(in_keys if self._use_inputs else ()), *self._input_modules]
         public_out_keys = [*out_keys, *(join_keys(self._attr_key, key) for key in attribution_sources)]
         return _LRPModule(pipeline, public_in_keys, public_out_keys)
 
-    def _install_hooks(self, module: BoundModule) -> BoundHookProgram:
+    def _hook_module(self, module: HookedModule) -> BoundHookProgram:
         with HookProgramBuilder() as program:
             root = program.resolve_path(module.hook_root, "", relative_path=module.relative_path)
             for name, child in root.named_modules():

@@ -4,12 +4,12 @@ from typing import Optional, Iterable, Callable, Generator
 from tensordict import TensorDict
 from contextlib import contextmanager
 
-from tdhook.methods import Method, BoundMethod
-from tdhook.modules import BoundModule
+from tdhook.contexts import HookingContextFactory, HookingContext
+from tdhook.modules import HookedModule
 from tdhook.runtime import HookProgram, HookSpec, temporary_module_state
 
 
-class TaskVectorsBinding(BoundMethod):
+class TaskVectorsContext(HookingContext):
     def __init__(
         self,
         *args,
@@ -25,12 +25,12 @@ class TaskVectorsBinding(BoundMethod):
 
     def compute_alpha(self, vector: TensorDict) -> float:
         """Compute alpha"""
-        if self._bound_module is None or not self._in_context:
+        if self._hooked_module is None or not self._in_context:
             raise RuntimeError("Cannot compute alpha outside of context")
 
         adequate_values = []
         for value in self.alphas:
-            with self._bound_module.with_applied_vectors(vector, alpha=value) as module:
+            with self._hooked_module.with_applied_vectors(vector, alpha=value) as module:
                 if self.get_control_adequacy(module):
                     adequate_values.append((value, self.get_test_accuracy(module)))
         if not adequate_values:
@@ -38,7 +38,7 @@ class TaskVectorsBinding(BoundMethod):
         return max(adequate_values, key=lambda x: x[1])[0]
 
 
-class TaskVectorsModule(BoundModule):
+class TaskVectorsModule(HookedModule):
     def __init__(
         self,
         *args,
@@ -68,9 +68,9 @@ class TaskVectorsModule(BoundModule):
     def get_weights(self, *vectors: TensorDict, alpha: Optional[float] = None) -> TensorDict:
         """Get weights"""
         if alpha is None:
-            if self.binding is None or not isinstance(self.binding, TaskVectorsBinding):
+            if self.hooking_context is None or not isinstance(self.hooking_context, TaskVectorsContext):
                 raise RuntimeError("Module is not bound with TaskVectors")
-            alpha = self.binding.compute_alpha(sum(vectors))
+            alpha = self.hooking_context.compute_alpha(sum(vectors))
         return self._weights + sum(vectors) * alpha
 
     @contextmanager
@@ -87,13 +87,13 @@ class TaskVectorsModule(BoundModule):
             yield self
 
 
-class TaskVectors(Method):
+class TaskVectors(HookingContextFactory):
     """
     Task vectors :cite:`Ilharco2022EditingMW`.
     """
 
-    _binding_class = TaskVectorsBinding
-    _bound_module_class = TaskVectorsModule
+    _hooking_context_class = TaskVectorsContext
+    _hooked_module_class = TaskVectorsModule
 
     def __init__(
         self,
@@ -102,7 +102,7 @@ class TaskVectors(Method):
         get_control_adequacy: Callable[[nn.Module], bool],
     ):
         super().__init__()
-        self._binding_kwargs.update(
+        self._hooking_context_kwargs.update(
             {
                 "alphas": alphas,
                 "get_test_accuracy": get_test_accuracy,

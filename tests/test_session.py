@@ -685,8 +685,8 @@ def test_session_selects_multiple_occurrences_and_exposes_immutable_evidence():
     assert torch.equal(first, torch.tensor([[1.0, 2.0, 3.0]]))
     assert torch.equal(second, torch.tensor([[2.0, 3.0, 4.0]]))
     assert [value.item() for value in captured.values] == [1.0, 3.0, 2.0, 4.0]
-    assert session.program.occurrence_specs[0].target_path == "shared"
-    assert session.program.occurrence_specs[0].selected_indices == (0, 2)
+    assert session.program.occurrence_plans[0].target_path == "shared"
+    assert session.program.occurrence_plans[0].selected_indices == (0, 2)
     assert tuple(item.root_pass for item in session.occurrence_evidence) == (0, 1)
     assert all(item.selected_indices == (0, 2) for item in session.occurrence_evidence)
     assert all(item.observed_indices == (0, 1, 2) for item in session.occurrence_evidence)

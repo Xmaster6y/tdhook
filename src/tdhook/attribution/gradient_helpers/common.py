@@ -6,7 +6,7 @@ from tensordict.nn import TensorDictModule, TensorDictModuleBase
 from tensordict import TensorDict
 from tensordict.utils import NestedKey
 
-from tdhook.methods import Method
+from tdhook.contexts import HookingContextFactory
 from tdhook.modules import (
     _CacheRefSequential,
     FunctionModule,
@@ -15,14 +15,14 @@ from tdhook.modules import (
     ModuleCallWithCache,
 )
 from tdhook._types import join_keys
-from tdhook.modules import BoundModule
+from tdhook.modules import HookedModule
 from tdhook.hooks import HookFactory, MutableWeakRef, TensorDictRef
 from tdhook.execution import ExecutionSpec, GradientMode
 from tdhook.runtime import BoundHookProgram, HookProgramBuilder, HookSpec
 
 
 class _GradientPipeline(_CacheRefSequential):
-    """Named access to resources shared by a gradient method binding."""
+    """Named access to resources shared by a gradient method context."""
 
     def __init__(self, *modules, cache_ref: TensorDictRef, register_inputs, module_call, attributor):
         super().__init__(*modules, cache_ref=cache_ref)
@@ -43,7 +43,7 @@ class _GradientPipeline(_CacheRefSequential):
         return self._attributor
 
 
-class GradientAttribution(Method, metaclass=ABCMeta):
+class GradientAttribution(HookingContextFactory, metaclass=ABCMeta):
     """
     Base class for gradient attribution.
     """
@@ -87,7 +87,7 @@ class GradientAttribution(Method, metaclass=ABCMeta):
 
         return ExecutionSpec(gradient_mode=GradientMode.REQUIRED)
 
-    def _bind_module(
+    def _prepare_module(
         self,
         module: TensorDictModuleBase,
         in_keys: List[NestedKey],
@@ -145,12 +145,12 @@ class GradientAttribution(Method, metaclass=ABCMeta):
             attributor=attributor,
         )
 
-    def _install_hooks(self, module: BoundModule) -> BoundHookProgram:
+    def _hook_module(self, module: HookedModule) -> BoundHookProgram:
         with HookProgramBuilder() as program:
             self._register_hook_program(module, program)
             return program.build()
 
-    def _register_hook_program(self, module: BoundModule, program: HookProgramBuilder) -> None:
+    def _register_hook_program(self, module: HookedModule, program: HookProgramBuilder) -> None:
         """Add this attribution's hooks to an open program builder."""
 
         cache_ref = module.td_module.cache_ref
@@ -292,7 +292,7 @@ class GradientAttributionWithBaseline(GradientAttribution):
         self._baseline_key = baseline_key
         self._multiply_by_inputs = multiply_by_inputs
 
-    def _bind_module(
+    def _prepare_module(
         self,
         module: TensorDictModuleBase,
         in_keys: List[NestedKey],
@@ -303,7 +303,7 @@ class GradientAttributionWithBaseline(GradientAttribution):
         register_in_keys = [("_register_in", in_key) for in_key in in_keys]
         attr_keys = [join_keys(self._attr_key, in_key) for in_key in in_keys]
         baseline_keys = [(self._baseline_key, in_key) for in_key in in_keys]
-        pipeline = super()._bind_module(module, in_keys, out_keys, extra_relative_path)
+        pipeline = super()._prepare_module(module, in_keys, out_keys, extra_relative_path)
 
         modules = [
             FunctionModule(

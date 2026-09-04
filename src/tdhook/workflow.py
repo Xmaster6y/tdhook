@@ -14,7 +14,7 @@ from tensordict.utils import NestedKey
 from torch import Tensor, nn
 
 from tdhook._types import tensor_leaf_items
-from tdhook.methods import BoundMethod
+from tdhook.contexts import HookingContext
 from tdhook.execution import AutogradLifetime, ExecutionSpec, GradientMode
 
 
@@ -25,7 +25,7 @@ class WorkflowMethod(Protocol):
     @property
     def execution_spec(self) -> ExecutionSpec: ...
 
-    def bind(self, module: nn.Module) -> BoundMethod: ...
+    def prepare(self, module: nn.Module) -> HookingContext: ...
 
 
 @dataclass(frozen=True)
@@ -43,7 +43,7 @@ WorkflowStep = WorkflowMethod | TensorDictModuleBase | WorkflowUpdate
 
 
 @dataclass(frozen=True)
-class _BoundMethodNode:
+class _MethodNode:
     name: str
     in_keys: tuple[NestedKey, ...]
     out_keys: tuple[NestedKey, ...]
@@ -51,7 +51,7 @@ class _BoundMethodNode:
     model_out_keys: tuple[NestedKey, ...]
     execution_spec: ExecutionSpec
     module: TensorDictModuleBase
-    binding: BoundMethod
+    hooking_context: HookingContext
     allow_output_overwrite: bool = False
 
 
@@ -64,7 +64,7 @@ class _OperatorNode:
     allow_output_overwrite: bool = False
 
 
-_ExecutionNode = _BoundMethodNode | _OperatorNode
+_ExecutionNode = _MethodNode | _OperatorNode
 
 
 def _artifact_leaf_keys(data: TensorDictBase) -> frozenset[NestedKey]:
@@ -221,36 +221,38 @@ def _method_spec(method: WorkflowMethod) -> ExecutionSpec:
     return spec
 
 
-def _bind_method(
+def _prepare_method(
     index: int,
     method: WorkflowMethod,
     model: nn.Module,
     *,
     allow_output_overwrite: bool = False,
-) -> _BoundMethodNode:
-    binding = method.bind(model)
-    if not isinstance(binding, BoundMethod):
-        raise TypeError(f"{type(method).__name__}.bind(model) must return a BoundMethod, got {type(binding).__name__}")
-    bound_module = binding.module
-    if not isinstance(bound_module, TensorDictModuleBase):
+) -> _MethodNode:
+    context = method.prepare(model)
+    if not isinstance(context, HookingContext):
         raise TypeError(
-            f"{type(method).__name__}.bind(model) must bind a TensorDictModuleBase, got {type(bound_module).__name__}"
+            f"{type(method).__name__}.prepare(model) must return a HookingContext, got {type(context).__name__}"
         )
-    if not isinstance(getattr(bound_module, "td_module", None), TensorDictModuleBase) or not callable(
-        getattr(bound_module, "finalize_tensordict", None)
+    hooked_module = context.module
+    if not isinstance(hooked_module, TensorDictModuleBase):
+        raise TypeError(
+            f"{type(method).__name__}.prepare(model) must prepare a TensorDictModuleBase, got {type(hooked_module).__name__}"
+        )
+    if not isinstance(getattr(hooked_module, "td_module", None), TensorDictModuleBase) or not callable(
+        getattr(hooked_module, "finalize_tensordict", None)
     ):
         raise TypeError(
-            f"{type(method).__name__}.bind(model) returned an invalid bound module, got {type(bound_module).__name__}"
+            f"{type(method).__name__}.prepare(model) returned an invalid hooked module, got {type(hooked_module).__name__}"
         )
-    return _BoundMethodNode(
+    return _MethodNode(
         name=_step_name(index, method),
-        in_keys=tuple(bound_module.in_keys),
-        out_keys=tuple(bound_module.out_keys),
-        model_in_keys=binding.model_in_keys,
-        model_out_keys=binding.model_out_keys,
+        in_keys=tuple(hooked_module.in_keys),
+        out_keys=tuple(hooked_module.out_keys),
+        model_in_keys=context.model_in_keys,
+        model_out_keys=context.model_out_keys,
         execution_spec=_method_spec(method),
-        module=bound_module,
-        binding=binding,
+        module=hooked_module,
+        hooking_context=context,
         allow_output_overwrite=allow_output_overwrite,
     )
 
@@ -270,8 +272,8 @@ def _key_paths_overlap(left: NestedKey, right: NestedKey) -> bool:
     return left_path[:common] == right_path[:common]
 
 
-def _validate_workflow_method(node: _BoundMethodNode) -> None:
-    program = node.binding.program
+def _validate_workflow_method(node: _MethodNode) -> None:
+    program = node.hooking_context.program
     if (
         node.execution_spec.gradient_mode is not GradientMode.REQUIRED
         and program is not None
@@ -283,7 +285,7 @@ def _validate_workflow_method(node: _BoundMethodNode) -> None:
 
 
 class _DeferredAutogradCleanup:
-    """Close method bindings after the caller's autograd engine finishes."""
+    """Close method contexts after the caller's autograd engine finishes."""
 
     def __init__(self, stack: ExitStack):
         self._stack = stack
@@ -420,15 +422,12 @@ class Workflow:
                     )
                 )
             else:
-                nodes.append(_bind_method(index, actual, model, allow_output_overwrite=overwrite))
+                nodes.append(_prepare_method(index, actual, model, allow_output_overwrite=overwrite))
 
         _validate_dependencies(nodes, data)
         for index, node in enumerate(nodes[:-1]):
-            if (
-                isinstance(node, _BoundMethodNode)
-                and node.execution_spec.autograd_lifetime is AutogradLifetime.BACKWARD
-            ):
-                if any(isinstance(later, _BoundMethodNode) for later in nodes[index + 1 :]):
+            if isinstance(node, _MethodNode) and node.execution_spec.autograd_lifetime is AutogradLifetime.BACKWARD:
+                if any(isinstance(later, _MethodNode) for later in nodes[index + 1 :]):
                     raise ValueError(
                         "A deferred-backward workflow method cannot precede another model-executing method"
                     )
@@ -436,7 +435,7 @@ class Workflow:
         handoff = _HandoffArtifact.inspect(data)
         if handoff is not None:
             for node in nodes:
-                spec = node.execution_spec if isinstance(node, _BoundMethodNode) else None
+                spec = node.execution_spec if isinstance(node, _MethodNode) else None
                 handoff.validate_step(node.out_keys, spec)
         current = handoff.working_copy() if handoff is not None else data
         working = current
@@ -454,16 +453,16 @@ class Workflow:
                 continue
 
             with ExitStack() as stack:
-                bound_module = stack.enter_context(node.binding)
-                if not isinstance(bound_module, TensorDictModuleBase):
+                hooked_module = stack.enter_context(node.hooking_context)
+                if not isinstance(hooked_module, TensorDictModuleBase):
                     raise TypeError(
                         f"Workflow method {node.name!r} must enter a TensorDictModuleBase, "
-                        f"got {type(bound_module).__name__}"
+                        f"got {type(hooked_module).__name__}"
                     )
-                if bound_module is not node.module:
+                if hooked_module is not node.module:
                     raise TypeError(
-                        f"Workflow method {node.name!r} entered an invalid bound module, "
-                        f"got {type(bound_module).__name__}"
+                        f"Workflow method {node.name!r} entered an invalid hooked module, "
+                        f"got {type(hooked_module).__name__}"
                     )
                 _validate_workflow_method(node)
                 result = node.module(current)
@@ -475,7 +474,7 @@ class Workflow:
                     )
                 if node.execution_spec.autograd_lifetime is AutogradLifetime.BACKWARD:
                     cleanup = _DeferredAutogradCleanup(stack.pop_all())
-                    node.binding.on_hook_failure(cleanup.close)
+                    node.hooking_context.on_hook_failure(cleanup.close)
                     cleanup.arm(current, node.model_out_keys)
             if handoff is not None:
                 handoff.commit(current, working, node.name, node.out_keys)

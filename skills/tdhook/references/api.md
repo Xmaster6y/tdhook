@@ -2,25 +2,25 @@
 
 Key classes, usage patterns, and method implementations.
 
-## Method
+## HookingContextFactory
 
 Base for all method implementations. Subclasses: `IntegratedGradients`, `Saliency`, `Probing`, `ActivationAddition`, etc.
 
 ```python
-binding = method.bind(module, in_keys=None, out_keys=None)
-with binding as hooked_module:
+context = method.prepare(module, in_keys=None, out_keys=None)
+with context as hooked_module:
     result = hooked_module(data)
 ```
 
 - `in_keys` / `out_keys`: Override for non-TensorDictModule (e.g. HuggingFace: `["input_ids"]`, `["logits"]`).
 
-## BoundMethod / CachedBoundMethod
+## HookingContext / HookingContextWithCache
 
-Returned by `bind()` as a context manager. `CachedBoundMethod` adds a `cache` TensorDict and `clear()` for activation capture.
+Returned by `prepare()` as a context manager. `HookingContextWithCache` adds a `cache` TensorDict and `clear()` for activation capture.
 
-## BoundModule
+## HookedModule
 
-Wrapper returned inside `with method.bind(model)`. Callable with TensorDict.
+Wrapper returned inside `with method.prepare(model)`. Callable with TensorDict.
 
 ```python
 td = hooked_module(td)
@@ -68,13 +68,13 @@ with HookSession(model) as session:
 
 Targets can select structured output paths, feature indices, or repeated call occurrences. Use `occurrences=(0, 2)` to select repeated calls within each root model pass. See Module Path Resolution below for path syntax.
 
-### Binding control
+### Context control
 
 ```python
-with binding.disable_hooks():
+with context.disable_hooks():
     ...  # Run without method hooks
 
-with binding.disable() as raw_module:
+with context.disable() as raw_module:
     ...  # Raw module, no hooks
 ```
 
@@ -104,7 +104,7 @@ Target paths are relative to the model passed to `HookSession`. Probing methods 
 
 ## Method Implementations
 
-High-level modules by category. All extend `Method` and use `bind(module)`.
+High-level modules by category. All extend `HookingContextFactory` and use `prepare(module)`.
 
 ### Attribution
 
@@ -122,10 +122,10 @@ Explain which inputs or layers contribute. All write to `("attr", key)`.
 ```python
 from tdhook.attribution import Saliency, IntegratedGradients
 
-with Saliency(init_attr_targets=init_fn).bind(model) as hooked:
+with Saliency(init_attr_targets=init_fn).prepare(model) as hooked:
     attr = hooked(TensorDict({"input": x})).get(("attr", "input"))
 
-with IntegratedGradients(init_attr_targets=init_fn).bind(model) as hooked:
+with IntegratedGradients(init_attr_targets=init_fn).prepare(model) as hooked:
     attr = hooked(TensorDict({"input": x, ("baseline", "input"): baseline})).get(("attr", "input"))
 ```
 
@@ -136,7 +136,7 @@ with IntegratedGradients(init_attr_targets=init_fn).bind(model) as hooked:
 | `ActivationAddition` | Extract `positive - negative` at modules. Requires `("positive", "input")`, `("negative", "input")`. Outputs `("steer", module_key)` |
 | `SteeringVectors` | Apply `steer_fn(module_key, output)` at modules |
 | `ActivationPatching` | Replace activations via `patch_fn(output, output_to_patch, ...)`. Requires `("patched", "input")` |
-| `ActivationCaching` | Cache activations at regex-matched modules. `hooked.binding.cache` |
+| `ActivationCaching` | Cache activations at regex-matched modules. `hooked.hooking_context.cache` |
 | `Probing` | Train probes via `ProbeManager` / `BilinearProbeManager`. `additional_keys=["labels", "step_type"]` |
 | `TwoNnDimensionEstimator`, `LocalKnnDimensionEstimator`, etc. | Intrinsic dimension of `TensorDict({"data": activations})` |
 
@@ -146,17 +146,17 @@ from tdhook.latent.activation_caching import ActivationCaching
 from tdhook.latent.probing import Probing, ProbeManager
 
 # Extract steering vector
-with ActivationAddition(["transformer.h.7.mlp"]).bind(model) as hooked:
+with ActivationAddition(["transformer.h.7.mlp"]).prepare(model) as hooked:
     steer = hooked(TensorDict({("positive", "input"): pos, ("negative", "input"): neg}, batch_size=1)).get(("steer", "transformer.h.7.mlp"))
 
 # Cache activations
-with ActivationCaching(r"transformer\.h\.\d+\.mlp").bind(model) as hooked:
+with ActivationCaching(r"transformer\.h\.\d+\.mlp").prepare(model) as hooked:
     hooked(data)
-    cache = hooked.binding.cache
+    cache = hooked.hooking_context.cache
 
 # Probing (needs ProbeManager, labels, step_type)
 manager = ProbeManager(LogisticRegression, {}, compute_metrics)
-with Probing("transformer.h.(0|5|10).mlp$", manager.probe_factory, additional_keys=["labels", "step_type"]).bind(model, in_keys=["input_ids"], out_keys=["logits"]) as hooked:
+with Probing("transformer.h.(0|5|10).mlp$", manager.probe_factory, additional_keys=["labels", "step_type"]).prepare(model, in_keys=["input_ids"], out_keys=["logits"]) as hooked:
     hooked(train_td)
     hooked(test_td)
 ```
@@ -172,9 +172,9 @@ with Probing("transformer.h.(0|5|10).mlp$", manager.probe_factory, additional_ke
 ```python
 from tdhook.weights import Pruning, Adapters, TaskVectors
 
-with Pruning(importance_callback=fn, amount_to_prune=0.5).bind(model) as hooked:
+with Pruning(importance_callback=fn, amount_to_prune=0.5).prepare(model) as hooked:
     hooked(inp)
 
-with Adapters(adapters={"layer.5": (adapter, "layer.5", "layer.5")}).bind(model) as hooked:
+with Adapters(adapters={"layer.5": (adapter, "layer.5", "layer.5")}).prepare(model) as hooked:
     hooked(data)
 ```

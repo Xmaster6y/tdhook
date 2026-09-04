@@ -40,12 +40,12 @@ explicit ``TensorDict`` keys:
        batch_size=[1],
    )
 
-   with IntegratedGradients(init_attr_targets=select_score).bind(model) as hooked_model:
+   with IntegratedGradients(init_attr_targets=select_score).prepare(model) as hooked_model:
        result = hooked_model(data)
 
    attributions = result["attr", "input"]
 
-``bind(model)`` installs the method's hooks on entry and removes them on
+``prepare(model)`` installs the method's hooks on entry and removes them on
 exit. The model reads ``"input"`` and writes ``"output"``; Integrated
 Gradients reads ``("baseline", "input")`` and writes
 ``("attr", "input")``. Here, ``attributions.shape`` is ``(1, 4)``, matching
