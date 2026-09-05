@@ -1,4 +1,4 @@
-"""Shared presentation style and exports for the research demonstration notebooks."""
+"""Shared plotting style and figure exports for research notebooks."""
 
 from pathlib import Path
 
@@ -35,7 +35,7 @@ STYLE = {
 }
 
 
-def finish_figure(figure, name, output_dir=Path("demo-figures")):
+def finish_figure(figure, name, output_dir=Path("figures")):
     """Save vector and high-resolution raster figures, then display inline."""
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -68,13 +68,13 @@ def draw_board(axis, board, title, highlight=None):
         spine.set_visible(False)
 
 
-def workflow_figure(title, stages, artifacts, name):
+def workflow_figure(title, stages, artifacts, name, *, result=None):
     """Draw an explanatory producer-consumer schematic, not a runtime plan."""
     if len(artifacts) != len(stages) - 1:
         raise ValueError("Each connection needs an artifact label")
     with plt.rc_context(STYLE):
-        figure, axis = plt.subplots(figsize=(13, 2.7))
-        axis.set(xlim=(0, len(stages)), ylim=(0, 1.1))
+        figure, axis = plt.subplots(figsize=(15, 3.6))
+        axis.set(xlim=(0, len(stages)), ylim=(-0.3, 1.1))
         axis.axis("off")
         axis.set_title(title, loc="left")
         for index, stage in enumerate(stages):
@@ -83,7 +83,7 @@ def workflow_figure(title, stages, artifacts, name):
                     (index + 0.04, 0.38), 0.76, 0.38, boxstyle="round,pad=0.02", facecolor="#EEF3F9", edgecolor=BLUE
                 )
             )
-            axis.text(index + 0.42, 0.57, stage, ha="center", va="center", fontsize=13)
+            axis.text(index + 0.42, 0.57, stage, ha="center", va="center", fontsize=11)
             if index < len(artifacts):
                 axis.annotate(
                     "",
@@ -92,5 +92,7 @@ def workflow_figure(title, stages, artifacts, name):
                     arrowprops={"arrowstyle": "->", "color": BLUE, "lw": 1.8},
                 )
                 axis.text(index + 0.94, 0.19, artifacts[index], ha="center", va="center", fontsize=11)
+        if result is not None:
+            axis.text(len(stages) - 0.58, -0.12, result, ha="center", va="center", fontsize=11, color=BLUE)
         figure.tight_layout()
         return finish_figure(figure, name)

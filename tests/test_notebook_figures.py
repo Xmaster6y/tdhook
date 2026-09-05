@@ -1,4 +1,4 @@
-"""Presentation exports preserve readable labels and explicit board semantics."""
+"""Figure exports preserve readable labels and explicit board semantics."""
 
 import importlib.util
 import sys
@@ -12,8 +12,8 @@ from PIL import Image
 
 @pytest.fixture
 def figures(monkeypatch, tmp_path):
-    path = Path(__file__).resolve().parents[1] / "docs/source/notebooks/tutorials/demo_figures.py"
-    spec = importlib.util.spec_from_file_location("demo_figures", path)
+    path = Path(__file__).resolve().parents[1] / "docs/source/notebooks/tutorials/notebook_figures.py"
+    spec = importlib.util.spec_from_file_location("notebook_figures", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     monkeypatch.chdir(tmp_path)
@@ -22,11 +22,18 @@ def figures(monkeypatch, tmp_path):
     plt.close("all")
 
 
-def test_workflow_exports_editable_svg_and_slide_resolution_png(figures, tmp_path):
-    figures.workflow_figure("Example", ["Capture", "Analyze", "Evaluate"], ["activation", "artifact"], "workflow")
-    svg = (tmp_path / "demo-figures/workflow.svg").read_text()
-    assert "<text" in svg and "activation" in svg and "Evaluate" in svg
-    with Image.open(tmp_path / "demo-figures/workflow.png") as image:
+def test_workflow_exports_editable_svg_and_high_resolution_png(figures, tmp_path):
+    figures.workflow_figure(
+        "Example",
+        ["Capture", "Analyze", "Compute log-probabilities"],
+        ["activation", "artifact"],
+        "workflow",
+        result="metrics/log_probabilities",
+    )
+    svg = (tmp_path / "figures/workflow.svg").read_text()
+    assert "<text" in svg and "activation" in svg and "Compute log-probabilities" in svg
+    assert "metrics/log_probabilities" in svg
+    with Image.open(tmp_path / "figures/workflow.png") as image:
         assert image.width >= 3000
     with pytest.raises(ValueError, match="connection"):
         figures.workflow_figure("Invalid", ["Capture", "Analyze"], [], "invalid")
@@ -52,7 +59,7 @@ def test_intervention_heatmap_uses_a_symmetric_effect_scale(figures, monkeypatch
     spec = importlib.util.spec_from_file_location("othello_figure4", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    monkeypatch.setitem(sys.modules, "demo_figures", figures)
+    monkeypatch.setitem(sys.modules, "notebook_figures", figures)
     gain = np.full((8, 3), 0.3)
     gain[0, 0] = -0.001
     results = {

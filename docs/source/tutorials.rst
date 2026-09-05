@@ -108,18 +108,16 @@ Learn the methods
 Complete workflows
 ------------------
 
-Composition in the demonstration notebooks
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Composition in research notebooks
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The ECML presentation focuses on Othello, Circuit Insights (WeightLens and
-CircuitLens), and ROME. Together they illustrate representation analysis,
-activation intervention, circuit analysis, and weight editing through named
-artifacts. The concept-attribution and chess-dimension notebooks retain the
-original paper's two use cases as additional examples.
+The Othello, Circuit Insights (WeightLens and CircuitLens), ROME,
+concept-attribution, and chess-dimension notebooks illustrate how existing
+analysis methods can exchange named artifacts through workflows.
 
-The three presentation notebooks include dependency schematics and export each
-result figure to ``demo-figures/`` in the working directory: SVG for adaptation
-and 300-dpi PNG for slides. The plots retain explicit evaluation populations
+The Othello, Circuit Insights, and ROME notebooks include dependency schematics
+and export figures to ``figures/`` in the working directory as SVG and 300-dpi
+PNG. The plots retain explicit evaluation populations
 and controls; diagram arrows summarize analysis dependencies rather than claim
 to be executable runtime plans.
 

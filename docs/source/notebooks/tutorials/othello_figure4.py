@@ -414,7 +414,7 @@ def plot_figure4_reproduction(results: dict[str, Any]) -> plt.Figure:
     """Plot the main behavioral and intervention results."""
     from matplotlib.colors import TwoSlopeNorm
 
-    from demo_figures import STYLE
+    from notebook_figures import STYLE
 
     summaries = results["summaries"]
     behavior = results["behavior_and_probe"]
