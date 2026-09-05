@@ -24,19 +24,18 @@ def figures(monkeypatch, tmp_path):
 
 def test_workflow_exports_editable_svg_and_high_resolution_png(figures, tmp_path):
     figures.workflow_figure(
-        "Example",
         ["Capture", "Analyze", "Compute log-probabilities"],
         ["activation", "artifact"],
         "workflow",
-        result="metrics/log_probabilities",
     )
     svg = (tmp_path / "figures/workflow.svg").read_text()
     assert "<text" in svg and "activation" in svg and "Compute log-probabilities" in svg
-    assert "metrics/log_probabilities" in svg
+    assert plt.gcf().axes[0].get_title() == ""
+    assert not any(text.get_text().startswith("Result:") for text in plt.gcf().axes[0].texts)
     with Image.open(tmp_path / "figures/workflow.png") as image:
         assert image.width >= 3000
     with pytest.raises(ValueError, match="connection"):
-        figures.workflow_figure("Invalid", ["Capture", "Analyze"], [], "invalid")
+        figures.workflow_figure(["Capture", "Analyze"], [], "invalid")
 
 
 def test_board_labels_and_edit_location_are_preserved(figures):

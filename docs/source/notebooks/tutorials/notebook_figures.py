@@ -68,22 +68,21 @@ def draw_board(axis, board, title, highlight=None):
         spine.set_visible(False)
 
 
-def workflow_figure(title, stages, artifacts, name, *, result=None):
+def workflow_figure(stages, artifacts, name):
     """Draw an explanatory producer-consumer schematic, not a runtime plan."""
     if len(artifacts) != len(stages) - 1:
         raise ValueError("Each connection needs an artifact label")
     with plt.rc_context(STYLE):
-        figure, axis = plt.subplots(figsize=(15, 3.6))
-        axis.set(xlim=(0, len(stages)), ylim=(-0.3, 1.1))
+        figure, axis = plt.subplots(figsize=(13, 2))
+        axis.set(xlim=(0, len(stages)), ylim=(0.02, 0.9))
         axis.axis("off")
-        axis.set_title(title, loc="left")
         for index, stage in enumerate(stages):
             axis.add_patch(
                 FancyBboxPatch(
                     (index + 0.04, 0.38), 0.76, 0.38, boxstyle="round,pad=0.02", facecolor="#EEF3F9", edgecolor=BLUE
                 )
             )
-            axis.text(index + 0.42, 0.57, stage, ha="center", va="center", fontsize=11)
+            axis.text(index + 0.42, 0.57, stage, ha="center", va="center", fontsize=13)
             if index < len(artifacts):
                 axis.annotate(
                     "",
@@ -91,8 +90,6 @@ def workflow_figure(title, stages, artifacts, name, *, result=None):
                     (index + 0.82, 0.57),
                     arrowprops={"arrowstyle": "->", "color": BLUE, "lw": 1.8},
                 )
-                axis.text(index + 0.94, 0.19, artifacts[index], ha="center", va="center", fontsize=11)
-        if result is not None:
-            axis.text(len(stages) - 0.58, -0.12, result, ha="center", va="center", fontsize=11, color=BLUE)
+                axis.text(index + 0.94, 0.19, artifacts[index], ha="center", va="center", fontsize=12)
         figure.tight_layout()
         return finish_figure(figure, name)
