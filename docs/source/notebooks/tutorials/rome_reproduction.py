@@ -10,10 +10,14 @@ from typing import Any
 
 import numpy as np
 import torch
+from tensordict import TensorDict
+from tensordict.nn import TensorDictModule
 from torch import Tensor, nn
 
+from tdhook.latent import SteeringVectors
 from tdhook.session import HookSession
 from tdhook.targets import Target
+from tdhook.workflow import Workflow
 
 
 @dataclass(frozen=True)
@@ -59,6 +63,60 @@ def _restore_clean(value: Tensor) -> Tensor:
     return result
 
 
+def causal_trace_workflow(
+    states_to_patch: Sequence[tuple[int, str]],
+    answer_token: int,
+    subject_range: tuple[int, int],
+    *,
+    embedding_path: str = "transformer.wte",
+    state_output_paths: Mapping[str, tuple[int | str, ...]] | None = None,
+    config: CausalTraceConfig = DEFAULT_TRACE_CONFIG,
+) -> Workflow:
+    """Declare one corrupt-and-restore causal-tracing experiment.
+
+    The first batch item remains the clean reference. The configured TDHook
+    method corrupts subject embeddings in the remaining items and restores
+    selected hidden states from the clean item. A TensorDict operator then
+    reduces the model output to the answer probability consumed by the sweep.
+    """
+
+    start, stop = subject_range
+    patches: dict[str, list[int]] = defaultdict(list)
+    for token, module_path in states_to_patch:
+        patches[module_path].append(token)
+
+    embedding = Target(embedding_path, "activation", 1, tuple(range(start, stop)))
+    states = tuple(
+        Target(
+            module_path,
+            "activation",
+            1,
+            tuple(sorted(set(tokens))),
+            output_path=(state_output_paths or {}).get(module_path, ()),
+        )
+        for module_path, tokens in patches.items()
+    )
+
+    def intervene(*, module_key: str, output: Tensor) -> Tensor:
+        if module_key == embedding_path:
+            return _corrupt_subject(
+                output,
+                seed=config.noise_seed,
+                noise_level=config.noise_level,
+                replace=config.replace_noise,
+            )
+        return _restore_clean(output)
+
+    def answer_probability(output: object) -> Tensor:
+        probabilities = torch.softmax(_logits(output)[1:, -1, :], dim=-1)
+        return probabilities[:, answer_token].mean()
+
+    return Workflow(
+        SteeringVectors([embedding, *states], intervene),
+        TensorDictModule(answer_probability, in_keys=["output"], out_keys=[("metrics", "answer_probability")]),
+    )
+
+
 def trace_with_patch_tdhook(
     model: nn.Module,
     model_inputs: Mapping[str, Tensor],
@@ -83,37 +141,23 @@ def trace_with_patch_tdhook(
     if not 0 <= start < stop:
         raise ValueError("subject_range must be a non-empty half-open range")
 
-    patches: dict[str, list[int]] = defaultdict(list)
-    for token, module_path in states_to_patch:
-        patches[module_path].append(token)
-
-    embedding = Target(embedding_path, "activation", 1, tuple(range(start, stop)))
-    with torch.no_grad(), HookSession(model) as session:
-        clean_embeddings = session.capture(embedding)
-        session.replace(
-            embedding,
-            clean_embeddings,
-            transform=lambda value: _corrupt_subject(
-                value,
-                seed=config.noise_seed,
-                noise_level=config.noise_level,
-                replace=config.replace_noise,
-            ),
-        )
-        for module_path, tokens in patches.items():
-            state = Target(
-                module_path,
-                "activation",
-                1,
-                tuple(sorted(set(tokens))),
-                output_path=(state_output_paths or {}).get(module_path, ()),
-            )
-            clean_state = session.capture(state)
-            session.replace(state, clean_state, transform=_restore_clean)
-        output = model(**model_inputs)
-
-    probabilities = torch.softmax(_logits(output)[1:, -1, :], dim=-1)
-    return probabilities[:, answer_token].mean()
+    model_module = TensorDictModule(
+        model,
+        in_keys={key: key for key in model_inputs},
+        out_keys=["output"],
+    )
+    artifacts = TensorDict(dict(model_inputs), batch_size=[])
+    workflow = causal_trace_workflow(
+        states_to_patch,
+        answer_token,
+        subject_range,
+        embedding_path=embedding_path,
+        state_output_paths=state_output_paths,
+        config=config,
+    )
+    with torch.no_grad():
+        result = workflow(model_module, artifacts)
+    return result[("metrics", "answer_probability")]
 
 
 def causal_trace_grid(

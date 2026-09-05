@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from contextvars import ContextVar
+from contextvars import ContextVar, copy_context
 from copy import copy
 from typing import Literal
 from weakref import WeakKeyDictionary
@@ -17,7 +17,17 @@ from tdhook.attribution import LRP
 from tdhook.contexts import HookingContextFactory
 from tdhook.execution import ExecutionSpec
 from tdhook.modules import HookedModule
-from tdhook.runtime import BoundHookProgram
+from tdhook.runtime import BoundHookProgram, HookProgramBuilder, HookSpec
+
+
+def _contextual_gradient_hook(callback):
+    """Freeze forward context for backward, including CUDA engine threads."""
+    context = copy_context()
+
+    def hook(gradient):
+        return context.copy().run(callback, (gradient,))[0]
+
+    return hook
 
 
 class ConceptSelection(TensorDictModuleBase):
@@ -213,7 +223,33 @@ class ChannelConditionedLRP(HookingContextFactory):
         return bound_module
 
     def _hook_module(self, module: HookedModule) -> BoundHookProgram:
-        return self._bindings[module.td_module]._hook_module(module)
+        bound = self._bindings[module.td_module]
+        callback = bound._output_grad_callbacks[self.condition_module]
+        rules = copy(bound)
+        rules._output_grad_callbacks = {
+            key: value for key, value in bound._output_grad_callbacks.items() if key != self.condition_module
+        }
+        with HookProgramBuilder() as program:
+            base = rules._hook_module(module)
+            program.add_cleanup(base.remove)
+            for spec in base.program.hooks:
+                program.record(spec)
+            tensor_handles = []
+            program.add_cleanup(lambda: [handle.remove() for handle in tensor_handles])
+
+            def capture_context(_module, _args, output):
+                if not isinstance(output, torch.Tensor):
+                    raise TypeError("Channel-conditioned LRP requires a tensor module output")
+                if output.requires_grad:
+                    tensor_handles.append(output.register_hook(_contextual_gradient_hook(callback)))
+
+            program.register_path(
+                module.hook_root,
+                capture_context,
+                HookSpec(self.condition_module, "replace", "fwd"),
+                relative_path=module.relative_path,
+            )
+            return program.build()
 
     def _restore_module(self, module, in_keys, out_keys, extra_relative_path):
         return module

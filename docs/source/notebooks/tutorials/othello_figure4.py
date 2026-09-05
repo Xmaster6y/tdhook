@@ -16,10 +16,13 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+from tensordict import NonTensorData, TensorDict
+from tensordict.nn import TensorDictModule
 from torch.nn import functional as F
 
-from tdhook.session import HookSession
+from tdhook.latent import ActivationCaching, SteeringVectors
 from tdhook.targets import Target
+from tdhook.workflow import Workflow
 
 HAZINEH_REVISION = "e52217b4b756d22579b28f24c7b1b2355c8f8914"
 HAZINEH_BASE = (
@@ -78,16 +81,21 @@ def _target(layer: int) -> Target:
 
 
 def _capture(model: torch.nn.Module, inputs: torch.Tensor, layer: int) -> tuple[torch.Tensor, torch.Tensor]:
-    with torch.inference_mode(), HookSession(model) as session:
-        captured = session.capture(_target(layer))
-        logits = model(inputs)[0]
-    return captured.values[-1], logits
+    target = _target(layer)
+    cache_key = ("activations", "selected")
+    artifacts = TensorDict({"input": inputs}, batch_size=[])
+    model_module = TensorDictModule(model, in_keys=["input"], out_keys=["output", "aux"])
+    with torch.inference_mode():
+        result = Workflow(ActivationCaching(target, cache_key=cache_key))(model_module, artifacts)
+    return result[(*cache_key, target.module_path)], result["output"]
 
 
 def _replace(model: torch.nn.Module, inputs: torch.Tensor, layer: int, replacement: torch.Tensor) -> torch.Tensor:
-    with torch.inference_mode(), HookSession(model) as session:
-        session.replace(_target(layer), replacement)
-        return model(inputs)[0]
+    method = SteeringVectors([_target(layer)], lambda **_kwargs: replacement)
+    model_module = TensorDictModule(model, in_keys=["input"], out_keys=["output", "aux"])
+    with torch.inference_mode():
+        result = Workflow(method)(model_module, TensorDict({"input": inputs}, batch_size=[]))
+    return result["output"]
 
 
 def _probe_logits(value: torch.Tensor, probe: tuple[torch.Tensor, torch.Tensor]) -> torch.Tensor:
@@ -165,40 +173,156 @@ def _evaluate_options(
     probe: tuple[torch.Tensor, torch.Tensor],
     randomized_probe: tuple[torch.Tensor, torch.Tensor],
 ) -> dict[str, float]:
-    option_1_activation, option_1_logits = _capture(model, option_1, layer)
-    option_2_activation, option_2_logits = _capture(model, option_2, layer)
-    desired = _probe_logits(option_1_activation[:, -1], probe).argmax(-1).expand(len(option_2), -1)
-    optimized, _, _ = _inverse_map(option_2_activation[:, -1], desired, probe)
-    delta = optimized - option_2_activation[:, -1]
+    workflow = option_intervention_workflow(model, layer, probe, randomized_probe)
+    result = workflow(model, TensorDict({"reference_input": option_1, "alternative_input": option_2}, []))
+    return result["metrics", "scores"]
 
-    replacement = option_2_activation.clone()
-    replacement[:, -1] = optimized
-    intervention_logits = _replace(model, option_2, layer, replacement)
 
-    sham_logits = _replace(model, option_2, layer, option_2_activation)
+def option_intervention_workflow(model, layer, probe, randomized_probe) -> Workflow:
+    """Capture both options, derive replacements, apply controls, and score.
 
-    wrong_layer = (layer + 4) % 8
-    wrong_activation, _ = _capture(model, option_2, wrong_layer)
-    wrong_replacement = wrong_activation.clone()
-    wrong_replacement[:, -1] += delta
-    wrong_logits = _replace(model, option_2, wrong_layer, wrong_replacement)
+    Model and probe configuration is fixed when constructing the workflow.
+    Every per-game activation, replacement, and prediction travels through
+    declared TensorDict keys rather than a closure over an earlier result.
+    """
 
-    random_desired = _probe_logits(option_1_activation[:, -1], randomized_probe).argmax(-1).expand(len(option_2), -1)
-    random_optimized, _, _ = _inverse_map(option_2_activation[:, -1], random_desired, randomized_probe)
-    random_replacement = option_2_activation.clone()
-    random_replacement[:, -1] = random_optimized
-    randomized_logits = _replace(model, option_2, layer, random_replacement)
+    def replacements(reference, alternative):
+        desired = _probe_logits(reference[:, -1], probe).argmax(-1).expand(len(alternative), -1)
+        optimized, _, _ = _inverse_map(alternative[:, -1], desired, probe)
+        replacement = alternative.clone()
+        replacement[:, -1] = optimized
+        delta = optimized - alternative[:, -1]
+        random_desired = _probe_logits(reference[:, -1], randomized_probe).argmax(-1).expand(len(alternative), -1)
+        random_optimized, _, _ = _inverse_map(alternative[:, -1], random_desired, randomized_probe)
+        random_replacement = alternative.clone()
+        random_replacement[:, -1] = random_optimized
+        return replacement, delta, random_replacement
 
-    reference = option_1_logits[:, -1].expand(len(option_2), -1)
-    clean_similarity = _cosine(option_2_logits[:, -1], reference).mean()
-    scores = {
-        "clean": float(clean_similarity.cpu()),
-        "intervention": float(_cosine(intervention_logits[:, -1], reference).mean().cpu()),
-        "sham": float(_cosine(sham_logits[:, -1], reference).mean().cpu()),
-        "wrong_layer": float(_cosine(wrong_logits[:, -1], reference).mean().cpu()),
-        "randomized_probe": float(_cosine(randomized_logits[:, -1], reference).mean().cpu()),
-    }
-    return scores
+    def wrong_layer_prediction(inputs, delta):
+        wrong_layer = (layer + 4) % 8
+        wrong_activation, _ = _capture(model, inputs, wrong_layer)
+        replacement = wrong_activation.clone()
+        replacement[:, -1] += delta
+        return _replace(model, inputs, wrong_layer, replacement)
+
+    def score(reference, clean, intervention, sham, wrong_layer, randomized):
+        reference = reference[:, -1].expand(len(clean), -1)
+        predictions = dict(
+            clean=clean, intervention=intervention, sham=sham, wrong_layer=wrong_layer, randomized_probe=randomized
+        )
+        return NonTensorData(
+            {name: float(_cosine(logits[:, -1], reference).mean().cpu()) for name, logits in predictions.items()}
+        )
+
+    steps = [
+        TensorDictModule(
+            lambda inputs: _capture(model, inputs, layer),
+            ["reference_input"],
+            [("activations", "reference"), ("logits", "reference")],
+        ),
+        TensorDictModule(
+            lambda inputs: _capture(model, inputs, layer),
+            ["alternative_input"],
+            [("activations", "alternative"), ("logits", "clean")],
+        ),
+        TensorDictModule(
+            replacements,
+            [("activations", "reference"), ("activations", "alternative")],
+            [("replacement", "intervention"), ("replacement", "delta"), ("replacement", "randomized")],
+        ),
+    ]
+    for condition, source in (
+        ("intervention", ("replacement", "intervention")),
+        ("sham", ("activations", "alternative")),
+        ("randomized", ("replacement", "randomized")),
+    ):
+        steps.append(
+            TensorDictModule(
+                lambda inputs, value: _replace(model, inputs, layer, value),
+                ["alternative_input", source],
+                [("logits", condition)],
+            )
+        )
+    steps.extend(
+        [
+            TensorDictModule(
+                wrong_layer_prediction, ["alternative_input", ("replacement", "delta")], [("logits", "wrong_layer")]
+            ),
+            TensorDictModule(
+                score,
+                [
+                    ("logits", name)
+                    for name in ("reference", "clean", "intervention", "sham", "wrong_layer", "randomized")
+                ],
+                [("metrics", "scores")],
+            ),
+        ]
+    )
+    return Workflow(*steps)
+
+
+def prepare_behavior_example(cache, games_int, games_string, othello, *, game_index=0, game_length=10, layer=3):
+    """Fix one example before observing effects; use the first two legal moves."""
+    paths = _download_assets(cache)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = _load_released_model(paths, device)
+    probe = _load_probes(paths, device)[layer]
+    playable = [square for square in range(64) if square not in (27, 28, 35, 36)]
+    options = _option_inputs(
+        games_int[game_index],
+        games_string[game_index],
+        game_length,
+        othello,
+        {square: token + 1 for token, square in enumerate(playable)},
+        device,
+    )
+    if options is None:
+        raise ValueError("The configured position needs at least two legal moves")
+    first, alternatives = options
+    data = TensorDict({"reference_input": first, "alternative_input": alternatives[:1]}, [])
+    return model, probe, data
+
+
+def prediction_view(reference, clean, intervention, sham, scores):
+    """Materialize plot-ready values; preserve pass probability and signed effects."""
+    logits = torch.stack([value[0, -1].detach().float().cpu() for value in (reference, clean, intervention)])
+    probabilities = logits.softmax(-1)
+    return NonTensorData(
+        {
+            "probabilities": probabilities.tolist(),
+            "scores": dict(scores),
+            "sham_max_abs_logit_difference": float((clean - sham).abs().max().cpu()),
+        }
+    )
+
+
+def plot_prediction_comparison(view):
+    """Render exported values only: no model, probe, or optimization access."""
+    from notebook_figures import STYLE
+
+    probabilities = np.asarray(view["probabilities"])
+    if probabilities.shape != (3, 61) or not np.isfinite(probabilities).all():
+        raise ValueError("Expected three finite 61-token probability distributions")
+    if (probabilities < 0).any() or not np.allclose(probabilities.sum(-1), 1):
+        raise ValueError("Each probability distribution must be nonnegative and sum to one")
+    playable = [square for square in range(64) if square not in (27, 28, 35, 36)]
+    boards = np.full((3, 64), np.nan)
+    boards[:, playable] = probabilities[:, 1:]
+    with plt.rc_context(STYLE):
+        figure, axes = plt.subplots(1, 3, figsize=(13, 4.5), constrained_layout=True)
+        for index, (axis, title) in enumerate(
+            zip(axes, ("Move A · reference", "Move B · unchanged", "Move B · intervened"))
+        ):
+            image = axis.imshow(
+                boards[index].reshape(8, 8), vmin=0, vmax=float(probabilities[:, 1:].max()), cmap="Blues"
+            )
+            axis.set(
+                title=title, xticks=range(8), xticklabels=list("ABCDEFGH"), yticks=range(8), yticklabels=range(1, 9)
+            )
+            distance = float(np.abs(probabilities[index] - probabilities[0]).sum() / 2)
+            axis.set_xlabel(f"Pass: {probabilities[index, 0]:.3f}\nProbability distance to A: {distance:.3f}")
+        figure.colorbar(image, ax=axes, label="Next-move probability", shrink=0.8)
+    return figure
 
 
 def _bootstrap_mean_ci(values: np.ndarray, *, seed: int, samples: int = 2000) -> tuple[np.ndarray, np.ndarray]:
@@ -233,14 +357,16 @@ def _probe_and_behavior_metrics(
     parity = torch.tensor([(-1) ** position for position in range(59)], device=device).view(1, 59, 1, 1)
     labels = (states_tensor * parity + 1).long().reshape(100, 59, 64)
 
-    captures = []
-    with torch.inference_mode(), HookSession(model) as session:
-        for layer in range(8):
-            captures.append(session.capture(_target(layer)))
-        logits = model(inputs)[0]
+    cache_key = ("activations", "layers")
+    model_module = TensorDictModule(model, in_keys=["input"], out_keys=["output", "aux"])
+    with torch.inference_mode():
+        result = Workflow(
+            ActivationCaching(r"module.blocks\.[0-7]$", cache_key=cache_key),
+        )(model_module, TensorDict({"input": inputs}, batch_size=[]))
+    logits = result["output"]
     layer_accuracy = []
-    for captured, probe in zip(captures, probes, strict=True):
-        predictions = _probe_logits(captured.values[-1], probe).argmax(-1)
+    for layer, probe in enumerate(probes):
+        predictions = _probe_logits(result[(*cache_key, f"module.blocks.{layer}")], probe).argmax(-1)
         layer_accuracy.append(float((predictions[:, 5:54] == labels[:, 5:54]).float().mean().cpu()))
 
     playable = [square for square in range(64) if square not in (27, 28, 35, 36)]
@@ -350,14 +476,19 @@ def run_figure4_reproduction(
 
 def plot_figure4_reproduction(results: dict[str, Any]) -> plt.Figure:
     """Plot the main behavioral and intervention results."""
+    from matplotlib.colors import TwoSlopeNorm
+
+    from notebook_figures import STYLE
+
     summaries = results["summaries"]
     behavior = results["behavior_and_probe"]
     layers = results["layers"]
     game_lengths = results["game_lengths"]
     colors = {"blue": "#2563eb", "orange": "#f97316", "green": "#0f766e", "gray": "#94a3b8"}
 
-    with plt.style.context("seaborn-v0_8-whitegrid"):
-        figure, axes = plt.subplots(1, 3, figsize=(15, 4.3), constrained_layout=True)
+    with plt.rc_context(STYLE):
+        figure, axes = plt.subplots(1, 3, figsize=(17, 5.5), constrained_layout=True)
+        figure.suptitle("Othello interventions · 50 games, eight layers", fontsize=21)
 
         accuracy = 100 * np.asarray(behavior["layer_probe_accuracy"])
         axes[0].plot(layers, accuracy, marker="o", linewidth=2.5, color=colors["blue"])
@@ -372,13 +503,15 @@ def plot_figure4_reproduction(results: dict[str, Any]) -> plt.Figure:
         axes[0].legend(frameon=False)
 
         gain = np.asarray(summaries["intervention_gain"]["mean"], dtype=float)
-        image = axes[1].imshow(gain, aspect="auto", origin="lower", cmap="magma")
+        limit = max(float(np.nanmax(np.abs(gain))), 1e-6)
+        norm = TwoSlopeNorm(vmin=-limit, vcenter=0, vmax=limit)
+        image = axes[1].imshow(gain, aspect="auto", origin="lower", cmap="RdBu_r", norm=norm)
         axes[1].set(
             title="Intervention effect",
             xlabel="Moves played",
             ylabel="Layer",
         )
-        axes[1].set_xticks(range(len(game_lengths)), game_lengths)
+        axes[1].set_xticks(range(0, len(game_lengths), 2), game_lengths[::2])
         axes[1].set_yticks(range(len(layers)), layers)
         figure.colorbar(image, ax=axes[1], label="Cosine-similarity gain", shrink=0.82)
 
@@ -399,6 +532,7 @@ def plot_figure4_reproduction(results: dict[str, Any]) -> plt.Figure:
         axes[2].axvline(0, color="#334155", linewidth=0.8)
         axes[2].set(title="Controls", xlabel="Early-game gain, layers 3-5")
         axes[2].invert_yaxis()
+        axes[2].margins(x=0.3)
 
         for axis in axes:
             axis.spines[["top", "right"]].set_visible(False)

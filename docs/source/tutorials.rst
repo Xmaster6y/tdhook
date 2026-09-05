@@ -108,6 +108,65 @@ Learn the methods
 Complete workflows
 ------------------
 
+Composition in research notebooks
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The Othello, Circuit Insights (WeightLens and CircuitLens), ROME,
+concept-attribution, and chess-dimension notebooks illustrate how existing
+analysis methods can exchange named artifacts through workflows.
+
+The Othello, Circuit Insights, and ROME notebooks include dependency schematics
+and export figures to ``figures/`` in the working directory as SVG and 300-dpi
+PNG. The plots retain explicit evaluation populations
+and controls; diagram arrows summarize analysis dependencies rather than claim
+to be executable runtime plans.
+
+Each workflow declares the keys that its steps consume and produce. A step
+receives the result of its producer through the TensorDict; plotting and
+experiment sweeps remain ordinary notebook code. Functions and workflow
+construction are shown separately so that the dependencies remain readable.
+
+.. list-table:: Artifact dependencies
+   :header-rows: 1
+   :widths: 22 48 30
+
+   * - Notebook
+     - Composed analysis
+     - Artifact passed between stages
+   * - Concept attribution
+     - Batched LRP → ConceptSelection; calibrated selection →
+       ChannelConditionedLRP → relevance maps
+     - ``metrics/channel_relevance`` and ``metrics/concept_selection``
+   * - Chess dimension estimation
+     - ActivationCaching → ActivationSamples → TwoNN → DimensionSummary,
+       for channel- and square-conditioned samples
+     - ``activations/cache``, ``samples``, ``dimensions``, ``summaries``
+   * - Othello
+     - Capture → probe; capture → construct replacement → intervention →
+       metric; optimized intervention → decoded board
+     - Activation caches, replacement tensors, predictions and scores
+   * - WeightLens and CircuitLens
+     - Weight projection → candidate selection; activation capture → circuit
+       analysis; produced circuit batch → signature clustering
+     - Projections, captured activations and ``artifacts/circuit``
+   * - ROME
+     - Causal-tracing intervention → answer probability; rank-one edit
+       construction → temporary edit evaluation
+     - ``edit/deltas`` and ``metrics/edited_case``
+
+Calibration and query execution are separate phases in concept attribution,
+so the same selection can be reused on new images. WeightLens and CircuitLens
+are complementary analyses, not a claimed producer-consumer dependency between
+weight-only candidates and attention circuits. ROME keeps its official edit
+solver and evaluator; native TensorDict operators connect them inside Workflow.
+Othello's context-based intervention and optimization APIs are similarly exposed
+as operators with explicit inputs and outputs.
+
+The additional reproduction notebooks demonstrate integration with existing
+research pipelines. Their controls and bounded evaluation populations are
+specified in the notebooks. Successful execution is integration evidence;
+scientific conclusions require the reported metrics and comparison criteria.
+
 .. grid:: 1 2 2 2
    :gutter: 3
 
@@ -157,7 +216,7 @@ Complete workflows
       Reproduce published behavior and linear-probe results, then validate
       intervention parity.
 
-   .. grid-item-card:: WeightLens and CircuitLens Reproduction
+   .. grid-item-card:: Circuit Insights: WeightLens and CircuitLens
       :link: notebooks/tutorials/weight-circuit-research-reproduction
       :link-type: doc
       :class-card: surface

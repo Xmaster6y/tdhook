@@ -40,10 +40,12 @@ def test_temporary_rank_one_edit_is_visible_only_inside_the_session():
     left = torch.tensor([1.0, 2.0, 3.0])
     right = torch.tensor([4.0, 5.0])
 
-    with pytest.raises(ValueError, match="sentinel"):
-        with helper.temporary_rank_one_edit(model, "", "weight", left, right):
-            torch.testing.assert_close(model.weight, original + torch.outer(left, right).T)
-            raise ValueError("sentinel")
+    with (
+        pytest.raises(ValueError, match="sentinel"),
+        helper.temporary_rank_one_edit(model, "", "weight", left, right),
+    ):
+        torch.testing.assert_close(model.weight, original + torch.outer(left, right).T)
+        raise ValueError("sentinel")
 
     assert torch.equal(model.weight, original)
 
@@ -79,6 +81,36 @@ def test_tdhook_trace_runs_clean_and_corrupted_items_together_and_cleans_hooks()
     assert score.ndim == 0 and torch.isfinite(score)
     assert not model.transformer.wte._forward_hooks
     assert not model.layer._forward_hooks
+
+    corrupted = model.transformer.wte(inputs["input_ids"])
+    corrupted[:, 1:2] = helper._corrupt_subject(
+        corrupted[:, 1:2],
+        seed=1,
+        noise_level=0.1,
+        replace=False,
+    )
+    expected_corrupted = torch.softmax(corrupted[1:, -1], dim=-1)[:, 2].mean()
+    unpatched = helper.trace_with_patch_tdhook(
+        model,
+        inputs,
+        [],
+        answer_token=2,
+        subject_range=(1, 2),
+        config=helper.CausalTraceConfig(samples=2),
+    )
+    torch.testing.assert_close(unpatched, expected_corrupted)
+
+
+def test_causal_trace_declares_intervention_and_metric_steps():
+    helper = _load_helper()
+    workflow = helper.causal_trace_workflow(
+        [(1, "layer")],
+        answer_token=2,
+        subject_range=(0, 1),
+        config=helper.CausalTraceConfig(samples=2),
+    )
+
+    assert [type(step).__name__ for step in workflow.steps] == ["SteeringVectors", "TensorDictModule"]
 
 
 def test_residual_grid_selects_the_tensor_from_gpt2_style_block_outputs():
