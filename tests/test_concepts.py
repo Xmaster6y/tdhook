@@ -214,6 +214,33 @@ def test_concept_conditioning_rejects_invalid_selection_artifacts(default_test_m
             _uniform_selection(TensorDict({"channel": channel, "direction": direction}, batch_size=[2]))
 
 
+def test_conditioned_method_rejects_non_tensor_output_and_removes_hooks():
+    class TupleOutput(torch.nn.Module):
+        def forward(self, inputs):
+            return (inputs,)
+
+    class Model(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.target = TupleOutput()
+
+        def forward(self, inputs):
+            return self.target(inputs)[0]
+
+    model = Model()
+    method = ChannelConditionedLRP(LRP(warn_on_missing_rule=False), condition_module="target")
+    artifacts = _conditioned_artifacts(torch.zeros(2, dtype=torch.long), torch.ones(2, dtype=torch.long))
+
+    with pytest.raises(TypeError, match="requires a tensor module output"):
+        Workflow(method)(model, artifacts)
+
+    for module in model.modules():
+        assert not module._forward_hooks
+        assert not module._forward_pre_hooks
+        assert not module._backward_hooks
+    torch.testing.assert_close(model(artifacts["input"]), artifacts["input"])
+
+
 def test_conditioned_method_preserves_base_initialisation_and_guards_hook_order(default_test_model):
     calls = []
 

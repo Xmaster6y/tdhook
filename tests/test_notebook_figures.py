@@ -1,6 +1,7 @@
 """Figure exports preserve readable labels and explicit board semantics."""
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -36,6 +37,45 @@ def test_workflow_exports_editable_svg_and_high_resolution_png(figures, tmp_path
         assert image.width >= 3000
     with pytest.raises(ValueError, match="connection"):
         figures.workflow_figure(["Capture", "Analyze"], [], "invalid")
+
+
+@pytest.mark.parametrize(
+    "notebook, stages, artifacts",
+    [
+        (
+            "othello",
+            ["Capture activations", "Construct replacement", "Apply intervention", "Compute log-probabilities"],
+            ["Activations", "Replacement", "Logits"],
+        ),
+        (
+            "weight-circuit",
+            ["Capture activations", "Identify contributors", "Cluster circuits"],
+            ["Activations", "Circuits"],
+        ),
+        ("rome", ["Derive rank-one update", "Apply edit & evaluate"], ["Weight update"]),
+    ],
+)
+def test_notebook_workflow_cells_render_expected_labels(figures, notebook, stages, artifacts):
+    path = (
+        Path(__file__).resolve().parents[1]
+        / "docs/source/notebooks/tutorials"
+        / f"{notebook}-research-reproduction.ipynb"
+    )
+    cells = json.loads(path.read_text())["cells"]
+    cell = next(cell for cell in cells if cell.get("id") == "figure-workflow-schema")
+    exec(compile("".join(cell["source"]), str(path), "exec"), {"workflow_figure": figures.workflow_figure})
+
+    axis = plt.gcf().axes[0]
+    labels = [text for text in axis.texts if text.get_text()]
+    assert sorted(text.get_text() for text in labels) == sorted(stages + artifacts)
+    assert axis.get_title() == ""
+    assert all(text.get_fontweight() == "normal" for text in labels)
+    assert len(axis.patches) == len(stages)
+    assert all(
+        text.get_position()[1] < 0.38 for text in labels if text.get_text() in artifacts
+    )  # Artifact names sit below the boxes and arrows.
+    assert cell["execution_count"] is not None
+    assert any(output.get("data", {}).get("image/png") for output in cell["outputs"])
 
 
 def test_board_labels_and_edit_location_are_preserved(figures):
