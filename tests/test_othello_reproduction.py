@@ -1,13 +1,15 @@
 """Tests for the Othello reproduction helpers."""
 
 import importlib.util
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
 import torch
-from tensordict import TensorDict
+from tensordict import NonTensorData, TensorDict
+from tensordict.nn import TensorDictModule
 from torch import nn
 
 from tdhook.workflow import Workflow
@@ -43,6 +45,35 @@ def test_othello_inverse_map_returns_the_post_update_converged_value():
     assert steps == 1
     assert torch.equal(returned_logits.argmax(-1), desired_board)
     torch.testing.assert_close(torch.tensor(final_loss), returned_loss)
+
+
+def test_prediction_view_is_a_serializable_workflow_output():
+    helper = _load_figure4_helper()
+    logits = torch.randn(1, 3, 61)
+    workflow = Workflow(
+        TensorDictModule(
+            helper.prediction_view,
+            ["reference", "clean", "intervention", "sham", "scores"],
+            ["view"],
+        )
+    )
+    result = workflow(
+        nn.Identity(),
+        TensorDict(
+            {
+                "reference": logits,
+                "clean": logits + 1,
+                "intervention": logits * 2,
+                "sham": logits + 1,
+                "scores": NonTensorData({"clean": 0.5, "intervention": 0.9}),
+            },
+            [],
+        ),
+    )
+    view = json.loads(json.dumps(result["view"]))
+    assert view["sham_max_abs_logit_difference"] == 0
+    torch.testing.assert_close(torch.tensor(view["probabilities"])[2], (logits[0, -1] * 2).softmax(-1))
+    assert view["scores"]["intervention"] == 0.9
 
 
 def test_othello_capture_and_replacement_use_workflow_artifacts():

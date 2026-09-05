@@ -358,6 +358,18 @@ def test_circuit_notebook_transports_artifacts_and_computes_errors():
     )
     assert namespace["clusters"].labels == (0, 0, -1)
 
+    namespace["model"].tokenizer = SimpleNamespace(decode=lambda ids: f"context {ids[0]}")
+    _execute_named(
+        "weight-circuit-research-reproduction.ipynb", ["circuit_overview_view", "overview_workflow"], namespace
+    )
+    result["samples"] = NonTensorData(tuple({"input_ids": [i]} for i in range(3)))
+    overview = namespace["overview_workflow"](namespace["model"], result)
+    view = json.loads(json.dumps(overview["views", "circuit_overview"]))
+    assert view["head_scores"][0] == [1.0, 1.0, 0.0]
+    assert view["head_scores"][1] == [0.0, 0.0, 1.0]
+    assert view["clusters"] == [0, 0, -1]
+    assert view["contexts"] == ["context 0", "context 1", "context 2"]
+
 
 def test_chess_notebook_executes_dimension_workflow():
     namespace = _namespace()

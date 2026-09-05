@@ -44,7 +44,7 @@ def test_workflow_exports_editable_svg_and_high_resolution_png(figures, tmp_path
     [
         (
             "othello",
-            ["Capture activations", "Construct replacement", "Apply intervention", "Compute log-probabilities"],
+            ["Capture both options", "Optimize replacement", "Apply interventions", "Compare predictions"],
             ["Activations", "Replacement", "Logits"],
         ),
         (
@@ -76,6 +76,43 @@ def test_notebook_workflow_cells_render_expected_labels(figures, notebook, stage
     )  # Artifact names sit below the boxes and arrows.
     assert cell["execution_count"] is not None
     assert any(output.get("data", {}).get("image/png") for output in cell["outputs"])
+
+
+def test_circuit_overview_preserves_signed_scores_and_marks_empty_sets(figures):
+    view = {
+        "head_scores": [[-2, 0, 1]] + [[0, 0, 0]] * 7,
+        "activations": [3, 2, 1],
+        "clusters": [1, 0, 1],
+        "empty": [False, True, False],
+        "contexts": ["first", "empty", "last"],
+    }
+    figure = figures.plot_circuit_overview(json.loads(json.dumps(view)))
+    image = figure.axes[0].images[0]
+    np.testing.assert_array_equal(image.get_array()[:, 0], [-2, 1, 0])
+    assert image.norm.vmin == -image.norm.vmax == -2
+    assert [text.get_text() for text in figure.axes[2].texts] == ["1", "1", "empty"]
+    with pytest.raises(ValueError, match="matching"):
+        figures.plot_circuit_overview({**view, "contexts": []})
+
+
+def test_prediction_comparison_plots_saved_probabilities_without_model(figures, monkeypatch):
+    path = Path(__file__).resolve().parents[1] / "docs/source/notebooks/tutorials/othello_figure4.py"
+    spec = importlib.util.spec_from_file_location("othello_figure4", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setitem(sys.modules, "notebook_figures", figures)
+    probabilities = np.zeros((3, 61))
+    probabilities[:, 0] = 0.25
+    probabilities[:, 1] = 0.75
+    figure = module.plot_prediction_comparison({"probabilities": probabilities.tolist()})
+    for axis in figure.axes[:3]:
+        image = axis.images[0]
+        assert image.get_array()[0, 0] == 0.75
+        assert image.get_array().mask[3, 3]
+        assert image.norm.vmax == 0.75
+        assert "0.250" in axis.get_xlabel()
+    with pytest.raises(ValueError, match="sum to one"):
+        module.plot_prediction_comparison({"probabilities": (probabilities * 2).tolist()})
 
 
 def test_board_labels_and_edit_location_are_preserved(figures):

@@ -261,6 +261,70 @@ def option_intervention_workflow(model, layer, probe, randomized_probe) -> Workf
     return Workflow(*steps)
 
 
+def prepare_behavior_example(cache, games_int, games_string, othello, *, game_index=0, game_length=10, layer=3):
+    """Fix one example before observing effects; use the first two legal moves."""
+    paths = _download_assets(cache)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = _load_released_model(paths, device)
+    probe = _load_probes(paths, device)[layer]
+    playable = [square for square in range(64) if square not in (27, 28, 35, 36)]
+    options = _option_inputs(
+        games_int[game_index],
+        games_string[game_index],
+        game_length,
+        othello,
+        {square: token + 1 for token, square in enumerate(playable)},
+        device,
+    )
+    if options is None:
+        raise ValueError("The configured position needs at least two legal moves")
+    first, alternatives = options
+    data = TensorDict({"reference_input": first, "alternative_input": alternatives[:1]}, [])
+    return model, probe, data
+
+
+def prediction_view(reference, clean, intervention, sham, scores):
+    """Materialize plot-ready values; preserve pass probability and signed effects."""
+    logits = torch.stack([value[0, -1].detach().float().cpu() for value in (reference, clean, intervention)])
+    probabilities = logits.softmax(-1)
+    return NonTensorData(
+        {
+            "probabilities": probabilities.tolist(),
+            "scores": dict(scores),
+            "sham_max_abs_logit_difference": float((clean - sham).abs().max().cpu()),
+        }
+    )
+
+
+def plot_prediction_comparison(view):
+    """Render exported values only: no model, probe, or optimization access."""
+    from notebook_figures import STYLE
+
+    probabilities = np.asarray(view["probabilities"])
+    if probabilities.shape != (3, 61) or not np.isfinite(probabilities).all():
+        raise ValueError("Expected three finite 61-token probability distributions")
+    if (probabilities < 0).any() or not np.allclose(probabilities.sum(-1), 1):
+        raise ValueError("Each probability distribution must be nonnegative and sum to one")
+    playable = [square for square in range(64) if square not in (27, 28, 35, 36)]
+    boards = np.full((3, 64), np.nan)
+    boards[:, playable] = probabilities[:, 1:]
+    with plt.rc_context(STYLE):
+        figure, axes = plt.subplots(1, 3, figsize=(13, 4.5), constrained_layout=True)
+        for index, (axis, title) in enumerate(
+            zip(axes, ("Move A · reference", "Move B · unchanged", "Move B · intervened"))
+        ):
+            image = axis.imshow(
+                boards[index].reshape(8, 8), vmin=0, vmax=float(probabilities[:, 1:].max()), cmap="Blues"
+            )
+            axis.set(
+                title=title, xticks=range(8), xticklabels=list("ABCDEFGH"), yticks=range(8), yticklabels=range(1, 9)
+            )
+            distance = float(np.abs(probabilities[index] - probabilities[0]).sum() / 2)
+            axis.set_xlabel(f"Pass: {probabilities[index, 0]:.3f}\nProbability distance to A: {distance:.3f}")
+        figure.colorbar(image, ax=axes, label="Next-move probability", shrink=0.8)
+    return figure
+
+
 def _bootstrap_mean_ci(values: np.ndarray, *, seed: int, samples: int = 2000) -> tuple[np.ndarray, np.ndarray]:
     generator = np.random.default_rng(seed)
     draws = generator.integers(0, values.shape[0], size=(samples, values.shape[0]))
