@@ -21,7 +21,7 @@ Composable interpretability for PyTorch with `TensorDict` and `torch` hooks.
 
 ## Getting Started
 
-Install TDHook from PyPI:
+Install TDHook from PyPI with Python 3.11 or newer:
 
 ```console
 pip install tdhook
