@@ -1,4 +1,4 @@
-from tensordict.nn import TensorDictModuleWrapper, TensorDictModuleBase, TensorDictSequential
+from tensordict.nn import TensorDictModuleBase, TensorDictSequential
 from tensordict import NonTensorData, TensorDict, TensorDictBase
 from tensordict.utils import NestedKey, unravel_key_list
 from typing import Callable, Optional, TYPE_CHECKING, List
@@ -256,7 +256,7 @@ class IntermediateKeysCleaner(TensorDictModuleBase):
         return f"{type(self).__name__}(\n{fields})"
 
 
-class HookedModule(TensorDictModuleWrapper):
+class HookedModule(TensorDictModuleBase):
     """Internal execution wrapper owned by :class:`HookingContext`."""
 
     def __init__(
@@ -266,23 +266,35 @@ class HookedModule(TensorDictModuleWrapper):
         hooking_context: Optional["HookingContext"] = None,
         relative_path: str = "",
     ):
-        super().__init__(td_module)
+        super().__init__()
+        # Execute the caller's module with its hooks intact. Copying its hooks
+        # would also copy output selectors that still belong to the caller.
+        self.td_module = td_module
+        self.out_keys = list(td_module.out_keys)
         self._hook_root = hook_root
         self._hooking_context = hooking_context
         self._relative_path = relative_path
 
-    @TensorDictModuleWrapper.out_keys.setter
-    def out_keys(self, value: List[NestedKey]):
-        # Finalization can publish extra outputs that the wrapped model does not
-        # return. Keep their declaration and native key selection on this wrapper.
-        keys = unravel_key_list(list(value))
-        if "_out_keys" not in self.__dict__:
-            self._out_keys = keys
-        self._out_keys_apparent = keys
+    def __getattr__(self, name):
+        try:
+            return super().__getattr__(name)
+        except AttributeError:
+            if name.startswith("__"):
+                raise
+            return getattr(super().__getattr__("td_module"), name)
 
-    @property
-    def out_keys_source(self):
-        return self.__dict__.get("_out_keys", self.td_module.out_keys_source)
+    @TensorDictModuleBase.out_keys.setter
+    def out_keys(self, value: List[NestedKey]):
+        self._out_keys = self._out_keys_apparent = unravel_key_list(list(value))
+
+    def select_out_keys(self, *out_keys):
+        # Older TensorDict selectors call the declaration setter. Selection must
+        # narrow only the apparent outputs, not replace the declared contract.
+        source = self.out_keys_source
+        try:
+            return super().select_out_keys(*out_keys)
+        finally:
+            self._out_keys = source
 
     @property
     def hook_root(self) -> TensorDictModuleBase:
