@@ -7,6 +7,8 @@ hooks.
 Installation
 ------------
 
+TDHook requires Python 3.11 or newer.
+
 .. code-block:: console
 
    pip install tdhook

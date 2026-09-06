@@ -5,7 +5,7 @@ license: MIT
 metadata:
   version: 1.0.0
   author: Xmaster6y
-  dependencies: tdhook, tensordict>=0.3.0, torch>=2.0.0
+  dependencies: tdhook, tensordict>=0.10, torch>=2.7.1
   tags: tdhook, interpretability, attribution, activation analysis, probing, steering, tensordict, pytorch hooks, gradcam, lrp, activation patching
 ---
 
@@ -175,8 +175,10 @@ See [references/issues.md](references/issues.md) for more patterns.
 
 ## Setup & Installation
 
+Requires Python 3.11 or newer.
+
 ```bash
-pip install tdhook tensordict torch
+pip install tdhook
 ```
 
 For optional captum-based attribution or sklearn probing:
