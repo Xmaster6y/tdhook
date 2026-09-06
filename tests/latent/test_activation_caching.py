@@ -11,6 +11,7 @@ from tdhook.latent.activation_caching import ActivationCaching, ActivationCachin
 from tdhook.modules import get_best_device
 from tdhook.runtime import HookProgram, HookSpec
 from tdhook.targets import Target
+from tdhook.workflow import Workflow
 
 
 class TestActivationCaching:
@@ -47,6 +48,38 @@ class TestActivationCaching:
         assert hooked_module.in_keys == ["input"]
         assert hooked_module.out_keys == ["output", ("activations", "cache")]
         assert result["activations", "cache"]["linear2"].shape == (2, 20)
+
+    @pytest.mark.parametrize("run_in_workflow", [False, True])
+    def test_cache_publication_preserves_the_callers_model_contract(self, run_in_workflow):
+        raw_model = torch.nn.Sequential(torch.nn.Linear(3, 4))
+        input_key = ("inputs", "value")
+        output_key = ("predictions", "value")
+        cache_key = ("activations", "hidden")
+        model = TensorDictModule(raw_model, in_keys=[input_key], out_keys=[output_key])
+        method = ActivationCaching(r"module\.0$", cache_key=cache_key)
+        inputs = torch.randn(2, 3)
+        expected = raw_model(inputs)
+
+        for _ in range(2):
+            data = TensorDict({input_key: inputs}, batch_size=[2])
+            if run_in_workflow:
+                result = Workflow(method)(model, data)
+            else:
+                context = method.prepare(model)
+                assert model.out_keys == [output_key]
+                assert context.module.out_keys == [output_key, cache_key]
+                with context as hooked_module:
+                    result = hooked_module(data)
+
+            assert model.in_keys == [input_key]
+            assert model.out_keys == [output_key]
+            assert model.out_keys_source == [output_key]
+            torch.testing.assert_close(result[output_key], expected)
+            torch.testing.assert_close(result[cache_key]["module.0"], expected)
+
+        plain_result = model(TensorDict({input_key: inputs}, batch_size=[2]))
+        torch.testing.assert_close(plain_result[output_key], expected)
+        assert cache_key not in plain_result.keys(include_nested=True)
 
     def test_target_selection_is_cached_and_reported(self, default_test_model):
         target = Target("linear2", "activation", -1, (0, 2))

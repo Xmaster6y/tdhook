@@ -111,3 +111,33 @@ def test_bound_module_is_context_owned_and_finalizes_results(default_test_model)
 
     with pytest.raises(RuntimeError, match="called in context"):
         prepared(TensorDict({"input": torch.ones(2, 10)}, batch_size=[2]))
+
+
+def test_method_outputs_can_be_selected_and_reset_without_changing_model_outputs():
+    class PublishingModule(HookedModule):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.out_keys = [*self.out_keys, ("metrics", "sum")]
+
+        def finalize_tensordict(self, data):
+            return data.set(("metrics", "sum"), data["output"].sum(-1))
+
+    class PublishingMethod(HookingContextFactory):
+        _hooked_module_class = PublishingModule
+
+    model = TensorDictModule(torch.nn.Identity(), in_keys=["input"], out_keys=["output"])
+    with PublishingMethod().prepare(model) as prepared:
+        assert prepared.out_keys_source == ["output", ("metrics", "sum")]
+        prepared.select_out_keys(("metrics", "sum"))
+        selected = prepared(TensorDict({"input": torch.ones(2, 3)}, batch_size=[2]))
+        assert prepared.out_keys == [("metrics", "sum")]
+        assert "output" not in selected
+        torch.testing.assert_close(selected["metrics", "sum"], torch.full((2,), 3.0))
+
+        prepared.reset_out_keys()
+        assert prepared.out_keys == ["output", ("metrics", "sum")]
+        restored = prepared(TensorDict({"input": torch.ones(2, 3)}, batch_size=[2]))
+        torch.testing.assert_close(restored["output"], torch.ones(2, 3))
+
+    assert model.out_keys == ["output"]
+    assert model.out_keys_source == ["output"]

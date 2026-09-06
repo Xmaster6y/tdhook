@@ -1,6 +1,6 @@
 from tensordict.nn import TensorDictModuleWrapper, TensorDictModuleBase, TensorDictSequential
 from tensordict import NonTensorData, TensorDict, TensorDictBase
-from tensordict.utils import NestedKey
+from tensordict.utils import NestedKey, unravel_key_list
 from typing import Callable, Optional, TYPE_CHECKING, List
 import torch
 from textwrap import indent
@@ -270,6 +270,19 @@ class HookedModule(TensorDictModuleWrapper):
         self._hook_root = hook_root
         self._hooking_context = hooking_context
         self._relative_path = relative_path
+
+    @TensorDictModuleWrapper.out_keys.setter
+    def out_keys(self, value: List[NestedKey]):
+        # Finalization can publish extra outputs that the wrapped model does not
+        # return. Keep their declaration and native key selection on this wrapper.
+        keys = unravel_key_list(list(value))
+        if "_out_keys" not in self.__dict__:
+            self._out_keys = keys
+        self._out_keys_apparent = keys
+
+    @property
+    def out_keys_source(self):
+        return self.__dict__.get("_out_keys", self.td_module.out_keys_source)
 
     @property
     def hook_root(self) -> TensorDictModuleBase:
