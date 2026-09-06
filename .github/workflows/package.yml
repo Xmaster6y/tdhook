@@ -1,0 +1,80 @@
+name: Package
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
+    steps:
+    - uses: actions/checkout@v4
+    - uses: astral-sh/setup-uv@v5
+      with:
+        python-version: "3.11"
+    - name: Read expected package version
+      id: metadata
+      run: |
+        python -c 'import tomllib; print("version=" + tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])' >> "$GITHUB_OUTPUT"
+    - name: Build distributions
+      run: uv build --out-dir dist
+    - uses: actions/upload-artifact@v4
+      with:
+        name: python-distributions
+        path: dist/
+        if-no-files-found: error
+
+  smoke:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+        distribution: [wheel]
+        dependencies: [latest]
+        include:
+        - python-version: "3.11"
+          distribution: wheel
+          dependencies: minimum
+          requirements: "torch==2.7.1 tensordict==0.10.0"
+        - python-version: "3.11"
+          distribution: sdist
+          dependencies: latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: astral-sh/setup-uv@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+    - uses: actions/download-artifact@v4
+      with:
+        name: python-distributions
+        path: dist
+    - name: Install distribution with freshly resolved dependencies
+      env:
+        DISTRIBUTION: ${{ matrix.distribution }}
+        EXTRA_REQUIREMENTS: ${{ matrix.requirements }}
+        PYTHON_VERSION: ${{ matrix.python-version }}
+      run: |
+        if [[ "$DISTRIBUTION" == wheel ]]; then
+          packages=("$GITHUB_WORKSPACE"/dist/*.whl)
+        else
+          packages=("$GITHUB_WORKSPACE"/dist/*.tar.gz)
+        fi
+        test "${#packages[@]}" -eq 1
+        read -r -a requirements <<< "$EXTRA_REQUIREMENTS"
+        uv venv --no-project --python "$PYTHON_VERSION" "$RUNNER_TEMP/package-env"
+        uv pip install --python "$RUNNER_TEMP/package-env/bin/python" --torch-backend cpu "${packages[0]}" "${requirements[@]}"
+        uv pip check --python "$RUNNER_TEMP/package-env/bin/python"
+    - name: Exercise the installed package outside the checkout
+      env:
+        EXPECTED_VERSION: ${{ needs.build.outputs.version }}
+      run: |
+        cd "$RUNNER_TEMP"
+        "$RUNNER_TEMP/package-env/bin/python" -I "$GITHUB_WORKSPACE/scripts/release_smoke.py" "$EXPECTED_VERSION" "$GITHUB_WORKSPACE/README.md"

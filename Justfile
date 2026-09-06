@@ -26,4 +26,4 @@ build:
 release-check: checks tests docs build
 
 release-smoke wheel version:
-	uv run --isolated --no-project --with "{{wheel}}" python scripts/release_smoke.py "{{version}}"
+	uv run --isolated --no-project --with "{{wheel}}" python -I scripts/release_smoke.py "{{version}}" README.md

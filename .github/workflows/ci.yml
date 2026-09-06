@@ -7,6 +7,9 @@ on:
       - main
 
 jobs:
+  package:
+    uses: ./.github/workflows/package.yml
+
   ci:
     runs-on: ubuntu-latest
     strategy:
@@ -40,7 +43,7 @@ jobs:
         files: coverage.xml
         fail_ci_if_error: true
     - name: Upload test results to Codecov
-      if: matrix.python-version == '3.11' && ${{ !cancelled() }}
+      if: ${{ matrix.python-version == '3.11' && !cancelled() }}
       uses: codecov/test-results-action@v1
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
