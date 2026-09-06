@@ -1,3 +1,5 @@
+from copy import deepcopy
+
 import pytest
 import torch
 from tensordict import TensorDict
@@ -14,6 +16,7 @@ from tdhook.modules import (
     PGDModule,
     flatten_select_reshape_call,
 )
+from tdhook.workflow import Workflow
 
 
 def test_function_module_and_intermediate_cleaner_are_native_operators():
@@ -111,3 +114,96 @@ def test_bound_module_is_context_owned_and_finalizes_results(default_test_model)
 
     with pytest.raises(RuntimeError, match="called in context"):
         prepared(TensorDict({"input": torch.ones(2, 10)}, batch_size=[2]))
+
+
+def test_method_outputs_can_be_selected_and_reset_without_changing_model_outputs():
+    class PublishingModule(HookedModule):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.out_keys = [*self.out_keys, ("metrics", "sum")]
+            self.out_keys = [*self.out_keys, ("metrics", "mean")]
+
+        def finalize_tensordict(self, data):
+            data.set(("metrics", "sum"), data["output"].sum(-1))
+            return data.set(("metrics", "mean"), data["output"].mean(-1))
+
+    class PublishingMethod(HookingContextFactory):
+        _hooked_module_class = PublishingModule
+
+    model = TensorDictModule(torch.nn.Identity(), in_keys=["input"], out_keys=["output"])
+    with PublishingMethod().prepare(model) as prepared:
+        declared_keys = ["output", ("metrics", "sum"), ("metrics", "mean")]
+        assert prepared.out_keys_source == declared_keys
+        prepared.select_out_keys(("metrics", "sum"))
+        selected = prepared(TensorDict({"input": torch.ones(2, 3)}, batch_size=[2]))
+        assert prepared.out_keys == [("metrics", "sum")]
+        assert prepared.out_keys_source == declared_keys
+        assert "output" not in selected
+        torch.testing.assert_close(selected["metrics", "sum"], torch.full((2,), 3.0))
+
+        prepared.reset_out_keys()
+        assert prepared.out_keys == declared_keys
+        restored = prepared(TensorDict({"input": torch.ones(2, 3)}, batch_size=[2]))
+        torch.testing.assert_close(restored["output"], torch.ones(2, 3))
+        torch.testing.assert_close(restored["metrics", "mean"], torch.ones(2))
+
+    assert model.out_keys == ["output"]
+    assert model.out_keys_source == ["output"]
+
+
+def test_reset_preserves_a_callers_selected_outputs_and_workflow_dependencies():
+    model = TensorDictModule(lambda value: (value, value + 1), in_keys=["input"], out_keys=["visible", "hidden"])
+    model.select_out_keys("visible")
+    with HookingContextFactory().prepare(model) as prepared:
+        assert prepared.out_keys_source == ["visible"]
+        prepared.select_out_keys("visible")
+        prepared.reset_out_keys()
+        assert prepared.out_keys == ["visible"]
+        assert model.out_keys == ["visible"]
+        assert model.out_keys_source == ["visible", "hidden"]
+
+        data = TensorDict({"input": torch.ones(2, 3)}, batch_size=[2])
+        result = prepared(data.clone())
+        torch.testing.assert_close(result["visible"], data["input"])
+        assert "hidden" not in result
+
+        hidden_consumer = TensorDictModule(lambda value: value, in_keys=["hidden"], out_keys=["summary"])
+        with pytest.raises(ValueError, match="missing TensorDict keys"):
+            Workflow(prepared, hidden_consumer)(model, data.clone())
+
+    plain_result = model(data.clone())
+    assert "hidden" not in plain_result
+    assert model.out_keys == ["visible"]
+
+
+def test_wrapping_a_model_does_not_duplicate_its_forward_hooks():
+    model = TensorDictModule(torch.nn.Identity(), in_keys=["input"], out_keys=["output"])
+    calls = []
+
+    def record_call(module, args, kwargs, result):
+        calls.append(module)
+
+    handle = model.register_forward_hook(record_call, with_kwargs=True)
+    try:
+        with HookingContextFactory().prepare(model) as prepared:
+            prepared(TensorDict({"input": torch.ones(2, 3)}, batch_size=[2]))
+        assert calls == [model]
+    finally:
+        handle.remove()
+
+
+def test_copying_a_wrapper_preserves_independent_model_state_and_attribute_access():
+    model = TensorDictModule(torch.nn.Linear(3, 2, bias=False), in_keys=["input"], out_keys=["output"])
+    original = HookedModule(model, hook_root=model)
+    copied = deepcopy(original)
+
+    assert copied.td_module is not model
+    assert copied.hook_root is copied.td_module
+    with torch.no_grad():
+        copied.module.weight.add_(1)
+
+    data = TensorDict({"input": torch.ones(2, 3)}, batch_size=[2])
+    original_result = original(data.clone())
+    copied_result = copied(data.clone())
+    torch.testing.assert_close(copied_result["output"], original_result["output"] + 3)
+    assert copied.out_keys_source == original.out_keys_source == ["output"]
