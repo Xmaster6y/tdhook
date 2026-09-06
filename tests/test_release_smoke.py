@@ -1,5 +1,3 @@
-"""Check that the installed-package gate rejects misleading validation."""
-
 import importlib.util
 from pathlib import Path
 from types import SimpleNamespace

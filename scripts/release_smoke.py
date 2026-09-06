@@ -46,7 +46,6 @@ def check_readme(readme_path: Path) -> None:
     start = text.index("```python\n") + len("```python\n")
     example = text[start : text.index("\n```", start)]
     namespace = {}
-    # Execute the repository's actual quickstart rather than maintaining a copy.
     exec(compile(example, str(readme_path), "exec"), namespace)  # noqa: S102
     attributions = namespace["attributions"]
     if attributions.shape != namespace["inputs"].shape or not torch.isfinite(attributions).all():
@@ -58,8 +57,6 @@ def check_readme(readme_path: Path) -> None:
 def check_capture_workflow() -> None:
     model = nn.Sequential(nn.Linear(3, 4), nn.ReLU(), nn.Linear(4, 2))
     caller = TensorDictModule(model, in_keys=["input"], out_keys=["output"])
-    # Both ordinary PyTorch models and existing TensorDict modules must keep
-    # their model outputs distinct from the capture's additional artifacts.
     for wrapped, layer_name in ((model, "0"), (caller, "module.0")):
         capture = ActivationCaching(re.escape(layer_name) + "$", cache_key=("activations", "hidden"))
         workflow = Workflow(
