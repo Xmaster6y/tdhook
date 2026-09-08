@@ -1,10 +1,10 @@
 import json
+import re
+import tomllib
 from importlib.metadata import version
 from pathlib import Path
-import tomllib
 
 import tdhook
-
 
 REPO_ROOT = Path(__file__).parents[1]
 
@@ -32,3 +32,17 @@ def test_star_import_exposes_the_documented_core_modules() -> None:
     exec("from tdhook import *", namespace)
 
     assert namespace["modules"] is tdhook.modules
+
+
+def test_notebook_citations_resolve_to_bibliography_entries() -> None:
+    bibliography = (REPO_ROOT / "docs/source/references.bib").read_text(encoding="utf-8")
+    bibliography_keys = set(re.findall(r"@[A-Za-z]+\{([^,]+),", bibliography))
+
+    citation_keys = set()
+    for notebook_path in (REPO_ROOT / "docs/source/notebooks").rglob("*.ipynb"):
+        notebook = json.loads(notebook_path.read_text(encoding="utf-8"))
+        markdown = "\n".join("".join(cell["source"]) for cell in notebook["cells"] if cell["cell_type"] == "markdown")
+        for citation_group in re.findall(r'data-cite="([^"]+)"', markdown):
+            citation_keys.update(key.strip() for key in citation_group.split(","))
+
+    assert citation_keys <= bibliography_keys
