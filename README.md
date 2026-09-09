@@ -1,3 +1,5 @@
+
+
 <div align="center">
 <img src="https://raw.githubusercontent.com/Xmaster6y/tdhook/refs/heads/main/docs/source/_static/images/tdhook-logo.png" alt="logo" width="200"/>
 </div>
@@ -88,7 +90,8 @@ This project uses [`uv`](https://docs.astral.sh/uv/) to manage python dependenci
 
 The [maintained benchmark suite](benchmarks/README.md) checks current TDHook
 attribution, capture, and intervention behavior against reference libraries
-before recording versioned timing and memory results. It provides a cheap local
+before recording versioned timing and memory results. Install it with
+`uv sync --extra benchmark` before running the suite. It provides a cheap local
 smoke mode and a documented full mode; it does not claim to reproduce the
 historical v0.1 paper measurements.
 
