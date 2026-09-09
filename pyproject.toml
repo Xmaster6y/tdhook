@@ -10,7 +10,8 @@ authors = [
 ]
 requires-python = ">=3.11"
 dependencies = [
-    "tensordict>=0.10",
+    # Capped below 0.14 to stay compatible with TorchRL's tensordict range.
+    "tensordict>=0.10,<0.14",
     "torch>=2.7.1",
 ]
 
